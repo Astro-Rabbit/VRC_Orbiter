@@ -1,0 +1,30 @@
+SimManager
+ ├── SimClock
+ ├── EphemerisSystem
+ │    ├── Ephem_Sun
+ │    ├── Ephem_Earth   (depends on Sun)
+ │    └── Ephem_Moon    (depends on Earth)
+ ├── ControlSystem
+ │    ├── ControlBus
+ │    ├── PilotInput (optional early)
+ │    └── Autopilot  (later)
+ ├── CraftPropSystem
+ │    ├── CraftStateModel
+ │    ├── KeplerPropagator      (V1)
+ │    ├── DynamicsPropagator    (V2)
+ │    │     ├── NumericalIntegrator
+ │    │     └── ForceModel_* (later)
+ ├── OrbitDiagnostics
+ ├── NetState          (Phase 1+)
+ └── RenderSystem
+      ├── OrreryRenderer (debug)
+      └── OrbitRenderer  (LineRenderer)
+
+
+OrreryRoot
+ ├── EarthProxy              (Sphere mesh)
+ ├── MoonProxy               (Sphere mesh)
+ ├── CraftProxy              (Small sphere / empty + gizmo)
+ ├── OrbitLine               (Empty with LineRenderer)
+ ├── OrreryRenderer          (UdonSharpBehaviour)
+ └── OrbitRenderer           (UdonSharpBehaviour)

@@ -1,0 +1,151 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Custom_Moon
+  m_Shader: {fileID: 4800000, guid: 03e83210777aa5b49bd44d4aace932a1, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: _EarthLimbDark
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _EarthDayTex:
+        m_Texture: {fileID: 2800000, guid: ee983b0a85fcf5a46b20e7e849fab287, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EarthNightTex:
+        m_Texture: {fileID: 2800000, guid: e1ed1d2621dff9642bd7a0168da3c115, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MoonAlbedo:
+        m_Texture: {fileID: 2800000, guid: c27b840437571ad49a63ed534ef1fd7e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MoonHeight:
+        m_Texture: {fileID: 2800000, guid: 06e8b6c94c1ced64f972a88a51402fd5, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MoonNormal:
+        m_Texture: {fileID: 2800000, guid: bdc798dbd8b7c6a4c8cec46f060f6f62, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkyboxTex:
+        m_Texture: {fileID: 8900000, guid: 351e02dc25c8b5844a1621560f52a505, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _StarData:
+        m_Texture: {fileID: 2800000, guid: bd3f04e55a29c6a45b92b44547eee0b3, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TempData:
+        m_Texture: {fileID: 2800000, guid: 564721d3df2e8fe47b53fc58e2fd61b9, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _XoffData:
+        m_Texture: {fileID: 2800000, guid: 9f7a6e02d2b63b3409c30db83680d950, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _YoffData:
+        m_Texture: {fileID: 2800000, guid: e3a1373e1bcc4db44ae782412b5a9f8e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _Ambient: 0.013
+    - _DebugDisplacement: 0
+    - _EarthAngularRadiusDeg: 1
+    - _EarthAtmoEnable: 1
+    - _EarthAtmoRimPower: 3.14
+    - _EarthAtmoStrength: 0.9
+    - _EarthAtmoSunBoost: 1.5
+    - _EarthAtmoSunPower: 4
+    - _EarthAtmoWidth: 0.08
+    - _EarthDayIntensity: 2
+    - _EarthEdgeSoftnessPx: 2
+    - _EarthLimbDark: 0.35
+    - _EarthNightIntensity: 0.35
+    - _EarthRARollDeg: 102
+    - _EarthSpecEnable: 1
+    - _EarthSpecPower: 64
+    - _EarthSpecStrength: 0.05
+    - _EarthTermSoftDeg: 8.13
+    - _EarthWrap: 0.08
+    - _FlipSceneSun: 1
+    - _HeightNormalDuV: 0.000145
+    - _HeightNormalStrength: 0.02
+    - _HeightRefMeters: 0
+    - _HeightScale: 0.97
+    - _HeightShadow: 0
+    - _HitIters: 10
+    - _LimbAA: 0
+    - _MWDesat: 0.6
+    - _MWRotX: 171
+    - _MWRotY: 300
+    - _MWRotZ: 156
+    - _MWbright: 0.06
+    - _MaxReliefMeters: 20000
+    - _MoonPitchDeg: 90
+    - _MoonRadiusWS: 1727400
+    - _MoonRollDeg: 0
+    - _MoonYawDeg: 0
+    - _NormalStrength: 0.05
+    - _PixelSize: 1024
+    - _RARollDeg: 0
+    - _ReliefScale: 1
+    - _ShowSeam: 0
+    - _SunAngularRadiusDeg: 0.2666
+    - _SunDiskIntensity: 25
+    - _SunEdgeSoftnessPx: 0.74
+    - _SunGlareEnable: 1
+    - _SunGlarePower: 2.5
+    - _SunGlareRadiusDeg: 0.89
+    - _SunGlareStrength: 2
+    - _SunIntensity: 1
+    - _SunShadowBias: 0.002
+    - _SunShadowBiasMeters: 19.3
+    - _SunShadowEnable: 0.711
+    - _SunShadowSoft: 1.96
+    - _SunShadowStepUV: 0.01
+    - _SunShadowSteps: 6
+    - _SunShadowStrength: 9.9
+    - _SunShadowTermBand: 0.5
+    - _SunSpikeCount: 5.2
+    - _SunSpikeEnable: 1
+    - _SunSpikeFalloff: 2
+    - _SunSpikeLengthR: 2.19
+    - _SunSpikeSharpness: 14
+    - _SunSpikeStrength: 0.6
+    - _TermSoft: 0.0806
+    - _UseSceneSun: 1
+    - _UseUVDebug: 0
+    - _Wrap: 0
+    - _brightnessScale: 25
+    - _maxMag: 10
+    - _scaleFactor: 0
+    - _sigma: 90
+    m_Colors:
+    - _BgColor: {r: 0.02, g: 0.02, b: 0.03, a: 1}
+    - _CelestialNorthWS: {r: 0, g: 1, b: 0, a: 0}
+    - _EarthAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
+    - _EarthAtmoColor: {r: 0.34999996, g: 0.54999995, b: 1, a: 1}
+    - _EarthDirWS: {r: 0, g: 0, b: 1, a: 0}
+    - _EarthNorthWS: {r: 0.54, g: 1, b: 0, a: 0}
+    - _MoonCenterWS: {r: 6756110, g: -1487088.4, b: -4085741.8, a: 1}
+    - _MoonColor: {r: 0.7, g: 0.7, b: 0.7, a: 1}
+    - _SunColor: {r: 1, g: 0.97999996, b: 0.92, a: 1}
+    - _SunDirWS: {r: 4.8, g: 1, b: 0, a: 0}
+  m_BuildTextureStacks: []
