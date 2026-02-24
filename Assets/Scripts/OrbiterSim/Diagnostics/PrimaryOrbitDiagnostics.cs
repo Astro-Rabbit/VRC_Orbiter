@@ -38,6 +38,10 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
     public Vector3 J_hat;
     public Vector3 K_hat;
 
+    private bool _basisInit = false;
+    private Vector3 _prevI;
+    private Vector3 _prevJ;
+    private Vector3 _prevK;
     public void Evaluate()
     {
         valid = false;
@@ -86,12 +90,20 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
         double hMag = Math.Sqrt(hx * hx + hy * hy + hz * hz);
         if (hMag <= 0.0) return;
 
-        iRad = Math.Acos(Clamp(hz / hMag, -1.0, 1.0));
+        double hxy = Math.Sqrt(hx * hx + hy * hy);
+        iRad = Wrap2Pi(Math.Atan2(hxy, hz)); // 0..2pi but inclination is usually 0..pi; you can clamp if you prefer
+        if (iRad > Math.PI) iRad = 2.0 * Math.PI - iRad;
 
         // n = k x h with k=(0,0,1) => (-hy, hx, 0)
         double nx = -hy;
         double ny =  hx;
         double nMag = Math.Sqrt(nx * nx + ny * ny);
+
+        // RAAN (stable)
+        raanRad = 0.0;
+        bool equatorial = (iRad < iTolRad);
+        if (!equatorial && nMag > 1e-12)
+            raanRad = Wrap2Pi(Math.Atan2(ny, nx));
 
         // evec = (v x h)/mu - r/|r|
         double vxh_x = vy * hz - vz * hy;
@@ -107,52 +119,37 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
         if (Math.Abs(energy) < 1e-14) return;
         aMeters = -mu / (2.0 * energy);
 
-        bool equatorial = (iRad < iTolRad);
         bool circular = (e < eTol);
 
-        raanRad = 0.0;
-        if (!equatorial && nMag > 1e-12)
-            raanRad = Wrap2Pi(Math.Atan2(ny, nx));
-
+        // arg of periapsis ω
         argpRad = 0.0;
         if (!circular && !equatorial && nMag > 1e-12)
         {
-            double ndote = nx * ex + ny * ey;
-            double cosw = Clamp(ndote / (nMag * e), -1.0, 1.0);
-
-            // sign from (n x e) · h
-            double c_x = ny * ez;
-            double c_y = -nx * ez;
-            double c_z = nx * ey - ny * ex;
-            double sign = c_x * hx + c_y * hy + c_z * hz;
-
-            double w = Math.Acos(cosw);
-            argpRad = Wrap2Pi((sign >= 0.0) ? w : (2.0 * Math.PI - w));
+            // ω = atan2( (k·(n×e)), (n·e) ), with k = (0,0,1)
+            // n×e = (0,0, nx*ey - ny*ex) + (other terms with ez, but k·(...) only needs z component)
+            double kdot_nxe = nx * ey - ny * ex;
+            double ndote = nx * ex + ny * ey; // (since nz=0)
+            argpRad = Wrap2Pi(Math.Atan2(kdot_nxe, ndote));
         }
         else if (!circular && equatorial)
         {
-            // longitude of periapsis
+            // longitude of periapsis: atan2(ey, ex)
             raanRad = 0.0;
             argpRad = Wrap2Pi(Math.Atan2(ey, ex));
         }
 
+        // true anomaly ν
         nuRad = 0.0;
         if (!circular)
         {
+            // ν = atan2( (k·(e×r)), (e·r) )
+            double kdot_exr = ex * ry - ey * rx; // z-component of e×r
             double edotr = ex * rx + ey * ry + ez * rz;
-            double cosnu = Clamp(edotr / (e * rMag), -1.0, 1.0);
-
-            // sign from (e x r) · h
-            double er_x = ey * rz - ez * ry;
-            double er_y = ez * rx - ex * rz;
-            double er_z = ex * ry - ey * rx;
-            double sign = er_x * hx + er_y * hy + er_z * hz;
-
-            double nuth = Math.Acos(cosnu);
-            nuRad = Wrap2Pi((sign >= 0.0) ? nuth : (2.0 * Math.PI - nuth));
+            nuRad = Wrap2Pi(Math.Atan2(kdot_exr, edotr));
         }
         else
         {
+            // circular: use argument of latitude (or true longitude if equatorial)
             if (equatorial)
             {
                 nuRad = Wrap2Pi(Math.Atan2(ry, rx));
@@ -161,18 +158,11 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
             }
             else if (nMag > 1e-12)
             {
+                // u = atan2( (k·(n×r)), (n·r) )
+                double kdot_nxr = nx * ry - ny * rx;
                 double ndotr = nx * rx + ny * ry;
-                double cosu = Clamp(ndotr / (nMag * rMag), -1.0, 1.0);
-
-                // sign from (n x r) · h
-                double nr_x = ny * rz;
-                double nr_y = -nx * rz;
-                double nr_z = nx * ry - ny * rx;
-                double sign = nr_x * hx + nr_y * hy + nr_z * hz;
-
-                double u = Math.Acos(cosu);
-                u = (sign >= 0.0) ? u : (2.0 * Math.PI - u);
-                nuRad = Wrap2Pi(u);
+                double u = Wrap2Pi(Math.Atan2(kdot_nxr, ndotr));
+                nuRad = u;
                 argpRad = 0.0;
             }
             else
@@ -180,6 +170,8 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
                 nuRad = Wrap2Pi(Math.Atan2(ry, rx));
             }
         }
+
+
 
         periapsisMeters = aMeters * (1.0 - e);
         apoapsisMeters = aMeters * (1.0 + e);
@@ -192,35 +184,72 @@ public class PrimaryOrbitDiagnostics : UdonSharpBehaviour
         valid = true;
     }
 
-    private bool BuildEquatorialBasis(byte bodyId, out Vector3 I, out Vector3 J, out Vector3 K)
+private bool BuildEquatorialBasis(byte bodyId, out Vector3 I, out Vector3 J, out Vector3 K)
+{
+    I = Vector3.right;
+    J = Vector3.up;
+    K = Vector3.forward;
+
+    Quaternion qBI = bodies.GetBodyFixedToInertial(bodyId);
+
+    // Primary pole (+Z body) expressed in solver frame
+    Vector3 k = qBI * Vector3.forward;
+    float k2 = k.sqrMagnitude;
+    if (k2 < 1e-12f) return false;
+    k *= 1.0f / Mathf.Sqrt(k2);
+
+    // Choose a seed direction to define I in the equator plane.
+    // Key idea: use previous I if possible -> continuity.
+    Vector3 seed = _basisInit ? _prevI : Vector3.right;
+
+    Vector3 i = seed - Vector3.Dot(seed, k) * k;
+    float i2 = i.sqrMagnitude;
+
+    // If degenerate, try fixed fallbacks (but *without* threshold flips)
+    if (i2 < 1e-10f)
     {
-        I = Vector3.right;
-        J = Vector3.up;
-        K = Vector3.forward;
+        seed = Vector3.right;
+        i = seed - Vector3.Dot(seed, k) * k;
+        i2 = i.sqrMagnitude;
 
-        // Body-fixed -> inertial (solver frame)
-        Quaternion qBI = bodies.GetBodyFixedToInertial(bodyId);
-        Vector3 k = qBI * Vector3.forward; // body +Z in solver frame
-        if (k.sqrMagnitude < 1e-12f) return false;
-        k.Normalize();
+        if (i2 < 1e-10f)
+        {
+            seed = Vector3.up;
+            i = seed - Vector3.Dot(seed, k) * k;
+            i2 = i.sqrMagnitude;
 
-        // Choose a stable inertial reference direction
-        Vector3 refI = Vector3.right; // solver +X
-        float d = Mathf.Abs(Vector3.Dot(refI, k));
-        if (d > 0.9f) refI = Vector3.up; // solver +Y fallback
-
-        // Project ref into equatorial plane
-        Vector3 i = refI - Vector3.Dot(refI, k) * k;
-        if (i.sqrMagnitude < 1e-12f) return false;
-        i.Normalize();
-
-        Vector3 j = Vector3.Cross(k, i);
-        if (j.sqrMagnitude < 1e-12f) return false;
-        j.Normalize();
-
-        I = i; J = j; K = k;
-        return true;
+            if (i2 < 1e-10f)
+            {
+                seed = Vector3.forward;
+                i = seed - Vector3.Dot(seed, k) * k;
+                i2 = i.sqrMagnitude;
+                if (i2 < 1e-10f) return false;
+            }
+        }
     }
+
+    i *= 1.0f / Mathf.Sqrt(i2);
+
+    // Right-handed basis
+    Vector3 j = Vector3.Cross(k, i);
+    float j2 = j.sqrMagnitude;
+    if (j2 < 1e-12f) return false;
+    j *= 1.0f / Mathf.Sqrt(j2);
+
+    // Enforce continuity (avoid 180° flips)
+    if (_basisInit && Vector3.Dot(i, _prevI) < 0f)
+    {
+        i = -i;
+        j = -j;
+    }
+
+    I = i; J = j; K = k;
+
+    _prevI = i; _prevJ = j; _prevK = k;
+    _basisInit = true;
+
+    return true;
+}
 
     private static double Wrap2Pi(double a)
     {
