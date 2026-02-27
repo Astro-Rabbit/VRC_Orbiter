@@ -43,8 +43,8 @@ public class SimManager : UdonSharpBehaviour
     [Tooltip("Max fixed substeps per FixedUpdate to prevent spiraling.")]
     public int maxSubstepsPerFixed = 8;
 
-    [Tooltip("If budget hit, drop remainder accumulator.")]
-    public bool dropAccumIfBudgetHit = true;
+    [Tooltip("If budget hit, clamp sim time to mission time (keeps ephem/render consistent).")]
+    public bool clampToMissionTimeIfBudgetHit = true;
 
     [Header("Pause")]
     public bool paused = false;
@@ -66,6 +66,7 @@ public class SimManager : UdonSharpBehaviour
     public OrbitDiagnostics orbit;
     public PrimaryOrbitDiagnostics primaryDiag;
     public OrbitRenderer orbitline;
+    public SkyBoxDriver skyrender;
 
     [Header("Initialize")]
     public OrbitInitializerFromPrimaryElements InitialConic;
@@ -73,12 +74,12 @@ public class SimManager : UdonSharpBehaviour
     // --- internal ---
     private float _settleAccum = 0f;
 
-    // fixed-step accumulator for integrated mode (driven by Time.fixedDeltaTime)
-    private float _accumFixed = 0f;
-
-    // integrated-mode sim time (seconds), anchored to clock.Now() at entry
+    // Integrated-mode sim time (seconds), kept consistent with mission time
     private double _simT = 0.0;
     private bool _simTValid = false;
+
+    // Mission-time accumulator (seconds) used to run fixedDt substeps
+    private double _accumSim = 0.0;
 
     void Start()
     {
@@ -90,17 +91,29 @@ public class SimManager : UdonSharpBehaviour
     {
         if (paused || clock == null) return;
 
-        // Global mission time (includes warp)
-        double T = clock.Now();
+        double Tmission = clock.Now();
 
-        // 1) Everyone runs ephemeris for rails + rendering (fast, deterministic vs T)
-        if (ephem != null) ephem.Evaluate(T);
+        // Choose a single authoritative time for "world/ephem rendering" this frame.
+        // - Owner + integrated: use _simT (craft state is integrated against _simT)
+        // - Everyone else: use mission time
+        double Tview = Tmission;
+        if (netCore != null && netCore.mode == MODE_INTEGRATED)
+        {
+            if (Networking.IsOwner(netCore.gameObject) && _simTValid)
+                Tview = _simT;
+        }
 
-        // 2) Everyone runs rails objects (deterministic vs T)
-        TickRailsObjects(T);
+        // 1) Everyone runs ephemeris for rails + rendering
+        if (ephem != null) ephem.Evaluate(Tview);
 
-        // 3) Craft (remote apply in Update; owner integrated is stepped in FixedUpdate)
-        TickCraft_UpdateSide(T);
+        // 2) Everyone runs rails objects (deterministic vs Tview)
+        TickRailsObjects(Tview);
+
+        // 3) Craft update-side handling:
+        //    - Owner rails: rails propagation uses mission time (warp supported)
+        //    - Owner integrated: stepped in FixedUpdate (no-op here)
+        //    - Remotes: apply net state (rails uses mission time)
+        TickCraft_UpdateSide(Tmission);
 
         // 4) Render
         ApplyRender();
@@ -114,61 +127,61 @@ public class SimManager : UdonSharpBehaviour
         if (!isOwner) return;
 
         byte mode = netCore.mode;
-
-        // In rails mode we do NOT run fixed-step physics. (Timewarp-friendly)
         if (mode != MODE_INTEGRATED) return;
 
         // Integrated mode must be warp=1 (by policy)
-        if (clock != null)
+        if (clock != null && clock.timeScale != 1.0)
         {
-            if (clock.timeScale != 1.0)
+            if (blockEnterIntegratedDuringWarp)
             {
-                if (blockEnterIntegratedDuringWarp)
-                {
-                    // If we somehow ended up integrated while warped, force back to rails safely.
-                    EnterRails();
-                    return;
-                }
-
-                if (forceWarpTo1OnIntegrated)
-                {
-                    // Owner-only; SimClock will re-anchor without jumping time.
-                    clock.SetTimeScale(1.0);
-                }
+                EnterRails();
+                return;
             }
+
+            if (forceWarpTo1OnIntegrated)
+                clock.SetTimeScale(1.0);
         }
+
+        double targetT = clock.Now(); // mission time (warp is 1 by policy)
 
         // Anchor sim time on first integrated tick (or after ownership changes)
         if (!_simTValid)
         {
-            _simT = clock.Now(); // anchor to shared mission time at entry
+            _simT = targetT;
+            _accumSim = 0.0;
+            _settleAccum = 0f;
             _simTValid = true;
         }
 
-        // Accumulate real fixed time, step in fixedDt chunks
-        float realFixedDt = Time.fixedDeltaTime;
-        if (realFixedDt < 0f) realFixedDt = 0f;
-
-        _accumFixed += realFixedDt;
+        // Accumulate mission-time that has elapsed since our last integrated step
+        double dtMission = targetT - _simT;
+        if (dtMission < 0.0) dtMission = 0.0; // guard for re-anchors / ownership edges
+        _accumSim += dtMission;
 
         int steps = 0;
-        while (_accumFixed >= fixedDt && steps < maxSubstepsPerFixed)
+        double h = (double)fixedDt;
+        if (h <= 0.0) h = 0.02; // sane fallback
+
+        while (_accumSim >= h && steps < maxSubstepsPerFixed)
         {
-            _accumFixed -= fixedDt;
+            _accumSim -= h;
             steps++;
 
             // Advance integrated sim time deterministically
-            _simT += (double)fixedDt;
+            double t0 = _simT;
+            double t1 = t0 + h;
+            _simT = t1;
 
-            // Physics-time ephemeris sampling (important for gravity/frames if used)
-            if (ephem != null) ephem.Evaluate(_simT);
+            // Ephemeris sampling at step end (gravity/frame snapshots)
+            // if (ephem != null) ephem.Evaluate(t1);
 
             // Owner attitude + actuation for THIS substep
-            TickAttitudeOwner(fixedDt);
+            TickAttitudeOwner((float)h);
 
+            // Propellant bookkeeping
             if (craft != null && actuation != null)
             {
-                double dProp = actuation.mainMdot_kgps * (double)fixedDt;
+                double dProp = actuation.mainMdot_kgps * h;
                 if (dProp > 0.0)
                 {
                     craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
@@ -180,14 +193,16 @@ public class SimManager : UdonSharpBehaviour
             if (numeric != null && actuation != null)
             {
                 numeric.force_E = actuation.F_E;
-                numeric.Step(fixedDt, _simT);
+
+                // IMPORTANT: Step expects tNow as the START of the step (it samples tNow and tNow+dt)
+                numeric.Step(h, t0);
             }
 
             // Auto settle back to rails (based on current net force)
             if (autoModeSwitch)
             {
                 double F = GetNetForceMagN();
-                if (F < exitIntegratedForceN) _settleAccum += fixedDt;
+                if (F < exitIntegratedForceN) _settleAccum += (float)h;
                 else _settleAccum = 0f;
 
                 if (_settleAccum >= settleSeconds)
@@ -199,8 +214,13 @@ public class SimManager : UdonSharpBehaviour
             }
         }
 
-        if (steps == maxSubstepsPerFixed && dropAccumIfBudgetHit)
-            _accumFixed = 0f;
+        // If we hit the step budget, DO NOT "drop time on the floor" (that desyncs craft vs ephem/render).
+        // Clamp: snap sim time to mission time and clear accumulator.
+        if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit)
+        {
+            _simT = targetT;
+            _accumSim = 0.0;
+        }
 
         // Publish once per FixedUpdate (your publish scripts are already rate-limited internally)
         if (netCore != null) netCore.PublishCore();
@@ -209,7 +229,7 @@ public class SimManager : UdonSharpBehaviour
     }
 
     // Update-side craft handling: rails owner + all remote application
-    private void TickCraft_UpdateSide(double T)
+    private void TickCraft_UpdateSide(double Tmission)
     {
         if (craft == null || netCore == null) return;
 
@@ -220,34 +240,30 @@ public class SimManager : UdonSharpBehaviour
         {
             if (mode == MODE_RAILS)
             {
-                // Rails propagation uses global mission time (warp supported)
+                // Rails propagation uses mission time (warp supported)
                 if (craftProp != null)
-                    craftProp.Evaluate(T);
+                    craftProp.Evaluate(Tmission);
 
                 if (soiSwitch != null)
-                    TryHandleSOISwitchRails(T);
+                    TryHandleSOISwitchRails(Tmission);
 
-                // Attitude should NOT be stepped with fixedDt-per-frame.
-                // Use real frame dt (clamped) so attitude behaves consistently.
+                // Attitude in rails mode: run on frame dt (clamped)
                 float dtFrame = Mathf.Min(Time.deltaTime, 0.05f);
                 TickAttitudeOwner(dtFrame);
 
                 // Auto switch to integrated if force exceeds threshold
                 if (autoModeSwitch)
                 {
-                    // If warp != 1, obey policy (force warp->1 or block)
                     double F = GetNetForceMagN();
                     if (F > enterIntegratedForceN)
                     {
                         if (clock != null && clock.timeScale != 1.0)
                         {
                             if (blockEnterIntegratedDuringWarp) return;
-
-                            if (forceWarpTo1OnIntegrated)
-                                clock.SetTimeScale(1.0);
+                            if (forceWarpTo1OnIntegrated) clock.SetTimeScale(1.0);
                         }
 
-                        EnterIntegrated(); // will reset accumulators + anchor time next FixedUpdate
+                        EnterIntegrated(); // anchors next FixedUpdate
                         return;
                     }
                 }
@@ -268,7 +284,7 @@ public class SimManager : UdonSharpBehaviour
             if (mode == MODE_RAILS)
             {
                 if (craftProp != null)
-                    craftProp.Evaluate(T);
+                    craftProp.Evaluate(Tmission);
 
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
@@ -314,14 +330,12 @@ public class SimManager : UdonSharpBehaviour
         if (netCore == null) return;
         if (!Networking.IsOwner(netCore.gameObject)) return;
 
-        // Reset fixed-step accumulator and settle timer
-        _accumFixed = 0f;
         _settleAccum = 0f;
 
-        // Invalidate _simT so FixedUpdate anchors to clock.Now() cleanly
+        // Re-anchor on next FixedUpdate
         _simTValid = false;
+        _accumSim = 0.0;
 
-        // Switch mode + sync primary
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
         // Push immediate snapshots
@@ -337,11 +351,10 @@ public class SimManager : UdonSharpBehaviour
         if (netCore == null || craft == null) return;
         if (!Networking.IsOwner(netCore.gameObject)) return;
 
-        _accumFixed = 0f;
         _settleAccum = 0f;
 
         // When leaving integrated, define rails conic at CURRENT authoritative time.
-        // Prefer integrated sim time if valid, else clock.Now().
+        // Prefer integrated sim time if valid, else mission time.
         double T = _simTValid ? _simT : (clock != null ? clock.Now() : 0.0);
         byte pid = craft.primaryBodyId;
 
@@ -358,6 +371,7 @@ public class SimManager : UdonSharpBehaviour
 
         // Reset integrated time anchor
         _simTValid = false;
+        _accumSim = 0.0;
     }
 
     public override void OnOwnershipTransferred(VRCPlayerApi player)
@@ -367,7 +381,7 @@ public class SimManager : UdonSharpBehaviour
 
         // New owner should re-anchor integrated sim time on next FixedUpdate
         _simTValid = false;
-        _accumFixed = 0f;
+        _accumSim = 0.0;
         _settleAccum = 0f;
 
         netCore.ForcePublishCore();
@@ -427,5 +441,6 @@ public class SimManager : UdonSharpBehaviour
         if (orbit != null) orbit.Evaluate();
         if (primaryDiag != null) primaryDiag.Evaluate();
         if (orbitline != null) orbitline.Apply();
+        skyrender.Tick();
     }
 }

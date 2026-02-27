@@ -41,6 +41,8 @@ public class MoonKeplerOrbitDriver : UdonSharpBehaviour
     public float moonPitchDeg = 0f; // about +X
     public float moonRollDeg = 0f;  // about +Y
 
+    public Vector3 pos;
+
     // Shader property IDs
     public string _MoonCenterWS_ID;
 
@@ -129,6 +131,8 @@ public class MoonKeplerOrbitDriver : UdonSharpBehaviour
             moonCenterFromCamera.z,
             1f
         ));
+
+        pos = rWorld;
     }
 
     // --- Helpers ---
