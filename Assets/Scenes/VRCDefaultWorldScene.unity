@@ -16804,7 +16804,7 @@ MonoBehaviour:
   netAtt: {fileID: 1687101843}
   fixedDt: 0.03
   maxSubstepsPerFixed: 3
-  dropAccumIfBudgetHit: 1
+  clampToMissionTimeIfBudgetHit: 1
   paused: 0
   enterIntegratedForceN: 1
   exitIntegratedForceN: 0.5
@@ -16815,6 +16815,7 @@ MonoBehaviour:
   orbit: {fileID: 1467943905}
   primaryDiag: {fileID: 585127730}
   orbitline: {fileID: 1697954584}
+  skyrender: {fileID: 527479711}
   InitialConic: {fileID: 442352363}
 --- !u!1 &328444741
 GameObject:
@@ -27729,13 +27730,13 @@ MonoBehaviour:
   primaryId: 2
   t0Seconds: 0
   aMeters: 18537400
-  e: 0
+  e: 0.905
   iRad: 0
   raanRad: 0
   argpRad: 0
-  useMeanAnomaly: 1
+  useMeanAnomaly: 0
   M0Rad: 0
-  nu0Rad: 0
+  nu0Rad: 6.1
   autoFitConicAfterSettingState: 1
   logInit: 0
 --- !u!1 &442719468
@@ -63624,6 +63625,7 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 948949989}
+  ephemSys: {fileID: 1805684445}
   bodies: {fileID: 1559119461}
   craft: {fileID: 265503658}
   grav: {fileID: 1168990452}
