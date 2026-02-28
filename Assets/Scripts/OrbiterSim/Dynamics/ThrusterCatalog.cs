@@ -177,7 +177,7 @@ public class ThrusterCatalog : UdonSharpBehaviour
             Vector3 rWorld = t.position - cgTransform.position;
             posRelCg_B[i] = craftRoot.InverseTransformVector(rWorld);
 
-            Vector3 dWorld = -t.forward;
+            Vector3 dWorld = t.forward;
             Vector3 dBody = craftRoot.InverseTransformDirection(dWorld);
             if (dBody.sqrMagnitude > 1e-12f) dBody.Normalize();
             else dBody = Vector3.forward;
