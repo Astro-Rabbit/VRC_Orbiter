@@ -79,6 +79,11 @@ public class MFD : UdonSharpBehaviour
         Redraw();
     }
 
+    public void Update()
+    {
+        Redraw();
+    }
+
     public void OnButton(ButtonSide side, int num)
     {
         currentPage.OnButton(this, side, num);

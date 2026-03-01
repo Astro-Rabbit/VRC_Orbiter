@@ -22,8 +22,19 @@ public class MFDOrbitPage : MFDPage
     public double inclination;
     public double argp;
 
+    public float posX;
+    public float posY;
+
+    private Quaternion bodyToPerifocal;
+
     private double lastEpochT0 = Double.NegativeInfinity;
     private string[] suffixes =  new[] {"", "k", "M", "G"};
+
+
+    private int leftMargin;
+    private int topMargin;
+    private Color infoColor;
+    private MFD currentDisplay;
 
     public override void OnButton(MFD display, ButtonSide side, int num)
     {
@@ -51,11 +62,17 @@ public class MFDOrbitPage : MFDPage
             raan = conic.raanRad;
             inclination = conic.iRad;
             argp = conic.argpRad;
+
+            const double RAD2DEG = 180 / Math.PI;
+            bodyToPerifocal = Quaternion.Euler(0, 0, (float)(-argp * RAD2DEG))
+                * Quaternion.Euler((float)(-inclination * RAD2DEG), 0, 0)
+                * Quaternion.Euler(0, 0, (float)(-raan * RAD2DEG));
         }
 
-        for (int i = 0; i < activeDisplayCount; i++) {
-            DrawDisplay(activeDisplays[i]);
-        }
+        Vector3 bodyPos = new Vector3((float)conicPropagator.rel_rx, (float)conicPropagator.rel_ry, (float)conicPropagator.rel_rz);
+        Vector3 perifocalPos = bodyToPerifocal * bodyPos;
+        posX = perifocalPos.y;
+        posY = -perifocalPos.x;
     }
 
     private string FormatNumber(string title, double num)
@@ -79,31 +96,41 @@ public class MFDOrbitPage : MFDPage
 
     private string FormatAngle(string title, double angle)
     {
-        return title.PadRight(4) + (Math.PI / 180.0 * angle).ToString("0.0").PadLeft(5) + "°";
+        return title.PadRight(4) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(5) + "°";
+    }
+
+    void DrawInfo(int line, string info) 
+    {
+        currentDisplay.DrawText(info, topMargin + line, leftMargin, infoColor);
     }
 
     public override void DrawDisplay(MFD display)
     {
-        const float orbitSize = 0.75f;
+        const float orbitSize = 0.5f;
 
         display.ClearGraphics();
-        float focusY = -orbitSize * (1f - (float)(periapsis / a));
-        display.DrawConic(new Vector2(0f, focusY), (float)(periapsis * orbitSize / a), 0f, (float)eccentricity, Color.green);
+        float scale = orbitSize / (float)a;
+        float focusY = (float)periapsis * scale - orbitSize;
+        Vector2 center = new Vector2(0f, focusY);
+        display.DrawConic(center, (float)(periapsis * scale), 0f, (float)eccentricity, Color.green);
+        display.DrawLine(center, center + scale * new Vector2(posX, posY), Color.green);
 
-        const int leftMargin = 2;
-        const int topMargin = 2;
+        // Some nested function support would feel pretty sweet right around now
+        currentDisplay = display;
+        leftMargin = 2;
+        topMargin = 2;
+        infoColor = Color.green;
 
         display.ClearText();
         if (eccentricity < 1.0 && a > 0.0) {
-            display.DrawText(FormatNumber("T", period), topMargin + 0, leftMargin, Color.white);
-
-            display.DrawText(FormatNumber("ApR", period), topMargin + 1, leftMargin, Color.white);
+            DrawInfo(0, FormatNumber("T", period));
+            DrawInfo(1, FormatNumber("ApR", apoapsis));
         }
-        display.DrawText(FormatNumber("PeR", periapsis), topMargin + 2, leftMargin, Color.white);
-        display.DrawText(FormatNumber("Ecc", eccentricity), topMargin + 3, leftMargin, Color.white);
-        display.DrawText(FormatAngle("LAN", raan), topMargin + 4, leftMargin, Color.white);
-        display.DrawText(FormatAngle("Inc", inclination), topMargin + 5, leftMargin, Color.white);
-        display.DrawText(FormatAngle("AgP", argp), topMargin + 6, leftMargin, Color.white);
+        DrawInfo(2, FormatNumber("PeR", periapsis));
+        DrawInfo(3, FormatNumber("Ecc", eccentricity));
+        DrawInfo(4, FormatAngle("LAN", raan));
+        DrawInfo(5, FormatAngle("Inc", inclination));
+        DrawInfo(6, FormatAngle("AgP", argp));
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }

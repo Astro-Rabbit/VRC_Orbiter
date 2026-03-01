@@ -132,7 +132,7 @@ Shader "Unlit/MFDGraphicsShader"
                 } else if (proj > dot(dir, dir)) {
                     return length(p - b);
                 } else {
-                    return abs(dot(offset, float2(dir.y, -dir.x)));
+                    return abs(dot(offset, float2(dir.y, -dir.x)) / length(dir));
                 }
             }
 
@@ -148,7 +148,7 @@ Shader "Unlit/MFDGraphicsShader"
                     // Conic rendering
                     float e = data.x;
                     float omega = data.y;
-                    float offset = data.zw;
+                    float2 offset = data.zw;
                     float s = sin(omega);
                     float c = cos(omega);
 
@@ -160,7 +160,9 @@ Shader "Unlit/MFDGraphicsShader"
                         float major = (ap + pe) * 0.5;
                         float minor = sqrt(ap * pe);
 
-                        return sdfEllipse(pr - offset, float2(minor, major));
+                        float2 center = (major - pe) * float2(-s, c);
+
+                        return sdfEllipse(pr - offset - center, float2(minor, major));
                     } else if (e > 1) {
                         return 1;
                     } else {
@@ -171,7 +173,7 @@ Shader "Unlit/MFDGraphicsShader"
 
             fixed4 frag (v2f i) : SV_Target
             {
-                const float lineWidth = .01;
+                const float lineWidth = .005;
 
                 float2 p = 2*(i.uv - .5);
                 float mag = abs(sdfEllipse(p, float2(.5,.25)));

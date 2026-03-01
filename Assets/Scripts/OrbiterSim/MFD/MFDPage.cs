@@ -34,6 +34,8 @@ public abstract class MFDPage : UdonSharpBehaviour
         for (; index + 1 < activeDisplayCount; index++) {
             activeDisplays[index] = activeDisplays[index + 1];
         }
+
+        activeDisplayCount--;
     }
 
     public abstract void OnButton(MFD display, ButtonSide side, int num);
