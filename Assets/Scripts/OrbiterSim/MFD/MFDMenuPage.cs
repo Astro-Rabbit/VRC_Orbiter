@@ -13,7 +13,7 @@ public class MFDMenuPage : MFDPage
     {
         if (side == ButtonSide.Left) {
             if (num < pages.Length && pages[num] != null) {
-                display.SetPage(pages[num]);
+                display.SetPage((byte)(num+1));
             }
         }
     }

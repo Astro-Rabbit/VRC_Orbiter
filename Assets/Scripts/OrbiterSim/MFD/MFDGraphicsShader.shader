@@ -176,8 +176,6 @@ Shader "Unlit/MFDGraphicsShader"
                 const float lineWidth = .005;
 
                 float2 p = 2*(i.uv - .5);
-                float mag = abs(sdfEllipse(p, float2(.5,.25)));
-                mag = mag < lineWidth ? 1 : 0;
 
                 float3 col = float3(0, 0, 0);
                 for (int i = 0; i < shapeCount; i++) {

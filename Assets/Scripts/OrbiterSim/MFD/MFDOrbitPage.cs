@@ -10,7 +10,6 @@ public class MFDOrbitPage : MFDPage
     public BodyCatalog bodies;
     public ConicState conic;
     public ConicPropagator conicPropagator;
-    public MFDPage menuPage;
 
     [Header("Display Data")]
     public double eccentricity;
@@ -39,7 +38,7 @@ public class MFDOrbitPage : MFDPage
     public override void OnButton(MFD display, ButtonSide side, int num)
     {
         if (side == ButtonSide.Bottom && num == 2) {
-            display.SetPage(menuPage);
+            display.SetPage((byte)MFDPageID.Menu);
         }
     }
 
