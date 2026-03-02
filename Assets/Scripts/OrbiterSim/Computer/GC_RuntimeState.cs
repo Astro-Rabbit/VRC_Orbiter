@@ -55,6 +55,29 @@ public class GC_RuntimeState : UdonSharpBehaviour
     [Tooltip("Active continuous control mode.")]
     public byte activeModeId = MODE_MANUAL;
 
+
+    // --------------------
+    // Active "program" descriptor (UI-facing)
+    // --------------------
+    // This is a descriptive label for what GC is doing, independent of control implementation.
+    public const byte PROG_NONE          = 0;
+    public const byte PROG_MANUAL        = 1;
+    public const byte PROG_HOLD_ATT      = 2; // hold quaternion
+    public const byte PROG_POINT_DIR_E   = 3; // point body axis at inertial direction
+    public const byte PROG_KILL_ROT      = 4; // rate target = 0
+    public const byte PROG_HOLD_PROGRADE = 5;
+    public const byte PROG_HOLD_RETRO    = 6;
+    public const byte PROG_HOLD_RAD_OUT  = 7;
+    public const byte PROG_HOLD_RAD_IN   = 8;
+    public const byte PROG_HOLD_NORMAL   = 9;
+    public const byte PROG_HOLD_ANTINORM = 10;
+
+    public const byte PROG_EXEC_NODE     = 20; // executor is actively controlling
+
+    [Header("UI program indicator")]
+    public byte activeProgramId = PROG_NONE;
+
+
     [Tooltip("Executor program currently active (future).")]
     public byte activeExecutorId = EXEC_NONE;
 
@@ -95,6 +118,9 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public int executorNodeIndex = -1;     // which node plan index is active
     public byte cachedModeBeforeExec = MODE_MANUAL;
     public bool abortExecOnManualInput = true;
+
+
+
 
 
     [TextArea] public string lastFaultMessage;

@@ -64,6 +64,19 @@ public class VPControls : UdonSharpBehaviour
     bool RightGrabbed, RightGrabbedOld, RightBusy;
     string RightObject = "";
 
+    [Header("Output -> Guidance Manual Draft")]
+    public GC_ManualDraft manualDraft;
+    // Manual tuning
+    public bool manualUseRateControl = true;
+    // Max command magnitudes
+    public float maxPitchRateDeg = 20f;
+    public float maxYawRateDeg   = 20f;
+    public float maxRollRateDeg  = 30f;
+    // If you ever want direct-torque mode for testing
+    public float maxTauNm = 2000f;
+    // Deadzone for deciding “active”
+    public float manualDeadzone = 0.02f;
+
     // Input Values
     [HideInInspector] public float inputX, inputY, inputZ; // Joystick
     [HideInInspector] public float ThrottleValue;         // Throttle
@@ -113,6 +126,69 @@ public class VPControls : UdonSharpBehaviour
 
         translateOutputXZ.transform.localPosition = new Vector3(-transX / 2.0f, transY / 2.0f, 0f);
         translateOutputY.transform.localPosition = new Vector3(0f, transZ/2.0f, 0f);
+
+        // --- 5. WRITE TO MANUAL DRAFT ---
+        if (manualDraft != null)
+        {
+            // Decide whether manual attitude is “active”
+            bool attActive =
+                JoystickisGrabbed ||
+                (Mathf.Abs(inputX) > manualDeadzone) ||
+                (Mathf.Abs(inputY) > manualDeadzone) ||
+                (Mathf.Abs(inputZ) > manualDeadzone);
+
+            // Decide whether manual throttle is “active”
+            bool thrActive =
+                ThrottleGrabbing ||
+                (ThrottleValue > manualDeadzone);
+
+            manualDraft.manualAttitudeActive = attActive;
+            manualDraft.manualThrottleActive = thrActive;
+
+            manualDraft.useRateControl = manualUseRateControl;
+
+            // Clear commands when inactive so guidance arbitration can fall back cleanly
+            if (!attActive)
+            {
+                manualDraft.rateCmd_B = Vector3.zero;
+                manualDraft.tauCmd_B  = Vector3.zero;
+            }
+            else
+            {
+                if (manualDraft.useRateControl)
+                {
+                    float p = maxPitchRateDeg * Mathf.Deg2Rad;
+                    float y = maxYawRateDeg   * Mathf.Deg2Rad;
+                    float r = maxRollRateDeg  * Mathf.Deg2Rad;
+
+                    // inputZ=pitch stick, inputY=yaw stick, inputX=roll stick
+                    manualDraft.rateCmd_B = new Vector3(
+                        inputZ * p,  // about +X
+                        inputY * y,  // about +Y
+                        inputX * r   // about +Z
+                    );
+                    manualDraft.tauCmd_B = Vector3.zero;
+                }
+                else
+                {
+                    // Direct torque mode for testing only (body Nm)
+                    manualDraft.tauCmd_B = new Vector3(
+                        inputZ * maxTauNm,
+                        inputY * maxTauNm,
+                        inputX * maxTauNm
+                    );
+                    manualDraft.rateCmd_B = Vector3.zero;
+                }
+            }
+
+            // Throttle: map your single throttle lever to mainThrottle01 for now
+            manualDraft.mainThrottle01 = thrActive ? Mathf.Clamp01(ThrottleValue) : 0f;
+
+            // No translation yet
+            manualDraft.hoverThrottle01 = 0f;
+        }
+
+
     }
 
     private void UpdateHandGrab(bool isLeft, float grip, ref bool grabbed, ref bool grabbedOld, ref bool busy, ref string objName, GameObject vis)

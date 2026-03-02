@@ -45,6 +45,10 @@ public class NodePlanState : UdonSharpBehaviour
     public float[] preSlewLeadSec; // how early to start pointing before trigger
     public float[] postHoldSec;    // how long to keep pointing after trigger
 
+    [Header("Burn execution (V2)")]
+    public float[] burnDurationSec;   // computed at creation
+    public float[] burnThrottle01;    // computed at creation (V1 fixed 1.0)
+
     [Header("Runtime bookkeeping")]
     public int activeIndex = -1;
 
@@ -69,6 +73,10 @@ public class NodePlanState : UdonSharpBehaviour
 
         if (preSlewLeadSec == null || preSlewLeadSec.Length != n) preSlewLeadSec = new float[n];
         if (postHoldSec == null || postHoldSec.Length != n) postHoldSec = new float[n];
+
+        if (burnDurationSec == null || burnDurationSec.Length != n) burnDurationSec = new float[n];
+        if (burnThrottle01 == null || burnThrottle01.Length != n) burnThrottle01 = new float[n];
+
     }
 
     public void ClearAll()
@@ -89,6 +97,10 @@ public class NodePlanState : UdonSharpBehaviour
 
             preSlewLeadSec[i] = 30f;
             postHoldSec[i] = 5f;
+
+            burnDurationSec[i] = 0f;
+            burnThrottle01[i] = 0f;
+
         }
     }
 
@@ -127,6 +139,18 @@ public class NodePlanState : UdonSharpBehaviour
         return i;
     }
 
+    public int AllocNode(byte trig, byte axis012)
+    {
+        EnsureArrays();
+        int i = FindFirstFree();
+        if (i < 0) return -1;
+
+        status[i] = STATUS_ARMED;
+        trigType[i] = trig;
+        bodyAxisToPoint[i] = axis012;
+        return i;
+    }
+
     public int API_CreateNode_TrueAnomaly(Vector3 dvE, double nuTargetRad, byte axis012)
     {
         EnsureArrays();
@@ -152,6 +176,9 @@ public class NodePlanState : UdonSharpBehaviour
 
         triggerTime[i] = 0.0;
         triggerNuRad[i] = 0.0;
+
+        burnDurationSec[i] = 0f;
+        burnThrottle01[i] = 0f;
 
         dV_E[i] = Vector3.zero;
         bodyAxisToPoint[i] = 2;

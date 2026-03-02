@@ -12,11 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c333ccfdd0cbdbc4ca30cef2dd6e6b9b, type: 3}
   m_Name: GC_ActuatorOverrideState
   m_EditorClassIdentifier: 
-  serializedUdonProgramAsset: {fileID: 11400000, guid: 13d1f047a21ccec479e4270c36f7222c,
+  serializedUdonProgramAsset: {fileID: 11400000, guid: 0e122531a6224524fa925b2e73e38fb6,
     type: 2}
   udonAssembly: 
   assemblyError: 
-  sourceCsScript: {fileID: 11500000, guid: a506b225ed282424f9e9bbf2d10a63ff, type: 3}
+  sourceCsScript: {fileID: 11500000, guid: bbac853f8a521d54b97e71c4ee641313, type: 3}
   scriptVersion: 2
   compiledVersion: 2
   behaviourSyncMode: 0
@@ -92,7 +92,7 @@ MonoBehaviour:
       Data: 5|UnityEngine.HeaderAttribute, UnityEngine.CoreModule
     - Name: header
       Entry: 1
-      Data: Allow toggles
+      Data: Allow toggles (tri-state)
     - Name: 
       Entry: 8
       Data: 
@@ -245,7 +245,7 @@ MonoBehaviour:
       Data: 12|UnityEngine.HeaderAttribute, UnityEngine.CoreModule
     - Name: header
       Entry: 1
-      Data: Actuator selection mode override
+      Data: Attitude actuator selection override
     - Name: 
       Entry: 8
       Data: 
@@ -254,7 +254,7 @@ MonoBehaviour:
       Data: 13|UnityEngine.TooltipAttribute, UnityEngine.CoreModule
     - Name: tooltip
       Entry: 1
-      Data: 0=NoOverride; otherwise set to a CraftCommandState.ATT_ACT_* value.
+      Data: 0 = NoOverride; otherwise set to CraftCommandState.ATT_ACT_*
     - Name: 
       Entry: 8
       Data: 

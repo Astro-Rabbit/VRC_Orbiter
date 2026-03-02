@@ -17,6 +17,28 @@ public class CraftNetAttitude : UdonSharpBehaviour
     [Tooltip("If > 0, slerp toward received attitude at this rate (1/sec). 0 = hard set.")]
     public float slerpRate = 0f;
 
+
+    // -------------------------
+    // Remote interpolation buffer (render-only)
+    // -------------------------
+    [Header("Remote interpolation (render sampling)")]
+    [Tooltip("Render this many seconds behind remote time to enable interpolation.")]
+    public float interpBackTimeSeconds = 0.15f;
+
+    [Tooltip("Max seconds to extrapolate beyond newest sample.")]
+    public float extrapClampSeconds = 0.25f;
+
+    [Tooltip("Snapshot ring buffer size (>=4 recommended).")]
+    public int snapBufferSize = 8;
+
+    private double[] _tBuf;
+    private Quaternion[] _qBuf;
+    private Vector3[] _wBuf;
+    private int _bufCount = 0;
+    private int _bufHead = 0; // next write index
+
+
+
     // --- synced attitude ---
     [UdonSynced] private int _rev;
     [UdonSynced] private double _epochT;
@@ -27,6 +49,20 @@ public class CraftNetAttitude : UdonSharpBehaviour
     private int _appliedRev = -1;
 
     private float Period => (attHz > 0f) ? (1f / attHz) : 999999f;
+
+    void Start()
+    {
+        int n = snapBufferSize;
+        if (n < 4) n = 4;
+        snapBufferSize = n;
+
+        _tBuf = new double[n];
+        _qBuf = new Quaternion[n];
+        _wBuf = new Vector3[n];
+        _bufCount = 0;
+        _bufHead = 0;
+    }
+
 
     /// <summary>Owner: publish attitude at cadence. Safe to call every frame.</summary>
     public void PublishAttitude()
@@ -95,9 +131,107 @@ public class CraftNetAttitude : UdonSharpBehaviour
         _appliedRev = _rev;
     }
 
+
+
+    // -------------------------
+    // Render sampling API
+    // -------------------------
+
+    /// <summary>
+    /// Remote-only: sample buffered attitude for rendering at tRender (SimClock time).
+    /// If insufficient history, returns latest received.
+    /// </summary>
+    public Quaternion SampleRenderQuaternion(double tRender)
+    {
+        // Fallback to latest received if no buffer
+        Quaternion latest = new Quaternion(_qX, _qY, _qZ, _qW);
+
+        if (_tBuf == null || _bufCount <= 0) return latest;
+
+        int n = snapBufferSize;
+        int oldest = (_bufHead - _bufCount + n) % n;
+
+        // Before oldest -> hold oldest
+        double tPrev = _tBuf[oldest];
+        Quaternion qPrev = _qBuf[oldest];
+        Vector3 wPrev = _wBuf[oldest];
+
+        if (tRender <= tPrev) return qPrev;
+
+        // Find bracket
+        for (int k = 1; k < _bufCount; k++)
+        {
+            int idx = (oldest + k) % n;
+            double tCur = _tBuf[idx];
+
+            if (tRender <= tCur)
+            {
+                double dt = tCur - tPrev;
+                float u = (dt > 1e-6) ? (float)((tRender - tPrev) / dt) : 1f;
+
+                Quaternion qCur = _qBuf[idx];
+                // Ensure shortest-arc slerp (Unity handles it, but we keep it clean)
+                return Quaternion.Slerp(qPrev, qCur, u);
+            }
+
+            tPrev = tCur;
+            qPrev = _qBuf[idx];
+            wPrev = _wBuf[idx];
+        }
+
+        // Past newest -> short extrapolate from newest using omega
+        int newest = (_bufHead - 1 + n) % n;
+        double tn = _tBuf[newest];
+        Quaternion qN = _qBuf[newest];
+        Vector3 wN = _wBuf[newest];
+
+        double dtEx = tRender - tn;
+        double c = (double)extrapClampSeconds;
+        if (dtEx >  c) dtEx =  c;
+        if (dtEx < -c) dtEx = -c;
+
+        return IntegrateQuaternion(qN, wN, (float)dtEx);
+    }
+
+    private Quaternion IntegrateQuaternion(Quaternion q, Vector3 omegaRadPerSec, float dt)
+    {
+        // dq ~ exp(0.5 * omega * dt). Use angle-axis approximation.
+        float wmag = omegaRadPerSec.magnitude;
+        float angle = wmag * Mathf.Abs(dt);
+
+        if (angle < 1e-7f) return q;
+
+        Vector3 axis = omegaRadPerSec / wmag;
+        Quaternion dq = Quaternion.AngleAxis(angle * Mathf.Rad2Deg, axis);
+
+        if (dt < 0f) dq = new Quaternion(-dq.x, -dq.y, -dq.z, dq.w); // inverse for negative dt
+
+        // q evolves by right-multiplying body-frame delta (typical for BODY rates)
+        return q * dq;
+    }
+
+
+
+
     public override void OnDeserialization()
     {
-        // You can apply immediately here, but I prefer SimManager calling ApplyRemoteAttitude()
+        // Keep your current preference: SimManager calls ApplyRemoteAttitude() per-frame
+        // But we DO buffer the received sample for render interpolation.
+        if (Networking.IsOwner(gameObject)) { _appliedRev = _rev; return; }
+
+        if (_tBuf == null || _tBuf.Length == 0) Start();
+
+        // Push snapshot into ring buffer
+        int n = snapBufferSize;
+        int i = _bufHead;
+
+        _tBuf[i] = _epochT;
+        _qBuf[i] = new Quaternion(_qX, _qY, _qZ, _qW);
+        _wBuf[i] = new Vector3(_wX, _wY, _wZ);
+
+        _bufHead = (i + 1) % n;
+        if (_bufCount < n) _bufCount++;
+
         _appliedRev = _rev;
     }
 }

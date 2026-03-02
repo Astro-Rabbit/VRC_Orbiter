@@ -1,6 +1,8 @@
 ﻿using UdonSharp;
 using UnityEngine;
 using System;
+using VRC.SDKBase;
+
 
 /// <summary>
 /// SkyBoxDriver
@@ -26,6 +28,11 @@ public class SkyBoxDriver : UdonSharpBehaviour
     public CraftAttitudeState craftAtt;
     public CraftStateModel craft;
     public BodyCatalog bodies;
+
+
+    public SimClock clock;
+    public CraftNetState netCore;
+    public CraftNetAttitude netAtt;
 
     [Header("Target skybox material (RenderSettings.skybox)")]
     public Material skyboxMat;
@@ -75,6 +82,17 @@ public class SkyBoxDriver : UdonSharpBehaviour
         // Shader expects BODY->(whatever it uses internally). We simply pass qBE and let the shader do its own
         // equatorial/ecliptic handling for stars, as per your current setup.
         Quaternion q = craftAtt.qBE;
+
+        // Remote rendering: sample buffered attitude at a presentation time
+        if (netCore != null && netAtt != null && clock != null)
+        {
+            if (!Networking.IsOwner(netCore.gameObject))
+            {
+                double tRender = clock.Now() - (double)netAtt.interpBackTimeSeconds;
+                q = netAtt.SampleRenderQuaternion(tRender);
+            }
+        }
+
         skyboxMat.SetVector("_CraftBodyToEq", new Vector4(q.x, q.y, q.z, q.w));
 
         // -------------
@@ -127,7 +145,7 @@ public class SkyBoxDriver : UdonSharpBehaviour
                     Vector3 sunDirEcl = new Vector3(ux, uy, uz);
 
                     // Convert to BODY/WORLD: sunDirBody = qEB * sunDirEcl
-                    Quaternion qBEq = craftAtt.qBE;
+                    Quaternion qBEq = q;
                     Quaternion qEB = new Quaternion(-qBEq.x, -qBEq.y, -qBEq.z, qBEq.w); // inverse (conjugate)
                     Vector3 sunDirBody = qEB * sunDirEcl;
 

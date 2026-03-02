@@ -29,6 +29,13 @@ public class GC_ManualDraft : UdonSharpBehaviour
     public float mainThrottle01;
     public float hoverThrottle01;
 
+    [Header("Manual translation inputs (B)")]
+    [Tooltip("Translation stick command in body frame, normalized [-1..1]. X=right, Y=up, Z=forward.")]
+    public Vector3 translateCmd_B;
+
+    [Tooltip("Manual RCS mode preference (translate/rotate/blended).")]
+    public byte rcsMode;
+
     [Header("Actuator policy (manual)")]
     public byte attitudeActuatorMode;
     public bool allowWheels = true;
@@ -47,7 +54,11 @@ public class GC_ManualDraft : UdonSharpBehaviour
         mainThrottle01 = 0f;
         hoverThrottle01 = 0f;
 
-        attitudeActuatorMode = 0;
+        translateCmd_B = Vector3.zero;
+        rcsMode = 2; // or BLENDED if you prefer default
+
+
+        attitudeActuatorMode = 3;
         allowWheels = true;
         allowRCS = true;
         allowGimbal = true;
