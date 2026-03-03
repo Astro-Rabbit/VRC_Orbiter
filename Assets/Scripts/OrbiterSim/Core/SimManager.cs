@@ -14,7 +14,12 @@ public class SimManager : UdonSharpBehaviour
     public ConicFitter conicFitter;
 
     [Header("Rails objects")]
-    public CraftPropSystem[] railObjects;
+    public StationPropSystem[] railObjects;
+
+    [Header("Contacts (craft <-> stations)")]
+    public StationStateModel[] stations;            // list of station state models (same ordering used by UI/targeting)
+    public CraftAttitudeState craftAtt;             // craft attitude qBE
+    public GuidanceNavContactsComputer contactsComp; // computes snapshot
 
     [Header("Active craft")]
     public CraftStateModel craft;
@@ -67,9 +72,13 @@ public class SimManager : UdonSharpBehaviour
     public PrimaryOrbitDiagnostics primaryDiag;
     public OrbitRenderer orbitline;
     public SkyBoxDriver skyrender;
+    // [Header("Station Render")]
+    public StationRenderManager stationRender;
 
     [Header("Initialize")]
     public OrbitInitializerFromPrimaryElements InitialConic;
+    public CraftInitializer_NearStation initialNearStation;
+
 
     // --- internal ---
     private float _settleAccum = 0f;
@@ -83,6 +92,13 @@ public class SimManager : UdonSharpBehaviour
 
     void Start()
     {
+        // Prefer station-offset init if provided; fallback to element-based init
+        if (initialNearStation != null)
+        {
+            bool ok = initialNearStation.InitializeNow();
+            if (ok) return;
+        }
+
         if (InitialConic != null)
             InitialConic.InitializeNow();
     }
@@ -115,7 +131,16 @@ public class SimManager : UdonSharpBehaviour
         //    - Remotes: apply net state (rails uses mission time)
         TickCraft_UpdateSide(Tmission);
 
-        // 4) Render
+        // 4) Contacts snapshot (render/GC/orrrery all read this)
+        if (contactsComp != null)
+        {
+            contactsComp.craft = craft;
+            contactsComp.craftAtt = craftAtt;
+            contactsComp.stations = stations;
+            contactsComp.Evaluate();
+        }
+
+        // 5) Render
         ApplyRender();
     }
 
@@ -145,13 +170,13 @@ public class SimManager : UdonSharpBehaviour
         double targetT = clock.Now(); // mission time (warp is 1 by policy)
 
         // Anchor sim time on first integrated tick (or after ownership changes)
-        if (!_simTValid)
-        {
-            _simT = targetT;
-            _accumSim = 0.0;
-            _settleAccum = 0f;
-            _simTValid = true;
-        }
+        // if (!_simTValid)
+        // {
+        //     _simT = targetT;
+        //     _accumSim = 0.0;
+        //     _settleAccum = 0f;
+        //     _simTValid = true;
+        // }
 
         // Accumulate mission-time that has elapsed since our last integrated step
         double dtMission = targetT - _simT;
@@ -214,9 +239,62 @@ public class SimManager : UdonSharpBehaviour
             }
         }
 
+        // --- NEW: finish the remaining fractional time so _simT matches mission time ---
+        // Without this, _simT lags by up to fixedDt, causing a visible snap when entering integrated.
+        double rem = _accumSim;
+        if (rem > 0.0)
+        {
+            // Keep it bounded; rem should be < h by construction.
+            if (rem > h) rem = h;
+
+            _accumSim -= rem;
+            if (_accumSim < 0.0) _accumSim = 0.0;
+
+            double t0r = _simT;
+            double t1r = t0r + rem;
+            _simT = t1r;
+
+            // Attitude + actuation for remainder
+            TickAttitudeOwner((float)rem);
+
+            // Propellant bookkeeping
+            if (craft != null && actuation != null)
+            {
+                double dProp = actuation.mainMdot_kgps * rem;
+                if (dProp > 0.0)
+                {
+                    craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
+                    craft.RecomputeMass();
+                }
+            }
+
+            // Translation integration for remainder
+            if (numeric != null && actuation != null)
+            {
+                numeric.force_E = actuation.F_E;
+                numeric.Step(rem, t0r);
+            }
+
+            // Auto settle logic should include remainder time too
+            if (autoModeSwitch)
+            {
+                double F = GetNetForceMagN();
+                if (F < exitIntegratedForceN) _settleAccum += (float)rem;
+                else _settleAccum = 0f;
+
+                if (_settleAccum >= settleSeconds)
+                {
+                    _settleAccum = 0f;
+                    EnterRails();
+                    return;
+                }
+            }
+        }
+
+
         // If we hit the step budget, DO NOT "drop time on the floor" (that desyncs craft vs ephem/render).
         // Clamp: snap sim time to mission time and clear accumulator.
-        if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit)
+        if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit && _accumSim > 0.0)
         {
             _simT = targetT;
             _accumSim = 0.0;
@@ -332,17 +410,27 @@ public class SimManager : UdonSharpBehaviour
 
         _settleAccum = 0f;
 
-        // Re-anchor on next FixedUpdate
-        _simTValid = false;
+        // --- NEW: hard-anchor integrated time NOW, and ensure craft state matches that time ---
+        double T = (clock != null) ? clock.Now() : 0.0;
+
+        // Force ephem and stations can remain driven by Update(Tview), but craft must match T right now.
+        if (craftProp != null)
+            craftProp.Evaluate(T);
+
+        // Optional: if you want SOI switching to be consistent at the transition moment:
+        if (soiSwitch != null)
+            TryHandleSOISwitchRails(T);
+
+        _simT = T;
+        _simTValid = true;
         _accumSim = 0.0;
 
+        // Now switch mode
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
         // Push immediate snapshots
         if (netKin != null) netKin.ForcePublishKinematics();
         if (netAtt != null) netAtt.ForcePublishAttitude();
-
-        // Optional conic publish (useful for UI)
         if (netConic != null) netConic.ForcePublishConic();
     }
 
@@ -442,5 +530,7 @@ public class SimManager : UdonSharpBehaviour
         if (primaryDiag != null) primaryDiag.Evaluate();
         if (orbitline != null) orbitline.Apply();
         skyrender.Tick();
+        if (stationRender != null)
+            stationRender.Tick();
     }
 }
