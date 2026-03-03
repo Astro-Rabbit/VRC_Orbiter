@@ -67,10 +67,18 @@ public class ThrusterCatalog : UdonSharpBehaviour
     public Vector3[] hoverDir_B;
     public bool[]    hoverCached;
 
+    public Vector3[] hoverTauPerNewton_B;
+    public float[]   hoverTauPerNewtonMag;
+
     [Header("Cached (read-only) - RCS")]
     public Vector3[] rcsPosRelCg_B;
     public Vector3[] rcsDir_B;
     public bool[]    rcsCached;
+    // NEW: torque-per-Newton cache (Nm per N)
+    public Vector3[] rcsTauPerNewton_B;
+    public float[]   rcsTauPerNewtonMag;
+
+
 
     void Start()
     {
@@ -82,8 +90,13 @@ public class ThrusterCatalog : UdonSharpBehaviour
         if (craftRoot == null || cgTransform == null) return;
 
         CacheGroupMain();
-        CacheGroup(hoverTf, hoverMaxForceN, ref hoverPosRelCg_B, ref hoverDir_B, ref hoverCached);
-        CacheGroup(rcsTf,  rcsMaxForceN,  ref rcsPosRelCg_B,  ref rcsDir_B,  ref rcsCached);
+        CacheGroup(hoverTf, hoverMaxForceN,
+            ref hoverPosRelCg_B, ref hoverDir_B, ref hoverCached,
+            ref hoverTauPerNewton_B, ref hoverTauPerNewtonMag);   // optional; delete args if you skip hover
+
+        CacheGroup(rcsTf, rcsMaxForceN,
+            ref rcsPosRelCg_B, ref rcsDir_B, ref rcsCached,
+            ref rcsTauPerNewton_B, ref rcsTauPerNewtonMag);
     }
 
     // Main group needs extra cached axes
@@ -155,13 +168,17 @@ public class ThrusterCatalog : UdonSharpBehaviour
 
     private void CacheGroup(
         Transform[] tf, float[] maxForce,
-        ref Vector3[] posRelCg_B, ref Vector3[] dir_B, ref bool[] cached)
+        ref Vector3[] posRelCg_B, ref Vector3[] dir_B, ref bool[] cached,
+        ref Vector3[] tauPerNewton_B, ref float[] tauPerNewtonMag)
     {
         int n = (tf != null) ? tf.Length : 0;
 
         EnsureVec3Array(ref posRelCg_B, n);
         EnsureVec3Array(ref dir_B, n);
         EnsureBoolArray(ref cached, n);
+
+        EnsureVec3Array(ref tauPerNewton_B, n);
+        EnsureFloatArray(ref tauPerNewtonMag, n);
 
         for (int i = 0; i < n; i++)
         {
@@ -171,19 +188,27 @@ public class ThrusterCatalog : UdonSharpBehaviour
                 cached[i] = false;
                 posRelCg_B[i] = Vector3.zero;
                 dir_B[i] = Vector3.forward;
+                tauPerNewton_B[i] = Vector3.zero;
+                tauPerNewtonMag[i] = 0f;
                 continue;
             }
 
             Vector3 rWorld = t.position - cgTransform.position;
-            posRelCg_B[i] = craftRoot.InverseTransformVector(rWorld);
+            Vector3 rB = craftRoot.InverseTransformVector(rWorld);
+            posRelCg_B[i] = rB;
 
             Vector3 dWorld = -t.forward;
-            Vector3 dBody = craftRoot.InverseTransformDirection(dWorld);
-            if (dBody.sqrMagnitude > 1e-12f) dBody.Normalize();
-            else dBody = Vector3.forward;
+            Vector3 dB = craftRoot.InverseTransformDirection(dWorld);
+            if (dB.sqrMagnitude > 1e-12f) dB.Normalize();
+            else dB = Vector3.forward;
 
-            dir_B[i] = dBody;
+            dir_B[i] = dB;
             cached[i] = true;
+
+            // NEW: torque-per-Newton cache: (r x d) gives Nm per N (since d is unit)
+            Vector3 tPerN = Vector3.Cross(rB, dB);
+            tauPerNewton_B[i] = tPerN;
+            tauPerNewtonMag[i] = tPerN.magnitude;
 
             if (maxForce != null && i < maxForce.Length && maxForce[i] < 0f)
                 maxForce[i] = 0f;
@@ -200,6 +225,13 @@ public class ThrusterCatalog : UdonSharpBehaviour
     {
         if (n <= 0) { a = null; return; }
         if (a == null || a.Length != n) a = new bool[n];
+    }
+
+
+    private static void EnsureFloatArray(ref float[] a, int n)
+    {
+        if (n <= 0) { a = null; return; }
+        if (a == null || a.Length != n) a = new float[n];
     }
 
     // ---------- Safe getters ----------

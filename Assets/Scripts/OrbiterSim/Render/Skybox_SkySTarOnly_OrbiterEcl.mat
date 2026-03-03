@@ -1,0 +1,89 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Skybox_SkySTarOnly_OrbiterEcl
+  m_Shader: {fileID: 4800000, guid: 7ab48199365a68443b9203f639b6bb64, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MoonAlbedo:
+        m_Texture: {fileID: 2800000, guid: c27b840437571ad49a63ed534ef1fd7e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MoonNormal:
+        m_Texture: {fileID: 2800000, guid: bdc798dbd8b7c6a4c8cec46f060f6f62, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkyboxTex:
+        m_Texture: {fileID: 8900000, guid: 351e02dc25c8b5844a1621560f52a505, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _StarData:
+        m_Texture: {fileID: 2800000, guid: bd3f04e55a29c6a45b92b44547eee0b3, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _TempData:
+        m_Texture: {fileID: 2800000, guid: 564721d3df2e8fe47b53fc58e2fd61b9, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _XoffData:
+        m_Texture: {fileID: 2800000, guid: 9f7a6e02d2b63b3409c30db83680d950, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _YoffData:
+        m_Texture: {fileID: 2800000, guid: e3a1373e1bcc4db44ae782412b5a9f8e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _MWbright: 0.06
+    - _MoonAmbient: 0.002
+    - _MoonFlipU: 1
+    - _MoonFlipV: 1
+    - _MoonGamma: 1
+    - _MoonLonOffsetDeg: 270
+    - _MoonNormalStrength: 1
+    - _MoonRadiusM: 1737400
+    - _MoonShadowPow: 1
+    - _ObliquityDeg: -23.43928
+    - _PixelSize: 1024
+    - _SpikeLength: 0.02
+    - _SpikeRotateDeg: 29.9
+    - _SpikeSharpness: 80
+    - _SpikeStrength: 2.52
+    - _SpikeWidth: 0.0012
+    - _SunAngRad: 0.0046430514
+    - _SunEdgeSoft: 0.000002
+    - _SunGlow: 0.06
+    - _SunGlowPow: 3
+    - _SunIntensity: 25.49
+    - _brightnessScale: 20
+    - _maxMag: 10
+    - _scaleFactor: 0
+    - _sigma: 90
+    m_Colors:
+    - _CraftBodyToEq: {r: 0.040958103, g: 0.009197037, b: 0.00031692444, a: 0.9991185}
+    - _MoonAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
+    - _MoonBodyToEcl: {r: 0.9898313, g: 0.1346707, b: 0.022397134, a: -0.039951693}
+    - _MoonColor: {r: 1, g: 1, b: 1, a: 0}
+    - _MoonPosEcl: {r: -4536541.5, g: -93294.17, b: 0.33931148, a: 0}
+    - _SunColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SunDirEcl: {r: 0.97001207, g: 0.24305673, b: 0.0001443374, a: 0}
+  m_BuildTextureStacks: []

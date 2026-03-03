@@ -1,47 +1,41 @@
-Shader "Skybox/MoonOrbit_M3_Albedo"
+Shader "Skybox/MoonOrbit_M5_Basic_OptionB"
 {
     Properties
     {
+        // =========================
+        // Background
+        // =========================
         _BgColor      ("Background Color", Color) = (0.02, 0.02, 0.03, 1)
 
-        // World-space sphere definition
-        _MoonCenterWS ("Moon Center WS", Vector) = (0, 0, 1000, 1)
-        _MoonRadiusWS ("Moon Radius WS", Float)  = 500
+        // =========================
+        // Option B: sky rotation (Unity WS quaternion xyzw)
+        // =========================
+        _SkyQ ("Sky Rotation Quaternion (xyzw)", Vector) = (0,0,0,1)
 
-        // Orientation controls (degrees). Placeholders for future physical libration.
-        _MoonYawDeg   ("Moon Yaw (deg, about +Z body)", Float) = 0
-        _MoonPitchDeg ("Moon Pitch (deg, about +X body)", Float) = 0
-        _MoonRollDeg  ("Moon Roll (deg, about +Y body)", Float) = 0
+        // =========================
+        // Moon (sphere, meters) -- PRE-sky-rotation frame (UInert)
+        // =========================
+        _MoonCenterUInert ("Moon Center UInert (m)", Vector) = (0, 0, 4000000, 1)
+        _MoonRadiusWS     ("Moon Radius (m)", Float)  = 1727400
 
-        // Texture
+        // Moon orientation (Body-fixed -> UInert). Quaternion (x,y,z,w).
+        _MoonBodyToUInertQ ("Moon Body->UInert Quaternion (xyzw)", Vector) = (0,0,0,1)
+
         _MoonAlbedo   ("Moon Albedo (equirect)", 2D) = "gray" {}
-        _MoonNormal ("Moon Normal (tangent space)", 2D) = "bump" {}
+        _MoonNormal   ("Moon Normal (tangent space)", 2D) = "bump" {}
         _NormalStrength ("Normal Strength", Range(0, 3)) = 1.0
 
-        _MoonHeight ("Moon Height", 2D) = "gray" {}
-        _HeightScale ("Height Scale", Range(0, 5)) = 1.0
-        _HeightShadow ("Height Shadow Strength", Range(0, 2)) = 0.5
+        // =========================
+        // Lighting (simple) -- PRE-sky-rotation frame (UInert)
+        // =========================
+        _SunDirUInert  ("Sun Direction UInert (to Sun)", Vector) = (0, 1, 0, 0)
+        _SunIntensity  ("Sun Intensity", Range(0, 5)) = 1.0
+        _Ambient       ("Ambient", Range(0, 0.3)) = 0.03
+        _TermSoft      ("Terminator Softness", Range(0.0, 0.2)) = 0.03
+        _Wrap          ("Diffuse Wrap", Range(0, 0.5)) = 0.12
 
-        _SunDirWS     ("Sun Direction WS", Vector) = (0, 1, 0, 0)
-        _UseSceneSun   ("Use Scene Directional Light", Range(0,1)) = 1
-        _FlipSceneSun  ("Flip Scene Sun Direction", Range(0,1)) = 0
-        _SunIntensity ("Sun Intensity", Range(0, 5)) = 1.0
-        _Ambient      ("Ambient", Range(0, 0.3)) = 0.03
-        _TermSoft     ("Terminator Softness", Range(0.0, 0.2)) = 0.03
-
-        _SunShadowEnable   ("Sun Shadows (Height Ray)", Range(0,1)) = 1
-        _SunShadowSteps    ("Sun Shadow Steps", Range(1,16)) = 8
-        _SunShadowStepUV   ("Sun Shadow Step (UV)", Range(0.0001, 0.01)) = 0.0015
-        _SunShadowStrength ("Sun Shadow Strength", Range(0, 50)) = 12
-        _SunShadowBias     ("Sun Shadow Bias", Range(0, 0.05)) = 0.002
-        _SunShadowTermBand ("Shadow Terminator Band", Range(0.01, 0.5)) = 0.20
-
-        // Debug switches
-        _UseUVDebug   ("Use UV Debug", Range(0,1)) = 0
-        _ShowSeam     ("Show Seam Lines (Debug)", Range(0,1)) = 1
-
-        _LimbAA ("Limb AA Strength", Range(0.5, 30.0)) = 1.0
-
+        // Limb AA tuning (keep from your proven approach)
+        _LimbAA       ("Limb AA Strength", Range(0.5, 30.0)) = 1.0
     }
 
     SubShader
@@ -49,7 +43,7 @@ Shader "Skybox/MoonOrbit_M3_Albedo"
         Tags { "Queue"="Background" "RenderType"="Background" "PreviewType"="Skybox" }
         Cull Back
         ZWrite Off
-        ZTest Always
+        ZTest LEqual
 
         Pass
         {
@@ -60,387 +54,198 @@ Shader "Skybox/MoonOrbit_M3_Albedo"
 
             fixed4 _BgColor;
 
-            float4 _MoonCenterWS;
-            float  _MoonRadiusWS;
+            float4 _SkyQ;
 
-            float _MoonYawDeg;
-            float _MoonPitchDeg;
-            float _MoonRollDeg;
+            float4 _MoonCenterUInert;
+            float  _MoonRadiusWS;
+            float4 _MoonBodyToUInertQ;
 
             sampler2D _MoonAlbedo;
-            float4 _MoonAlbedo_ST;
             sampler2D _MoonNormal;
             float _NormalStrength;
 
-            sampler2D _MoonHeight;
-            float _HeightScale;
-            float _HeightShadow;
-
-            float4 _SunDirWS;
-            float _UseSceneSun;
-            float _FlipSceneSun;
-            float  _SunIntensity;
-            float  _Ambient;
-            float  _TermSoft;
-
-            float _SunShadowEnable;
-            float _SunShadowSteps;
-            float _SunShadowStepUV;
-            float _SunShadowStrength;
-            float _SunShadowBias;
-            float _SunShadowTermBand;
-
-            float _UseUVDebug;
-            float _ShowSeam;
+            float4 _SunDirUInert;
+            float _SunIntensity, _Ambient, _TermSoft, _Wrap;
             float _LimbAA;
 
-            struct appdata
-            {
-                float4 vertex : POSITION;
-            };
-
-            struct v2f
-            {
-                float4 pos   : SV_POSITION;
-                float3 dirWS : TEXCOORD0;
-            };
+            struct appdata { float4 vertex : POSITION; };
+            struct v2f { float4 pos : SV_POSITION; float3 dirWS : TEXCOORD0; };
 
             v2f vert (appdata v)
             {
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
-
                 float3 dirOS = v.vertex.xyz;
                 float3 dirWS = mul((float3x3)unity_ObjectToWorld, dirOS);
                 o.dirWS = normalize(dirWS);
-
                 return o;
             }
 
-            bool RaySphereIntersect(float3 rayOriginWS, float3 rayDirWS, float3 centerWS, float radius, out float tHit)
+            // -------------------------
+            // Utility
+            // -------------------------
+            float3 SafeNormalize(float3 v)
             {
-                float3 oc = rayOriginWS - centerWS;
-
-                float b = dot(oc, rayDirWS);
-                float c = dot(oc, oc) - radius * radius;
-                float h = b * b - c;
-
-                if (h < 0.0)
-                {
-                    tHit = 0.0;
-                    return false;
-                }
-
-                float sqrtH = sqrt(h);
-                float tNear = -b - sqrtH;
-                float tFar  = -b + sqrtH;
-
-                if (tNear > 0.0) { tHit = tNear; return true; }
-                if (tFar  > 0.0) { tHit = tFar;  return true; }
-
-                tHit = 0.0;
-                return false;
+                float len2 = dot(v,v);
+                if (len2 < 1e-12) return float3(0,0,1);
+                return v * rsqrt(len2);
             }
 
-            float3x3 RotX(float a)
+            // Quaternion (x,y,z,w) -> 3x3 rotation matrix
+            float3x3 QuatToMat(float4 qIn)
             {
-                float s = sin(a), c = cos(a);
+                float4 q = qIn;
+                float invLen = rsqrt(max(1e-12, dot(q, q)));
+                q *= invLen;
+
+                float x = q.x, y = q.y, z = q.z, w = q.w;
+
+                float xx = x*x, yy = y*y, zz = z*z;
+                float xy = x*y, xz = x*z, yz = y*z;
+                float wx = w*x, wy = w*y, wz = w*z;
+
                 return float3x3(
-                    1, 0, 0,
-                    0, c,-s,
-                    0, s, c
+                    1.0 - 2.0*(yy + zz),  2.0*(xy - wz),        2.0*(xz + wy),
+                    2.0*(xy + wz),        1.0 - 2.0*(xx + zz),  2.0*(yz - wx),
+                    2.0*(xz - wy),        2.0*(yz + wx),        1.0 - 2.0*(xx + yy)
                 );
             }
 
-            float3x3 RotY(float a)
+            // Rotate a vector by quaternion (xyzw), active rotation: v' = q * v * q^-1
+            float3 QRotate(float4 qIn, float3 v)
             {
-                float s = sin(a), c = cos(a);
-                return float3x3(
-                     c, 0, s,
-                     0, 1, 0,
-                    -s, 0, c
-                );
+                float4 q = qIn;
+                float invLen = rsqrt(max(1e-12, dot(q, q)));
+                q *= invLen;
+
+                float3 u = q.xyz;
+                float s = q.w;
+
+                // Rodrigues via quaternion: v' = v + 2*s*(u×v) + 2*(u×(u×v))
+                float3 uv  = cross(u, v);
+                float3 uuv = cross(u, uv);
+                return v + (2.0 * s) * uv + 2.0 * uuv;
             }
 
-            float3x3 RotZ(float a)
+            float2 BodyDirToUV(float3 N_body)
             {
-                float s = sin(a), c = cos(a);
-                return float3x3(
-                    c,-s, 0,
-                    s, c, 0,
-                    0, 0, 1
-                );
+                float lon = atan2(N_body.y, N_body.x);
+                float lat = asin(clamp(N_body.z, -1.0, 1.0));
+                float u = lon * (1.0 / (2.0 * UNITY_PI)) + 0.5;
+                float v = lat * (1.0 / UNITY_PI) + 0.5;
+                return float2(frac(u), saturate(v));
             }
 
-            // Build a stable tangent basis from body-space normal.
-            // U ~ longitude (east), V ~ latitude (north).
             void BuildTBN_FromBodyNormal(float3 N_body, float3x3 bodyToWorld, out float3 T_ws, out float3 B_ws)
             {
-                // Define body-space "up" to resolve the basis; avoid degeneracy near poles.
                 float3 up_body = (abs(N_body.z) < 0.999) ? float3(0,0,1) : float3(0,1,0);
-
-                // Tangent points roughly along increasing longitude (east)
                 float3 T_body = normalize(cross(up_body, N_body));
-
-                // Bitangent completes right-handed basis, roughly toward increasing latitude (north)
                 float3 B_body = cross(N_body, T_body);
 
                 T_ws = mul(bodyToWorld, T_body);
                 B_ws = mul(bodyToWorld, B_body);
             }
-            // Height-map self-shadow approximation by marching in UV along the projected sun direction.
-            // Returns 1 = fully lit, 0 = fully shadowed.
-            float HeightSunShadowUV(
-                float2 uv0,
-                float h0,
-                float2 sunDirUV,          // normalized direction in UV space
-                float ndotl,              // dot(N, L) using your perturbed normal
-                float stepsF,
-                float stepUV,
-                float strength,
-                float bias)
+
+            bool RaySphereHit(float3 O, float3 D, float3 C, float R, out float tHit, out float tNear, out float tFar)
             {
-                // Only meaningful on day side
-                if (ndotl <= 0.0) return 0.0;
+                float3 oc = O - C;
+                float b = dot(oc, D);
+                float c = dot(oc, oc) - R * R;
+                float h = b*b - c;
+                if (h < 0.0) { tHit = tNear = tFar = 0.0; return false; }
+                float s = sqrt(h);
+                tNear = -b - s;
+                tFar  = -b + s;
 
-                // March distance scales with grazing angle: lower sun => longer shadows.
-                // This makes the effect naturally concentrate near the terminator.
-                float grazing = saturate(1.0 - ndotl);
-
-                float maxOcc = 0.0;
-
-                // Clamp steps to [1..16]
-                int steps = (int)clamp(stepsF, 1.0, 16.0);
-
-                float2 uv = uv0;
-
-                // A simple height threshold ramp:
-                // as we march "toward the sun", the ray rises; near terminator (grazing~1) it rises slowly.
-                // This is not physically exact, but it is stable and tunable.
-                float risePerStep = bias + 0.02 * grazing; // tuneable baseline rise
-
-                [unroll]
-                for (int i = 1; i <= 16; i++)
-                {
-                    if (i > steps) break;
-
-                    uv += sunDirUV * stepUV;
-
-                    // Wrap U, clamp V (avoid sampling beyond poles)
-                    float2 uvs;
-                    uvs.x = frac(uv.x);
-                    uvs.y = saturate(uv.y);
-
-                    float hi = tex2D(_MoonHeight, uvs).r;
-
-                    float expected = h0 + risePerStep * i;
-
-                    // If the terrain is above the "sun ray" height, it occludes
-                    float occ = hi - expected;
-                    maxOcc = max(maxOcc, occ);
-                }
-
-                // Convert occlusion amount to shadow factor
-                // More occlusion => darker. Clamp occ to avoid extreme exponent.
-                maxOcc = max(0.0, maxOcc);
-                float shadow = exp(-strength * maxOcc);
-
-                return saturate(shadow);
+                tHit = (tNear > 0.0) ? tNear : tFar;
+                return (tFar > 0.0);
             }
 
+            float4 QConj(float4 q) { return float4(-q.x, -q.y, -q.z, q.w); }
 
             fixed4 frag (v2f i) : SV_Target
             {
-                float3 O = _WorldSpaceCameraPos;
-                float3 D = normalize(i.dirWS);
+                // Camera origin stays in Unity WS. We rotate the *ray* into the pre-sky-rotation frame (UInert).
+                float3 O_ws = _WorldSpaceCameraPos;
+                float3 D_ws = normalize(i.dirWS);
 
-                float3 C = _MoonCenterWS.xyz;
+                
+                // Option B: apply sky rotation to ray (puts ray into UInert frame)
+                float3 D = SafeNormalize(QRotate(QConj(_SkyQ), D_ws));
+
+                // Background
+                float3 bg = _BgColor.rgb;
+
+                // Moon params in UInert
+                float3 C = _MoonCenterUInert.xyz;
                 float  R = max(_MoonRadiusWS, 1e-3);
 
-                // --- Closest-approach terms (stable at the limb) ---
-                float3 oc = O - C;
-                float  b  = dot(oc, D);
-                float  d2 = dot(oc, oc) - b * b;     // squared closest distance from ray to center
-
-                // Signed distance to the silhouette (world units)
-                float distToRay = sqrt(max(d2, 0.0));
-                float sdf = distToRay - R;           // <0 inside, >0 outside
-
-                // Analytic AA coverage
-                float w = fwidth(sdf) * _LimbAA;
-                float coverage = saturate(0.5 - sdf / max(w, 1e-6));
-
-                // Outside: background
-                if (coverage <= 0.0)
-                    return _BgColor;
-
-                // --- Compute a stable "hit" even at tangent ---
-                // For a true intersection, h >= 0, where h = R^2 - d2.
-                // At the limb, h ~ 0. We clamp to 0 so tangent pixels still get a valid point.
-                float h = R * R - d2;
-                float sqrtH = sqrt(max(h, 0.0));
-                // If even the FAR intersection is behind the camera, this ray does not hit in front.
-                // This is the key fix that removes the "opposite sky" duplicate.
-                float tFar = -b + sqrtH;
-                if (tFar <= 0.0)
-                    return _BgColor;
-
-                float tNear = -b - sqrtH;
-                float tHit = (tNear > 0.0) ? tNear : tFar;
-
-                float3 H_ws = O + tHit * D;
-                float3 N_ws = normalize(H_ws - C);
-
-                // Orientation
-                float yaw   = radians(_MoonYawDeg);
-                float pitch = radians(_MoonPitchDeg);
-                float roll  = radians(_MoonRollDeg);
-
-                float3x3 bodyToWorld = mul(RotY(roll), mul(RotX(pitch), RotZ(yaw)));
+                // Moon orientation in UInert
+                float3x3 bodyToWorld = QuatToMat(_MoonBodyToUInertQ);
                 float3x3 worldToBody = transpose(bodyToWorld);
 
+                // IMPORTANT: For a skybox, treat origin at (0,0,0). Do NOT use world camera position here.
+                // This matches your "craft at origin / skybox moved" model.
+                float3 O = float3(0,0,0);
+
+                // Intersect
+                float tHit, tNear, tFar;
+                if (!RaySphereHit(O, D, C, R, tHit, tNear, tFar))
+                    return fixed4(bg, 1.0);
+
+                // Limb AA coverage (signed distance at closest approach)
+                float3 oc = O - C;
+                float b = dot(oc, D);
+                float tC = clamp(-b, max(tNear, 0.0), tFar);
+                float3 Pc = O + tC * D;
+                float Fc = length(Pc - C) - R;
+                float w = fwidth(Fc) * _LimbAA;
+                float coverage = saturate(0.5 - Fc / max(w, 1e-6));
+
+                if (coverage <= 0.0)
+                    return fixed4(bg, 1.0);
+
+                // Surface point + normals
+                float3 P = O + tHit * D;
+                float3 N_ws = SafeNormalize(P - C);
+
+                // Convert to body for UVs
                 float3 N_body = mul(worldToBody, N_ws);
+                float2 uv = BodyDirToUV(N_body);
 
+                // Albedo
+                float3 albedo = tex2D(_MoonAlbedo, uv).rgb;
+
+                // Normal map
                 float3 T_ws, B_ws;
-                BuildTBN_FromBodyNormal(N_body, bodyToWorld, T_ws, B_ws);               
+                BuildTBN_FromBodyNormal(N_body, bodyToWorld, T_ws, B_ws);
 
-                // Equirectangular UV
-                float lon = atan2(N_body.y, N_body.x);
-                float lat = asin(clamp(N_body.z, -1.0, 1.0));
-
-                float u = lon * (1.0 / (2.0 * UNITY_PI)) + 0.5;
-                float v = lat * (1.0 / UNITY_PI) + 0.5;
-
-                // Debug mode (still anti-aliased at limb)
-                if (_UseUVDebug > 0.5)
-                {
-                    float seam = 0.0;
-                    if (_ShowSeam > 0.5)
-                    {
-                        float edgeU = min(u, 1.0 - u);
-                        float edgeV = min(v, 1.0 - v);
-                        float seamU = smoothstep(0.0, 0.01, edgeU);
-                        float seamV = smoothstep(0.0, 0.01, edgeV);
-                        seam = 1.0 - min(seamU, seamV);
-                    }
-
-                    fixed4 dbg = fixed4(u, v, seam, 1.0);
-
-                    // Blend debug with bg using coverage
-                    fixed3 outDbg = lerp(_BgColor.rgb, dbg.rgb, coverage);
-                    return fixed4(outDbg, 1.0);
-                }
-
-                fixed4 albedo = tex2D(_MoonAlbedo, float2(u, v));
-                albedo.a = 1.0;
-
-                // --- Lighting (geometric normal only) ---
-                float3 L = normalize(_SunDirWS.xyz);     // light direction in world space
-
-                if (_UseSceneSun > 0.5)
-                {
-                    // _WorldSpaceLightPos0 is valid for the main light in forward rendering.
-                    // For a directional light, w == 0.
-                    float3 sceneL = _WorldSpaceLightPos0.xyz;
-
-                    // Some projects want the opposite convention; make it explicit.
-                    if (_FlipSceneSun > 0.5) sceneL = -sceneL;
-
-                    // Only trust it if it's directional-ish (w ~ 0). Otherwise keep manual.
-                    if (abs(_WorldSpaceLightPos0.w) < 0.5)
-                        L = normalize(sceneL);
-                }
-
-
-                // Tangent-space normal from normal map (UnpackNormal handles Unity normal encoding)
-                float3 n_ts = UnpackNormal(tex2D(_MoonNormal, float2(u, v)));
-
-                // Strength control (scale XY; keep Z positive-ish)
+                float3 n_ts = UnpackNormal(tex2D(_MoonNormal, uv));
                 n_ts.xy *= _NormalStrength;
                 n_ts = normalize(n_ts);
 
-                // Convert to world space using TBN
-                float3 Nn_ws = normalize(n_ts.x * T_ws + n_ts.y * B_ws + n_ts.z * N_ws);
+                float3 N_final = normalize(n_ts.x * T_ws + n_ts.y * B_ws + n_ts.z * N_ws);
 
-                float ndotl = dot(Nn_ws, L);              // -1..1
+                // Lighting in UInert (same frame as everything else here)
+                float3 toSun = SafeNormalize(_SunDirUInert.xyz);
+                float ndotl = dot(N_final, toSun);
 
-                // Project sun direction onto local tangent plane -> UV direction.
-                // We use the tangent basis you already built (T_ws ~ +U, B_ws ~ +V).
-                float2 sunDirUV = float2(dot(L, T_ws), dot(L, B_ws));
-                float sunDirLen = length(sunDirUV);
-                sunDirUV = (sunDirLen > 1e-5) ? (sunDirUV / sunDirLen) : float2(0.0, 0.0);
+                float ndWrap = saturate((ndotl + _Wrap) / (1.0 + _Wrap));
+                float lit = smoothstep(0.0, _TermSoft, ndWrap);
 
+                float dayMask = step(0.0, dot(N_ws, toSun));
+                lit *= dayMask;
 
-                // // -----------------------------
-                // // Height-driven micro-occlusion (near terminator only)
-                // // -----------------------------
-                // float height01 = tex2D(_MoonHeight, float2(u, v)).r;
-                // float heightCentered = (height01 - 0.5) * _HeightScale;
+                float lightFactor = saturate(_Ambient + _SunIntensity * lit);
+                float3 moonRGB = albedo * lightFactor;
 
-                // // Mask: 1 at terminator (ndotl ~ 0), 0 by the time we reach brighter day side.
-                // // Tune OCC_START to control how wide the band is.
-                // const float OCC_START = 0.25; // try 0.15–0.35
-                // float termMask = 0.0;
-                // if (ndotl > 0.0)
-                // {
-                //     termMask = saturate((OCC_START - ndotl) / OCC_START);
-                //     termMask = termMask * termMask; // sharpen falloff
-                // }
-
-                // // Occlusion: valleys (negative heightCentered) darken more near terminator.
-                // // If your height map polarity is opposite, flip the sign inside max().
-                // float valley = max(0.0, -heightCentered);
-                // float heightOcc = exp(-_HeightShadow * valley * termMask);
-                // heightOcc = saturate(heightOcc);
-                
-                // Soft terminator: remap ndotl around 0 with a small width.
-                // This avoids a razor-sharp edge and looks better in orbit.
-                float lit = smoothstep(-_TermSoft, _TermSoft, ndotl); // 0 (night) to 1 (day)
-
-
-                // Base height sample at the current surface point
-                float h0 = _HeightScale*tex2D(_MoonHeight, float2(u, v)).r;
-
-                // Only apply this near the terminator on the day side
-                float termMask = 0.0;
-                if (ndotl > 0.0)
-                {
-                    // 1 at terminator, 0 by ndotl >= _SunShadowTermBand
-                    termMask = saturate((_SunShadowTermBand - ndotl) / max(_SunShadowTermBand, 1e-4));
-                    termMask = termMask * termMask;
-                }
-
-                float sunShadow = 1.0;
-                if (_SunShadowEnable > 0.5 && termMask > 0.0)
-                {
-                    sunShadow = HeightSunShadowUV(
-                        float2(u, v),
-                        h0,
-                        sunDirUV,
-                        ndotl,
-                        _SunShadowSteps,
-                        _SunShadowStepUV,
-                        _SunShadowStrength,
-                        _SunShadowBias
-                    );
-
-                    // Blend the effect in only near terminator
-                    sunShadow = lerp(1.0, sunShadow, termMask);
-                }
-                // Final light factor
-                float lightFactor = _Ambient + (_SunIntensity * lit * sunShadow);
-                lightFactor = saturate(lightFactor); // keep sane                
-
-                // --- IMPORTANT: do the blend in linear space to avoid "dark fringe" in Gamma projects ---
-                fixed3 bgCol = _BgColor.rgb;
-                fixed3 moonCol = albedo.rgb* lightFactor;
-
+                // Composite
                 #if defined(UNITY_COLORSPACE_GAMMA)
-                    bgCol   = GammaToLinearSpace(bgCol);
-                    moonCol = GammaToLinearSpace(moonCol);
+                    bg      = GammaToLinearSpace(bg);
+                    moonRGB = GammaToLinearSpace(moonRGB);
                 #endif
 
-                fixed3 outCol = lerp(bgCol, moonCol, coverage);
+                float3 outCol = lerp(bg, moonRGB, coverage);
 
                 #if defined(UNITY_COLORSPACE_GAMMA)
                     outCol = LinearToGammaSpace(outCol);
@@ -448,7 +253,6 @@ Shader "Skybox/MoonOrbit_M3_Albedo"
 
                 return fixed4(outCol, 1.0);
             }
-
             ENDCG
         }
     }

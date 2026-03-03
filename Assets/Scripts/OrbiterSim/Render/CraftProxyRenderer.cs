@@ -3,13 +3,8 @@ using UnityEngine;
 
 /// <summary>
 /// CraftProxyRenderer
-/// - Applies CraftAttitudeState.qBE to a Unity Transform for visualization.
-/// - This is a *render-only* bridge: solver attitude is canonical; mapping to Unity happens here.
-/// 
-/// Usage:
-/// - Assign targetTransform to the mesh root (or a proxy object).
-/// - If your render frame differs from solver frame, set solverToUnityRotation.
-///   Otherwise leave identity.
+/// Converts solver attitude (body->H, H is +Z up ecliptic) into Unity world rotation.
+/// Includes an optional *local* model-axis fix (applied on the RIGHT).
 /// </summary>
 public class CraftProxyRenderer : UdonSharpBehaviour
 {
@@ -19,32 +14,43 @@ public class CraftProxyRenderer : UdonSharpBehaviour
     [Header("Render target")]
     public Transform targetTransform;
 
-    [Header("Frame mapping")]
-    [Tooltip("Optional fixed rotation to map solver inertial axes into Unity world axes.")]
-    public Quaternion solverToUnityRotation = Quaternion.identity;
+    [Header("Solver frame to Unity frame")]
+    [Tooltip("H(+Z up) -> Unity(+Y up). Keep this unless you change the sim frame.")]
+    public bool applyHelioBasis = true;
 
-    [Tooltip("If true, treat qBE as body->inertial and apply directly as world rotation (after mapping).")]
-    public bool applyAsWorldRotation = true;
+    [Header("If your stored qBE is actually inertial->body, enable this.")]
+    public bool invertQBE = false;
+
+    [Header("Model axis fix (LOCAL)")]
+    [Tooltip("Apply a constant model->body (or model authoring) correction in LOCAL space. This is the 'x=270' you tried.")]
+    public Vector3 modelFixEulerDeg = Vector3.zero;
+
+    private Quaternion qBasis;
+    private Quaternion qBasisInv;
+
+    void Start()
+    {
+        // H(+Z up) -> Unity(+Y up): RotX(-90°)
+        qBasis = Quaternion.AngleAxis(-90f, Vector3.right);
+        qBasisInv = Quaternion.Inverse(qBasis);
+    }
 
     void LateUpdate()
     {
         if (att == null || targetTransform == null) return;
 
-        // qBE = Body -> Inertial
-        Quaternion qBE = att.qBE;
+        Quaternion qBE = att.qBE;               // expected: body -> H
+        if (invertQBE) qBE = Quaternion.Inverse(qBE);
 
-        // Map solver inertial into Unity axes if needed:
-        // q_unity = Qmap * q_solver
-        Quaternion qUnity = solverToUnityRotation * qBE;
+        // Convert to Unity basis if requested: body -> UnityInert
+        Quaternion qBodyToUnity = qBE;
+        if (applyHelioBasis)
+            qBodyToUnity = qBasis * qBE * qBasisInv;
 
-        if (applyAsWorldRotation)
-        {
-            targetTransform.rotation = qUnity;
-        }
-        else
-        {
-            // Optional: local rotation (if proxy is parented to something already positioned)
-            targetTransform.localRotation = qUnity;
-        }
+        // IMPORTANT: model fix must be LOCAL (right-multiply)
+        Quaternion qModelFix = Quaternion.Euler(modelFixEulerDeg);
+        Quaternion qFinal = qBodyToUnity * qModelFix;
+
+        targetTransform.rotation = qFinal;
     }
 }
