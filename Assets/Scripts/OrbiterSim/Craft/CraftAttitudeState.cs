@@ -1,10 +1,10 @@
-﻿
+
 using UdonSharp;
 using UnityEngine;
 
 public class CraftAttitudeState : UdonSharpBehaviour
 {
-    [Header("Attitude (body -> ECI)")]
+    [Header("Attitude (body -> Helio/Eccliptic)")]
     public Quaternion qBE = Quaternion.identity;
 
     [Header("Angular velocity in body frame (rad/s)")]

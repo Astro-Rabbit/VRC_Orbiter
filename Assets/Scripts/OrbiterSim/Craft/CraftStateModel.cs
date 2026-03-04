@@ -1,9 +1,9 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 
 public class CraftStateModel : UdonSharpBehaviour
 {
-    [Header("Canonical craft state (ECI)")]
+    [Header("Canonical craft state (Heliocentric)")]
     public double rx, ry, rz;   // meters
     public double vx, vy, vz;   // m/s
 
