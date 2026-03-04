@@ -19,6 +19,7 @@ public enum MFDPageID : byte
 {
 Menu,
 Orbit,
+Align,
 }
 
 public class MFD : UdonSharpBehaviour
