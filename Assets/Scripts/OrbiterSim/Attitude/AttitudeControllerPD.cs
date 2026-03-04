@@ -42,6 +42,15 @@ public class AttitudeControllerPD : UdonSharpBehaviour
     [Tooltip("Extra damping on body rates (Nm/(rad/s)). Usually small or zero if kpRate is enough.")]
     public float kdRate = 0f;
 
+    [Header("D-term conditioning (NEW)")]
+    [Tooltip("Low-pass time constant for D term rate (seconds). 0 disables filtering.")]
+    public float dRateFilterTau = 0.08f;
+
+    [Tooltip("Clamp magnitude of D contribution (Nm). 0 disables.")]
+    public float maxDTermNm = 0f;
+
+    private Vector3 _wFilt_B = Vector3.zero;
+
     [Header("Max angular rate limiter (NEW)")]
     [Tooltip("Enable per-axis angular rate limiting (rad/s).")]
     public bool enableMaxAngularRate = false;
@@ -98,6 +107,7 @@ public class AttitudeControllerPD : UdonSharpBehaviour
 
         // Current body rates (rad/s) in BODY frame (state uses doubles)
         Vector3 w_B = new Vector3((float)attState.wx, (float)attState.wy, (float)attState.wz);
+        Vector3 wD_B = FilterRateForD(w_B);
 
         byte mode = cmd.attitudeCmdMode;
 
@@ -136,7 +146,7 @@ public class AttitudeControllerPD : UdonSharpBehaviour
             if (d2 < 1e-12f)
             {
                 // No target => damping only
-                tauDesired_B = -kdAtt * w_B;
+                tauDesired_B = -kdAtt * wD_B;
             }
             else
             {
@@ -153,15 +163,15 @@ public class AttitudeControllerPD : UdonSharpBehaviour
                 {
                     // Rate-limited outer loop: wTgt = clamp(kRateFromAtt * err, maxRate)
                     Vector3 wTgt_B = ClampRateTarget(attErr_B * kRateFromAtt);
-                    rateErr_B = wTgt_B - w_B;
+                    rateErr_B = wTgt_B - wD_B;
 
                     // Inner loop: rate PD (use measured rate for damping)
-                    tauDesired_B = kpRate * rateErr_B - kdAtt * w_B;
+                    tauDesired_B = kpRate * rateErr_B - kdAtt * wD_B;
                 }
                 else
                 {
                     // Direct attitude PD torque
-                    tauDesired_B = kpAtt * attErr_B - kdAtt * w_B;
+                    tauDesired_B = kpAtt * attErr_B - kdAtt * wD_B;
                 }
             }
         }
@@ -189,14 +199,14 @@ public class AttitudeControllerPD : UdonSharpBehaviour
             {
                 // Rate-limited outer loop
                 Vector3 wTgt_B = ClampRateTarget(attErr_B * kRateFromAtt);
-                rateErr_B = wTgt_B - w_B;
+                rateErr_B = wTgt_B - wD_B;
 
-                tauDesired_B = kpRate * rateErr_B - kdAtt * w_B;
+                tauDesired_B = kpRate * rateErr_B - kdAtt * wD_B;
             }
             else
             {
                 // Direct attitude PD torque
-                tauDesired_B = kpAtt * attErr_B - kdAtt * w_B;
+                tauDesired_B = kpAtt * attErr_B - kdAtt * wD_B;
             }
         }
 
@@ -246,6 +256,28 @@ public class AttitudeControllerPD : UdonSharpBehaviour
         }
 
         return tau;
+    }
+
+    private Vector3 FilterRateForD(Vector3 w_B)
+    {
+        float tau = dRateFilterTau;
+        if (tau <= 0f) return w_B;
+
+        float dt = Time.deltaTime;
+        if (dt <= 0f) return _wFilt_B;
+
+        // alpha = dt/(tau+dt) is cheap and stable
+        float a = dt / (tau + dt);
+        _wFilt_B = Vector3.Lerp(_wFilt_B, w_B, a);
+        return _wFilt_B;
+    }
+
+    private Vector3 ClampDTerm(Vector3 d)
+    {
+        if (maxDTermNm <= 0f) return d;
+        float m = d.magnitude;
+        if (m <= maxDTermNm || m < 1e-9f) return d;
+        return d * (maxDTermNm / m);
     }
 
     private Vector3 ClampRateTarget(Vector3 wTgt_B)

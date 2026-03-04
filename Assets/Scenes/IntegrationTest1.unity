@@ -50853,6 +50853,8 @@ MonoBehaviour:
   kdAtt: 500000
   kpRate: 100000
   kdRate: 16000
+  dRateFilterTau: 0.2
+  maxDTermNm: 0
   enableMaxAngularRate: 0
   maxRateX: 0
   maxRateY: 0
@@ -50860,7 +50862,7 @@ MonoBehaviour:
   kRateFromAtt: 2
   maxTorqueSlewNmPerSec: 0
   maxTorqueNm: 20000
-  torqueDeadbandNm: 50
+  torqueDeadbandNm: 0
   tauCmd_B: {x: 0, y: 0, z: 0}
   attErr_B: {x: 0, y: 0, z: 0}
   rateErr_B: {x: 0, y: 0, z: 0}
@@ -71419,8 +71421,7 @@ PrefabInstance:
         type: 3}
       propertyPath: serializedProgramAsset
       value: 
-      objectReference: {fileID: 11400000, guid: 0b1a2308b6541e543b9896b7d8096a35,
-        type: 2}
+      objectReference: {fileID: 0}
     - target: {fileID: 4240271448938480650, guid: eb3fefabf35f86b4fa231e42ab348e2a,
         type: 3}
       propertyPath: serializedProgramAsset
@@ -93601,6 +93602,12 @@ PrefabInstance:
       propertyPath: m_Material
       value: 
       objectReference: {fileID: 2100000, guid: 35630e38b4e5ffb40b44ec5348b4333f, type: 2}
+    - target: {fileID: 6973643284917288346, guid: 4063daca1b76a3d4c8452b7b33db3bb8,
+        type: 3}
+      propertyPath: serializedProgramAsset
+      value: 
+      objectReference: {fileID: 11400000, guid: fc486ec2f42c58a4e86bb8179b0fe267,
+        type: 2}
     - target: {fileID: 8125985251983421762, guid: 4063daca1b76a3d4c8452b7b33db3bb8,
         type: 3}
       propertyPath: m_Material

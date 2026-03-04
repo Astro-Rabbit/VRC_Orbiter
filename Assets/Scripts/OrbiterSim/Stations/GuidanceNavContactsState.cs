@@ -1,23 +1,6 @@
 ﻿using UdonSharp;
 using UnityEngine;
 
-/// <summary>
-/// GuidanceNavContactsState
-/// Snapshot of station contacts relative to the ACTIVE craft for the current frame.
-///
-/// Always computed for ALL stations:
-/// - valid[i]
-/// - dr_E (station - craft) in solver inertial SSB
-/// - range2, range
-///
-/// Full computed for up to 2 stations ("promoted slots"):
-/// - fullStationIndex[s]
-/// - dv_E
-/// - dr_B (relative position expressed in craft BODY frame)
-/// - qTargetInB (target body orientation expressed in craft BODY frame)
-///
-/// This is intentionally renderer/GC/orrery agnostic.
-/// </summary>
 public class GuidanceNavContactsState : UdonSharpBehaviour
 {
     [Header("All contacts (arrays sized to stationCount)")]
@@ -54,6 +37,51 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
     [Header("Selection (set by UI/GC/etc.)")]
     [Tooltip("Selected station index in the stations[] list. -1 means none.")]
     public int selectedStationIndex = -1;
+
+    [Tooltip("Selected docking port on the selected station. -1 means none.")]
+    public int selectedStationDockPortIndex = 0;
+
+    [Tooltip("Selected craft docking port. -1 means none.")]
+    public int selectedCraftDockPortIndex = 0;
+
+    // --------------------------------------------------------------------
+    // Docking targeting outputs (computed; targeting only, no latch logic)
+    // Frames:
+    // - All *_B values are in craft BODY frame (Unity world in your render model), relative to craft CG origin.
+    // - qTargetPortInB: target station port frame expressed in craft BODY frame.
+    // - qCraftPort_B:   craft port frame expressed in craft BODY frame.
+    // --------------------------------------------------------------------
+    [Header("Docking target (computed)")]
+    [Tooltip("If true, compute docking targeting for slot1 too (usually unnecessary).")]
+    public bool computeDockForSlot1 = false;
+
+    // Slot 0 docking (selected station)
+    public bool dockValid0 = false;
+    public int dockStationPortIndex0 = -1;
+    public int dockCraftPortIndex0 = -1;
+
+    public double targetPort_px_B0, targetPort_py_B0, targetPort_pz_B0;
+    public Quaternion qTargetPortInB0 = Quaternion.identity;
+
+    public double craftPort_px_B0, craftPort_py_B0, craftPort_pz_B0;
+    public Quaternion qCraftPort_B0 = Quaternion.identity;
+
+    public double dockErr_px_B0, dockErr_py_B0, dockErr_pz_B0;
+    public Quaternion qDockErr0 = Quaternion.identity; // inv(craftPort) * targetPort
+
+    // Slot 1 docking (optional)
+    public bool dockValid1 = false;
+    public int dockStationPortIndex1 = -1;
+    public int dockCraftPortIndex1 = -1;
+
+    public double targetPort_px_B1, targetPort_py_B1, targetPort_pz_B1;
+    public Quaternion qTargetPortInB1 = Quaternion.identity;
+
+    public double craftPort_px_B1, craftPort_py_B1, craftPort_pz_B1;
+    public Quaternion qCraftPort_B1 = Quaternion.identity;
+
+    public double dockErr_px_B1, dockErr_py_B1, dockErr_pz_B1;
+    public Quaternion qDockErr1 = Quaternion.identity;
 
     public void EnsureSize(int n)
     {
@@ -92,5 +120,30 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
         dvx_E1 = dvy_E1 = dvz_E1 = 0.0;
         drx_B1 = dry_B1 = drz_B1 = 0.0;
         qTargetInB1 = Quaternion.identity;
+
+        ClearDocking();
+    }
+
+    public void ClearDocking()
+    {
+        dockValid0 = false;
+        dockStationPortIndex0 = -1;
+        dockCraftPortIndex0 = -1;
+        targetPort_px_B0 = targetPort_py_B0 = targetPort_pz_B0 = 0.0;
+        craftPort_px_B0  = craftPort_py_B0  = craftPort_pz_B0  = 0.0;
+        qTargetPortInB0 = Quaternion.identity;
+        qCraftPort_B0 = Quaternion.identity;
+        dockErr_px_B0 = dockErr_py_B0 = dockErr_pz_B0 = 0.0;
+        qDockErr0 = Quaternion.identity;
+
+        dockValid1 = false;
+        dockStationPortIndex1 = -1;
+        dockCraftPortIndex1 = -1;
+        targetPort_px_B1 = targetPort_py_B1 = targetPort_pz_B1 = 0.0;
+        craftPort_px_B1  = craftPort_py_B1  = craftPort_pz_B1  = 0.0;
+        qTargetPortInB1 = Quaternion.identity;
+        qCraftPort_B1 = Quaternion.identity;
+        dockErr_px_B1 = dockErr_py_B1 = dockErr_pz_B1 = 0.0;
+        qDockErr1 = Quaternion.identity;
     }
 }
