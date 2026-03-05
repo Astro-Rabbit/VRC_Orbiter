@@ -95,6 +95,10 @@ public class ActuationController : UdonSharpBehaviour
     [Tooltip("Treat values > 0 and < highThreshold as LOW.")]
     public float rcsLowThreshold = 1e-4f;
 
+    [Header("Translation LOW/HIGH (no PWM)")]
+    [Tooltip("If requested force is within (lowModeMarginFrac) of LOW capability, stay in LOW.")]
+    [Range(0f, 0.5f)] public float lowModeMarginFrac = 0.05f;
+
     // Internal scratch
     private Vector3 _forceCmd_B;
     private Vector3 _tauReq_B;
@@ -108,7 +112,9 @@ public class ActuationController : UdonSharpBehaviour
     private float _autoPitchDegPrev = 0f;
 
     private const float G0 = 9.80665f;
-
+    // Translation PWM accumulator (sigma-delta)
+    // Keeps average translation force proportional to request.
+    private float _transPwmAcc = 0f;
     public void Evaluate()
     {
         F_E = Vector3.zero;
@@ -136,7 +142,7 @@ public class ActuationController : UdonSharpBehaviour
         }
 
         // ---- translation force request (BODY) ----
-        _forceCmd_B = cmd.translateCmd_B * maxTranslateForceN;
+        _forceCmd_B = cmd.translateCmd_B;
 
         // ---- is any attitude torque actually desired? ----
         bool attitudeTorqueWanted = _tauReq_B.sqrMagnitude > (torqueDeadbandNm * torqueDeadbandNm);
@@ -533,7 +539,43 @@ public class ActuationController : UdonSharpBehaviour
         Quaternion qBE = attState.qBE;
 
         int n = (catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
+        if (n <= 0) return;
 
+        bool hasLow = catalog.rcsHasLowMode && (catalog.rcsLowScale > 1e-6f);
+
+        // 1) Estimate LOW capability along dirCmd using the LOW selection set
+        float capLow = 0f; // effective along command direction before lowScale
+        if (hasLow)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (catalog.rcsCached == null || i >= catalog.rcsCached.Length || !catalog.rcsCached[i]) continue;
+                if (!CanFireRcs(i)) continue;
+
+                float maxF = catalog.GetRcsMaxForceN(i);
+                if (maxF <= 0f) continue;
+
+                Vector3 dir_B = catalog.rcsDir_B[i];
+                float align = Vector3.Dot(dir_B, dirCmd_B);
+                if (align < alignOnLow) continue;   // LOW set
+                capLow += maxF * align;
+            }
+        }
+
+        float capLowEff = hasLow ? (capLow * catalog.rcsLowScale) : 0f;
+
+        // 2) Choose LOW if LOW can cover requested magnitude (with a small margin)
+        bool useLowMode = false;
+        if (hasLow && capLowEff > 1e-6f)
+        {
+            float margin = 1f - Mathf.Clamp01(lowModeMarginFrac); // e.g. 0.95
+            useLowMode = mag <= (capLowEff * margin);
+        }
+
+        float scale = useLowMode ? catalog.rcsLowScale : 1f;
+        float alignThresh = useLowMode ? (hasLow ? alignOnLow : alignOnHigh) : alignOnHigh;
+
+        // 3) Fire jets continuously using chosen mode
         for (int i = 0; i < n; i++)
         {
             if (catalog.rcsCached == null || i >= catalog.rcsCached.Length || !catalog.rcsCached[i]) continue;
@@ -543,14 +585,9 @@ public class ActuationController : UdonSharpBehaviour
             if (maxF <= 0f) continue;
 
             Vector3 dir_B = catalog.rcsDir_B[i];
-
             float align = Vector3.Dot(dir_B, dirCmd_B);
             if (align <= 0f) continue;
-
-            float fireSel = SelectBangBangLevel(align);
-            if (fireSel <= 0f) continue;
-
-            float scale = (fireSel >= 1f) ? 1f : catalog.rcsLowScale;
+            if (align < alignThresh) continue;
 
             Vector3 f_B = dir_B * (maxF * scale);
 
@@ -561,7 +598,7 @@ public class ActuationController : UdonSharpBehaviour
             Tau_B += Vector3.Cross(r_B, f_B);
 
             if (rcsFire01 != null && i < rcsFire01.Length)
-                rcsFire01[i] = (fireSel >= 1f) ? 1f : catalog.rcsLowScale;
+                rcsFire01[i] = scale; // LOW=lowScale, HIGH=1
         }
     }
 

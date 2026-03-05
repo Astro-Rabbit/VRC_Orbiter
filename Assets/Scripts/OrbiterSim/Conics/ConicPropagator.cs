@@ -30,9 +30,9 @@ public class ConicPropagator : UdonSharpBehaviour
         {
             double n = Math.Sqrt(mu / (a * a * a));
             double M = conic.M0Rad + n * (t - conic.epochT0);
-            M = WrapPi(M);
-
-            double E = (e < 1e-12) ? M : SolveKeplerE(M, e, keplerIters);
+            double Mnorm = WrapTwoPi(M);
+            double E = (e < 1e-12) ? Mnorm : SolveKeplerE(Mnorm, e, keplerIters);
+            E = WrapTwoPi(E);
 
             double cosE = Math.Cos(E);
             double sinE = Math.Sin(E);
@@ -153,15 +153,42 @@ public class ConicPropagator : UdonSharpBehaviour
         return a;
     }
 
-    private static double SolveKeplerE(double M, double e, int iters)
+    private static double WrapTwoPi(double a)
     {
+        double twopi = 2.0 * Math.PI;
+        a = a % twopi;
+        if (a < 0.0) a += twopi;
+        return a;
+    }
+
+    private static double SolveKeplerE(double M, double e, int maxIters)
+    {
+        // M assumed in [0, 2π)
+        // Initial guess (works well up to high-e)
         double E = (e < 0.8) ? M : Math.PI;
-        for (int k = 0; k < iters; k++)
+
+        // If M is near 0, better starter for high e
+        if (e >= 0.8 && (M < 0.5 || M > 2.0 * Math.PI - 0.5))
+            E = M;
+
+        const double tol = 1e-12;
+
+        for (int k = 0; k < Math.Max(8, maxIters); k++)
         {
-            double f = E - e * Math.Sin(E) - M;
-            double fp = 1.0 - e * Math.Cos(E);
-            E -= f / fp;
+            double s = Math.Sin(E);
+            double c = Math.Cos(E);
+            double f  = (E - e * s - M);
+            double fp = (1.0 - e * c);
+
+            // fp should never be ~0 for elliptical e<1, but guard anyway
+            if (Math.Abs(fp) < 1e-14) break;
+
+            double dE = f / fp;
+            E -= dE;
+
+            if (Math.Abs(dE) < tol) break;
         }
+
         return E;
     }
 
