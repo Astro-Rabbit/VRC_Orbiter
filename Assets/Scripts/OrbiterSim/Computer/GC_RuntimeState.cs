@@ -32,6 +32,12 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public const byte MODE_RATE_TARGET    = 4;
     public const byte MODE_DIRECT_TORQUE  = 5;
 
+    public const byte MODE_DOCK_POINT_SHIPZ_TO_PORT = 6;  // continuous
+    public const byte MODE_DOCK_ALIGN_PORTS        = 7;   // continuous
+
+    public const byte MODE_RELVEL_PROGRADE  = 8;  // continuous: point at +dv (station - craft)
+    public const byte MODE_RELVEL_RETROGRADE= 9;  // continuous: point at -dv
+
     // --------------------
     // Executor slot (future: node execution)
     // --------------------
@@ -71,8 +77,21 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public const byte PROG_HOLD_RAD_IN   = 8;
     public const byte PROG_HOLD_NORMAL   = 9;
     public const byte PROG_HOLD_ANTINORM = 10;
-
+    public const byte PROG_RELVEL_PRO   = 11;
+    public const byte PROG_RELVEL_RETRO= 12;
     public const byte PROG_EXEC_NODE     = 20; // executor is actively controlling
+
+
+    // --------------------
+    // Translation assist modes (V1 docking helpers)
+    // --------------------
+    public const byte XLAT_MANUAL          = 0;
+    public const byte XLAT_KILL_RELVEL     = 1;   // root dv damping vs selected station
+    public const byte XLAT_HOLD_REL_POS    = 2;   // optional: root dr position hold (later)
+    public const byte XLAT_DOCK_HOLD_PORT  = 3;   // optional: fine docking using port error (later)
+
+    [Tooltip("Active translation control mode (independent of attitude mode).")]
+    public byte activeTranslateModeId = XLAT_MANUAL;
 
     [Header("UI program indicator")]
     public byte activeProgramId = PROG_NONE;
@@ -109,6 +128,17 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public float manualTakeoverDeadzone = 0.05f;
     public float manualReleaseTimeoutSec = 0.5f;
 
+
+    [Header("Manual translation takeover policy")]
+    public bool autoSwitchTranslateToManualOnInput = true;
+    public bool latchTranslateTakeover = true;
+    public float translateReleaseTimeoutSec = 0.5f;
+
+    [Header("Translation runtime bookkeeping")]
+    public byte lastNonManualTranslateModeId = XLAT_MANUAL;
+    public double lastManualTranslateInputTime = 0;
+
+
     [Header("Runtime bookkeeping")]
     public byte lastNonManualModeId = 0;   // set when we leave a mode due to manual takeover
     public double lastManualInputTime = 0; // nav.t when last manual activity seen
@@ -144,5 +174,11 @@ public class GC_RuntimeState : UdonSharpBehaviour
         lastAbortReason = 0;
         lastFaultCode = 0;
         lastFaultMessage = "";
+
+        activeTranslateModeId = XLAT_MANUAL;
+        lastNonManualTranslateModeId = XLAT_MANUAL;
+        lastManualTranslateInputTime = nowT;
+
+
     }
 }

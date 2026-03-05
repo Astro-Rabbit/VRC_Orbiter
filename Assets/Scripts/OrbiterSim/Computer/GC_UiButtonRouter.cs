@@ -152,6 +152,15 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
     }
 
 
+    public void point_port()
+    {
+        gc.API_Dock_PointShipZAtTargetPort();
+    }
+
+    public void kill_motion()
+    {
+        gc.API_Relative_KillVel_SelectedStation();
+    }
 
     public void API_TestNode()
     {

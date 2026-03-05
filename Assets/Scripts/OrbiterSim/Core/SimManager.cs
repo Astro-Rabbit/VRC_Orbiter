@@ -6,6 +6,7 @@ public class SimManager : UdonSharpBehaviour
 {
     public const byte MODE_RAILS = 0;
     public const byte MODE_INTEGRATED = 1;
+    public const byte MODE_DOCKED = 2;
 
     [Header("Core")]
     public SimClock clock;
@@ -20,6 +21,10 @@ public class SimManager : UdonSharpBehaviour
     public StationStateModel[] stations;            // list of station state models (same ordering used by UI/targeting)
     public CraftAttitudeState craftAtt;             // craft attitude qBE
     public GuidanceNavContactsComputer contactsComp; // computes snapshot
+
+    [Header("Docking (craft <-> station attachment authority)")]
+    public DockingComputer dockingComp;
+    public DockingRuntimeState dock; // optional if dockingComp already has it
 
     [Header("Active craft")]
     public CraftStateModel craft;
