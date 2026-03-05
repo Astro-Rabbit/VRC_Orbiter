@@ -6,13 +6,18 @@ using UnityEngine;
 /// Pure data container for a rails-only space station (no rendering, no physics).
 ///
 /// Frames:
-/// - "E" / solver inertial: your global SSB ecliptic inertial solver frame.
+/// - "E" / solver inertial: global SSB ecliptic inertial solver frame.
 /// - Primary-relative values are still expressed in solver inertial axes, just with primary at origin.
 ///
 /// Outputs:
 /// - Primary-relative: rr*, rv* (meters, m/s)
 /// - SSB inertial:     r*,  v*  (meters, m/s)
 /// - Attitude:         q_B2E (body -> solver inertial)
+///
+/// Docking ports:
+/// - Cached in STATION BODY frame:
+///   portPos_B[i] = position relative to station origin, expressed in station body axes (meters)
+///   portRot_B[i] = orientation of the port frame expressed in station body axes (Quaternion)
 /// </summary>
 public class StationStateModel : UdonSharpBehaviour
 {
@@ -58,4 +63,32 @@ public class StationStateModel : UdonSharpBehaviour
 
     [Tooltip("Mode B: RTN mapping preset")]
     public byte rtnMap = RTNMAP_Z_NADIR_X_PROGRADE_Y_NORMAL;
+
+    // --------------------------------------------------------------------
+    // Docking ports cache (station body frame)
+    // --------------------------------------------------------------------
+    [Header("Docking ports (cached, station BODY frame)")]
+    public int dockingPortCount = 0;
+
+    // Positions relative to station origin, expressed in station body axes (meters)
+    public double[] dock_px_B;
+    public double[] dock_py_B;
+    public double[] dock_pz_B;
+
+    // Orientation of each docking port frame expressed in station body axes
+    public Quaternion[] dock_q_B;
+
+    /// <summary>
+    /// Ensures arrays are sized to n. Does not populate values.
+    /// </summary>
+    public void EnsureDockPortSize(int n)
+    {
+        if (n < 0) n = 0;
+        dockingPortCount = n;
+
+        if (dock_px_B == null || dock_px_B.Length != n) dock_px_B = new double[n];
+        if (dock_py_B == null || dock_py_B.Length != n) dock_py_B = new double[n];
+        if (dock_pz_B == null || dock_pz_B.Length != n) dock_pz_B = new double[n];
+        if (dock_q_B  == null || dock_q_B.Length  != n) dock_q_B  = new Quaternion[n];
+    }
 }
