@@ -7,95 +7,146 @@ using VRC.Udon;
 public class TabletPen : UdonSharpBehaviour
 {
     public float rayDistance = 0.05f;
-    public LayerMask interactionLayers; // Ensure this includes the MFD Button layer!
+    public float desktopRayDistance = 1.5f;
+    public LayerMask interactionLayers;
 
-    private bool _wasTouching;
-    private TabletButton _activeTabletBtn;
-    private MFDButton _activeMFDBtn;
-
-    private TabletButton _lastHoveredTabletBtn;
-    private MFDButton _lastHoveredMFDBtn;
-
-    public int penID;
-    public bool isRightHand;
-    private string _triggerAxis;
-    public float desktopRayDistance = 1.0f;
-
+    [Header("References")]
     public GameObject PenMesh;
     public AudioSource ButtonAudioSource;
     public AudioClip[] ButtonUpClip;
     public AudioClip[] ButtonDownClip;
+    public AudioClip[] SwitchUpClip;
+    public AudioClip[] SwitchDownClip;
+    public AudioClip[] KnobClip;
+
+
+    public int penID;
+    public bool isRightHand;
+
+    // Focus Lock (For Knobs/MFD)
+    private bool _isLocked;
+    private MFDButton _focusedMFDBtn;
+    private MFDKnob _focusedKnob;
+    private MFDSwitch _focusedSwitch;
+
+    // Previous System (For Tablet)
+    private TabletButton _activeTabletBtn;
+    private TabletButton _lastHoveredTabletBtn;
+    private bool _wasTouchingTablet;
+
+    private string _triggerAxis;
+    private VRCPlayerApi _localPlayer;
+    private int _zoneCount = 0;
 
     void Start()
     {
+        _localPlayer = Networking.LocalPlayer;
         _triggerAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryIndexTrigger" : "Oculus_CrossPlatform_PrimaryIndexTrigger";
-        ButtonAudioSource = gameObject.GetComponent<AudioSource>();
+        if (ButtonAudioSource == null) ButtonAudioSource = GetComponent<AudioSource>();
     }
 
     void Update()
     {
-        if (!Networking.LocalPlayer.IsUserInVR() && !isRightHand)
+        if (_localPlayer == null) return;
+        if (!_localPlayer.IsUserInVR() && !isRightHand) return;
+
+        bool isVR = _localPlayer.IsUserInVR();
+        bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
+
+        // 1. IF LOCKED (KNOB/MFD)
+        if (_isLocked)
         {
+            if (!triggerHeld) ReleaseFocus();
+            else StayFocus(isVR);
             return;
         }
-        bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
+
+        // 2. RAYCAST SEARCH
         RaycastHit hit;
-        bool currentlyHitting = false;
+        Vector3 rayOrigin; Vector3 rayDirection; float dist;
 
-        if (triggerHeld)
+        if (!isVR)
         {
-            Vector3 rayOrigin;
-            Vector3 rayDirection;
-            float dist;
+            VRCPlayerApi.TrackingData headData = _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+            rayOrigin = headData.position; rayDirection = headData.rotation * Vector3.forward; dist = desktopRayDistance;
+        }
+        else
+        {
+            rayOrigin = transform.position; rayDirection = -transform.up; dist = rayDistance;
+        }
 
-            if (!Networking.LocalPlayer.IsUserInVR())
+        bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
+
+        if (currentlyHitting)
+        {
+            MFDKnob knob = hit.collider.GetComponent<MFDKnob>();
+
+            MFDButton mfdBtn = hit.collider.GetComponent<MFDButton>();
+            TabletScreen screen = hit.collider.GetComponent<TabletScreen>();
+            MFDSwitch mfdSwitch = hit.collider.GetComponent<MFDSwitch>();
+
+            // A. Handle Locked Objects (Knobs/MFD)
+            if (triggerHeld && (knob != null || mfdBtn != null || mfdSwitch != null))
             {
-                // Get Camera position and rotation from TrackingData
-                VRCPlayerApi.TrackingData headData = Networking.LocalPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
-                rayOrigin = headData.position;
-                rayDirection = headData.rotation * Vector3.forward;
-                dist = desktopRayDistance;
+
+                // Inside TabletPen.cs -> AttemptCapture
+                if (mfdSwitch != null)
+                {
+                    _focusedSwitch = mfdSwitch;
+                    _focusedSwitch.OnDown(penID, this, isVR ? transform.rotation : _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head).rotation);
+
+                }
+                else if (knob != null)
+                {
+                    _focusedKnob = knob;
+
+                    // Decide which rotation to snapshot
+                    Quaternion startRot;
+                    if (_localPlayer.IsUserInVR())
+                    {
+                        startRot = transform.rotation; // Snapshot the Pen
+                    }
+                    else
+                    {
+                        // Snapshot the Camera
+                        startRot = _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head).rotation;
+                    }
+
+                    // Handshake: Pass ID, HitPoint, and the correct Source Rotation
+                    _focusedKnob.OnDown(penID, hit.point, startRot, this);
+
+                    _isLocked = true;
+                    return;
+                }
+                else
+                {
+                    _focusedMFDBtn = mfdBtn; _focusedMFDBtn.OnDown(penID, this);
+                    Debug.Log("[TabletPen] MFD hit");
+                }
+                _isLocked = true;
+                ClearTabletInteraction(); // Ensure tablet state is reset if we switch to physical
+                return;
+            }
+
+            // B. Handle Tablet (Previous Hover/Slide System)
+            if (screen != null)
+            {
+                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), triggerHeld);
             }
             else
             {
-                // VR Pen logic
-                rayOrigin = transform.position;
-                rayDirection = -transform.up;
-                dist = rayDistance;
-            }
-
-            //currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers);
-            currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
-
-
-            if (currentlyHitting)
-            {
-                // 1. Check for Tablet (UI Logic)
-                TabletScreen screen = hit.collider.GetComponent<TabletScreen>();
-                if (screen != null)
-                {
-                    HandleTabletInteraction(screen.GetButtonAtPoint(hit.point));
-                }
-                // 2. Check for MFD (Physical Logic)
-                else
-                {
-                    MFDButton mfdBtn = hit.collider.GetComponent<MFDButton>();
-                    HandleMFDInteraction(mfdBtn);
-                }
+                ClearTabletInteraction();
             }
         }
-
-        // Release logic
-        if (!currentlyHitting && _wasTouching)
+        else
         {
-            ClearAllInteractions();
+            ClearTabletInteraction();
         }
-
-        _wasTouching = currentlyHitting;
     }
 
-    private void HandleTabletInteraction(TabletButton hovered)
+    private void HandleTabletInteraction(TabletButton hovered, bool triggerHeld)
     {
+        // Hover Logic
         if (hovered != _lastHoveredTabletBtn)
         {
             if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
@@ -103,118 +154,163 @@ public class TabletPen : UdonSharpBehaviour
             _lastHoveredTabletBtn = hovered;
         }
 
-        if (!_wasTouching)
+        // Press Logic
+        if (triggerHeld)
         {
-            _activeTabletBtn = hovered;
-            if (_activeTabletBtn != null) _activeTabletBtn.OnDown(penID);
-        }
-        else if (_activeTabletBtn != null)
-        {
-            _activeTabletBtn.OnStay(penID);
-        }
-    }
-
-    private void HandleMFDInteraction(MFDButton hovered)
-    {
-        if (hovered != _lastHoveredMFDBtn)
-        {
-            //if (_lastHoveredMFDBtn != null) _lastHoveredMFDBtn.OnHoverExit(penID);
-            //if (hovered != null) hovered.OnHoverEnter(penID);
-            _lastHoveredMFDBtn = hovered;
-        }
-
-        if (!_wasTouching)
-        {
-            _activeMFDBtn = hovered;
-            if (_activeMFDBtn != null)
+            if (!_wasTouchingTablet)
             {
-                _activeMFDBtn.OnDown(penID,this);
-                //ButtonAudioSource.pitch = Random.Range(.95f, 1.05f);
-                //ButtonAudioSource.volume = Random.Range(.9f, 1f);
-                //ButtonAudioSource.PlayOneShot(ButtonDownClip[Random.Range(0, ButtonDownClip.Length)]);
+                _activeTabletBtn = hovered;
+                if (_activeTabletBtn != null) _activeTabletBtn.OnDown(penID);
             }
+            else if (_activeTabletBtn != null)
+            {
+                _activeTabletBtn.OnStay(penID);
+            }
+            _wasTouchingTablet = true;
         }
-        else if (_activeMFDBtn != null)
+        else if (_wasTouchingTablet)
         {
-            _activeMFDBtn.OnStay(penID);
+            ClearTabletInteraction();
         }
     }
 
-    private void ClearAllInteractions()
+    private void ClearTabletInteraction()
     {
         if (_activeTabletBtn != null)
         {
-            if (_activeTabletBtn == _lastHoveredTabletBtn)
-            {
-                _activeTabletBtn.OnUp(penID);
-                //ButtonAudioSource.pitch = Random.Range(.95f, 1.05f);
-                //ButtonAudioSource.volume = Random.Range(.9f, 1f);
-                //ButtonAudioSource.PlayOneShot(ButtonUpClip[Random.Range(0, ButtonUpClip.Length)]);
-            }
+            if (_activeTabletBtn == _lastHoveredTabletBtn) _activeTabletBtn.OnUp(penID);
             else _activeTabletBtn.OnHoverExit(penID);
             _activeTabletBtn = null;
         }
-        if (_activeMFDBtn != null)
+        if (_lastHoveredTabletBtn != null)
         {
-            if (_activeMFDBtn == _lastHoveredMFDBtn)
-            {
-                _activeMFDBtn.OnUp(penID,this);
-                //ButtonAudioSource.pitch = Random.Range(.95f, 1.05f);
-                //ButtonAudioSource.volume = Random.Range(.9f, 1f);
-                //ButtonAudioSource.PlayOneShot(ButtonUpClip[Random.Range(0, ButtonUpClip.Length)]);
-            }
-            //else _activeMFDBtn.OnHoverExit(penID);
-            _activeMFDBtn = null;
+            _lastHoveredTabletBtn.OnHoverExit(penID);
+            _lastHoveredTabletBtn = null;
         }
-
-        if (_lastHoveredTabletBtn != null) { _lastHoveredTabletBtn.OnHoverExit(penID); _lastHoveredTabletBtn = null; }
-       // if (_lastHoveredMFDBtn != null) { _lastHoveredMFDBtn.OnHoverExit(penID); _lastHoveredMFDBtn = null; }
+        _wasTouchingTablet = false;
     }
 
-    private int _zoneCount = 0;
+    //private void StayFocus(bool isVR)
+    //{
+    //    // Determine the tracking source
+    //    VRCPlayerApi.TrackingDataType source = isVR ?
+    //        (isRightHand ? VRCPlayerApi.TrackingDataType.RightHand : VRCPlayerApi.TrackingDataType.LeftHand) :
+    //        VRCPlayerApi.TrackingDataType.Head;
 
-    public void OnTriggerEnter(Collider other)
+    //    Quaternion currentRot = _localPlayer.GetTrackingData(source).rotation;
+
+    //    if (_focusedKnob != null)
+    //    {
+    //        if (isVR) _focusedKnob.OnStayVR(penID, currentRot);
+    //        else _focusedKnob.OnStayDesktop(penID, currentRot);
+    //    }
+    //    else if (_focusedMFDBtn != null) _focusedMFDBtn.OnStay(penID);
+    //}
+    private void StayFocus(bool isVR)
     {
-        //Prevent Desktoppers pen mesh from enabling
-        if (!Networking.LocalPlayer.IsUserInVR())
+        if (_focusedKnob != null)
         {
-            return;
+            if (isVR)
+            {
+                // Pass the rotation of THIS Pen object (filtered/pickup rotation)
+                _focusedKnob.OnStayVR(penID, transform.rotation);
+            }
+            else
+            {
+                // Desktop still uses Head rotation as the "mouse"
+                _focusedKnob.OnStayDesktop(penID, _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head).rotation);
+            }
         }
-        if (other.name == "PenEnable")
+        else if (_focusedSwitch != null)
         {
-            _zoneCount++;
-            PenMesh.SetActive(true);
+            if (isVR) _focusedSwitch.OnStayVR(penID, this);
+            else _focusedSwitch.OnStayDesktop(penID, _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head).rotation);
+        }
+        else if (_focusedMFDBtn != null)
+        {
+            _focusedMFDBtn.OnStay(penID);
         }
     }
 
-    public void OnTriggerExit(Collider other)
+    private void ReleaseFocus()
     {
-        //Prevent Desktoppers pen mesh from enabling
-        if (!Networking.LocalPlayer.IsUserInVR())
+        if (_focusedKnob != null) _focusedKnob.OnUp(penID);
+        if (_focusedMFDBtn != null) _focusedMFDBtn.OnUp(penID, this);
+        if (_focusedSwitch != null) _focusedSwitch.OnUp(penID);
+        _focusedSwitch = null;
+        _focusedKnob = null;
+        _focusedMFDBtn = null;
+        _isLocked = false;
+    }
+
+    private Vector3 GetDesktopRayPoint()
+    {
+        VRCPlayerApi.TrackingData head = _localPlayer.GetTrackingData(VRCPlayerApi.TrackingDataType.Head);
+        RaycastHit hit;
+        if (Physics.Raycast(head.position, head.rotation * Vector3.forward, out hit, desktopRayDistance, interactionLayers, QueryTriggerInteraction.Ignore)) return hit.point;
+        return head.position + (head.rotation * Vector3.forward * desktopRayDistance);
+    }
+
+    // Trigger and Audio methods remain the same...
+    public void OnTriggerEnter(Collider other) {
+        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
         {
-            return;
+            _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
         }
-        if (other.name == "PenEnable")
+    }
+    public void OnTriggerExit(Collider other) {
+        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
         {
-            _zoneCount--;
-            // Only turn off if we aren't inside ANY valid zones
-            if (_zoneCount <= 0)
+            _zoneCount--; if (_zoneCount <= 0)
             {
-                _zoneCount = 0; // Safety reset
-                PenMesh.SetActive(false);
+                _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
             }
         }
+    }
+
+    public void TriggerHaptic(float duration = 0.05f, float amplitude = 0.2f, float frequency = 0.8f)
+    {
+        if (_localPlayer == null || !_localPlayer.IsUserInVR()) return;
+
+        VRC_Pickup.PickupHand hand = isRightHand ? VRC_Pickup.PickupHand.Right : VRC_Pickup.PickupHand.Left;
+        _localPlayer.PlayHapticEventInHand(hand, duration, amplitude, frequency);
     }
     public void PlayButtonUpClip()
     {
+        if (ButtonUpClip.Length == 0) return;
         ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
         ButtonAudioSource.PlayOneShot(ButtonUpClip[Random.Range(0, ButtonUpClip.Length)]);
     }
     public void PlayButtonDownClip()
     {
+        if (ButtonDownClip.Length == 0) return;
         ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
         ButtonAudioSource.PlayOneShot(ButtonDownClip[Random.Range(0, ButtonDownClip.Length)]);
+    }
+    public void PlaySwitchDownClip()
+    {
+        if (SwitchDownClip.Length == 0) return;
+        ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
+        ButtonAudioSource.volume = Random.Range(.9f, 1f);
+        ButtonAudioSource.PlayOneShot(SwitchDownClip[Random.Range(0, SwitchDownClip.Length)]);
+
+    }
+    public void PlaySwitchUpClip()
+    {
+        if (SwitchUpClip.Length == 0) return;
+        ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
+        ButtonAudioSource.volume = Random.Range(.9f, 1f);
+        ButtonAudioSource.PlayOneShot(SwitchUpClip[Random.Range(0, SwitchUpClip.Length)]);
+
+    }
+    public void PlayKnobClip()
+    {
+        if (SwitchUpClip.Length == 0) return;
+        ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
+        ButtonAudioSource.volume = Random.Range(.9f, 1f);
+        ButtonAudioSource.PlayOneShot(SwitchUpClip[Random.Range(0, SwitchUpClip.Length)]);
+
     }
 }

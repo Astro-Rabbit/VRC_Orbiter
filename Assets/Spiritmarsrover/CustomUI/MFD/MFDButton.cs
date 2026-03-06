@@ -56,6 +56,7 @@ public class MFDButton : UdonSharpBehaviour
 
     public void OnDown(int id,TabletPen pen)
     {
+        //Debug.Log("[MFDButton] OnDown");
         if (mode == ButtonMode.None) return;
         _lastPenID = id;
 
@@ -91,6 +92,7 @@ public class MFDButton : UdonSharpBehaviour
         }
 
         pen.PlayButtonDownClip();
+        pen.TriggerHaptic(0.05f, 0.2f, 1.0f);
         if (EventScript == null || boolVariableName == "")
         {
             return;

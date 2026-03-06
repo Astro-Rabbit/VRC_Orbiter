@@ -22,18 +22,33 @@ public class TabletButton : UdonSharpBehaviour
     public Color pressedColor = new Color(0.78f, 0.78f, 0.78f);
     public Color disabledColor = new Color(0.78f, 0.78f, 0.78f, 0.5f);
 
+    //void Start()
+    //{
+    //    rectTransform = (RectTransform)transform;
+    //}
+
+    //public bool IsPointInside(Vector3 localPoint)
+    //{
+    //    // Check if the local point is within the width/height of the RectTransform
+    //    Rect rect = rectTransform.rect;
+    //    return rect.Contains(localPoint);
+    //}
+
     void Start()
     {
-        rectTransform = (RectTransform)transform;
+        // GetComponent is more reliable in Udon than casting the 'transform' property
+        rectTransform = GetComponent<RectTransform>();
     }
 
     public bool IsPointInside(Vector3 localPoint)
     {
+        // Safety check to prevent the EXTERN crash
+        if (rectTransform == null) return false;
+
         // Check if the local point is within the width/height of the RectTransform
         Rect rect = rectTransform.rect;
         return rect.Contains(localPoint);
     }
-
     private int _lastPenID = -1; // Tracks who currently "owns" the button visuals/logic
 
     public void OnDown(int id)
