@@ -16,7 +16,7 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
     public StationStateModel station;
     public Transform stationBody;            // station origin + body axes
     public Transform[] portTransforms;       // authored port frames
-
+    public Transform[] stewartTargetTransforms;
     [Header("Behavior")]
     public bool cacheOnStart = true;
     public bool log = false;
@@ -26,7 +26,10 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
         if (cacheOnStart)
             CacheNow();
     }
-
+    void Awake()
+    {
+        CacheNow();
+    }
     public void CacheNow()
     {
         if (station == null || stationBody == null || portTransforms == null)

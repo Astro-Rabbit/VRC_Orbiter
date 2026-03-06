@@ -57,6 +57,10 @@ public class DockingRuntimeState : UdonSharpBehaviour
     [Tooltip("Retract speed in 1/sec. retractS = MoveTowards(retractS, 1, speed*dt).")]
     public float retractSpeed = 0.35f;
 
+    [Header("Retract command")]
+    [Tooltip("Set true to begin retract from DOCK_SOFT.")]
+    public bool retractCommanded = false;
+
     [Header("Soft/Hard tolerances (used for auto-advance gates, not for latch detection)")]
     public double hardCapturePosTolM = 0.02;     // 2 cm
     public float  hardCaptureAngTolDeg = 2.0f;   // 2 deg
@@ -103,10 +107,20 @@ public class DockingRuntimeState : UdonSharpBehaviour
         target_qCraftToStation = Quaternion.identity;
 
         debugLatched = false;
+        retractCommanded = false;
 
         // Keep qMate as-configured (do NOT reset it here)
     }
 
+    public void CommandRetract()
+    {
+        retractCommanded = true;
+    }
+
+    public void ClearRetractCommand()
+    {
+        retractCommanded = false;
+    }
     public bool IsDocked()
     {
         return active && (phase == DOCK_HARD);

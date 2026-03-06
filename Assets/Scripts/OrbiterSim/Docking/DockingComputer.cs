@@ -1,7 +1,7 @@
 ﻿using UdonSharp;
 using UnityEngine;
 using System;
-
+using VRC.SDKBase;
 /// <summary>
 /// DockingComputer (Latch-driven V1)
 ///
@@ -50,8 +50,29 @@ public class DockingComputer : UdonSharpBehaviour
     [Tooltip("If true, other systems (GC, manual controls) should be disabled.")]
     public bool suggestKillControls = false;
 
+    [Header("Undock request")]
+    [Tooltip("Set true for one frame when undock has released the craft and SimManager should switch to integrated.")]
+    public bool requestLeaveDockedToRails = false;
+    public bool requestUndock = false;
+    [Header("Undock")]
+    [Tooltip("Extra separation distance applied instantly on release, along station port outward axis (meters).")]
+    public float undockSeparationMeters = 0.01f;
+
+    [Tooltip("Initial separation speed applied on release, along station port outward axis (m/s).")]
+    public float undockSeparationSpeedMps = 0.10f;
+
+    [Tooltip("Block fresh docking capture for a short time after undock (seconds).")]
+    public float recaptureBlockSeconds = 10.0f;
+    
+
+    [Header("Networking (optional but recommended)")]
+    public CraftNetState netCore;   // to publish dock snapshot
+    public SimClock clock;          // to stamp capture/retract times consistently
+
     [Header("Debug")]
     public bool log = false;
+
+    private double _recaptureBlockedUntil = -1.0;
 
     // --------------------
     // Public entry points
@@ -65,6 +86,8 @@ public class DockingComputer : UdonSharpBehaviour
     {
         requestEnterDocked = false;
         suggestKillControls = false;
+
+        if (tNow < _recaptureBlockedUntil) return;
 
         if (dock == null || dockCtrl == null || craft == null || craftAtt == null || stations == null) return;
 
@@ -86,8 +109,9 @@ public class DockingComputer : UdonSharpBehaviour
         if (targetPort == null) return;
 
         // Resolve indices via DockingPortMeta tags
-        DockingPortMeta localMeta = (DockingPortMeta)dockCtrl.localPort.GetComponent(typeof(DockingPortMeta));
-        DockingPortMeta targMeta  = (DockingPortMeta)targetPort.GetComponent(typeof(DockingPortMeta));
+        // Resolve indices via DockingPortMeta tags
+        DockingPortMeta localMeta = dockCtrl.localPort.GetComponent<DockingPortMeta>();
+        DockingPortMeta targMeta  = targetPort.GetComponent<DockingPortMeta>();
 
         if (localMeta == null || targMeta == null) return;
 
@@ -116,6 +140,30 @@ public class DockingComputer : UdonSharpBehaviour
 
         // Compute hard target pose from cached port frames
         ComputeHardTargetRelativePose(st);
+
+        ApplyDockedKinematics(st, dock.relPos_SB, dock.qCraftToStation);
+
+
+        // Publish dock snapshot (phase + indices + capture timing + captured pose).
+        if (netCore != null)
+        {
+            byte primary = st.primaryBodyId;
+
+            // Use tNow passed in (already mission time). If you prefer, you can use clock.Now() here.
+            netCore.SetDocked(
+                stIdx,
+                (byte)sPort,
+                (byte)cPort,
+                DockingRuntimeState.DOCK_SOFT,
+                tNow,          // captureT0
+                0.0,           // retractT0 not started
+                dock.relPos_SB,
+                dock.qCraftToStation,
+                primary,
+                true
+            );
+        }
+
 
         dock.phase = DockingRuntimeState.DOCK_SOFT;
         dock.active = true;
@@ -147,16 +195,33 @@ public class DockingComputer : UdonSharpBehaviour
 
         suggestKillControls = true;
 
-        if (autoAdvance && dockCtrl != null)
+        // Manual retract path:
+        // Stay in DOCK_SOFT until commanded.
+        if (dock.phase == DockingRuntimeState.DOCK_SOFT && dock.retractCommanded)
         {
-            // Use friend's controller state as phase gate:
-            // - SoftCapture => DOCK_SOFT (hold pose, damp drift)
-            // - HardCapture => DOCK_RETRACT (start retract animation)
-            if (dock.phase == DockingRuntimeState.DOCK_SOFT && dockCtrl.state == DockingState.HardCapture)
+            dock.phase = DockingRuntimeState.DOCK_RETRACT;
+            dock.retractS = 0f;
+            dock.retractCommanded = false;
+
+            if (netCore != null)
             {
-                dock.phase = DockingRuntimeState.DOCK_RETRACT;
-                if (log) Debug.Log("[Docking] SOFT -> RETRACT (DockingController.HardCapture).");
+                byte primary = st.primaryBodyId;
+
+                netCore.SetDocked(
+                    dock.dockedStationIndex,
+                    (byte)dock.stationPortIndex,
+                    (byte)dock.craftPortIndex,
+                    DockingRuntimeState.DOCK_RETRACT,
+                    dock.captureTime,
+                    tNow, // retract start time
+                    dock.relPos_SB,
+                    dock.qCraftToStation,
+                    primary,
+                    true
+                );
             }
+
+            if (log) Debug.Log("[Docking] SOFT -> RETRACT (manual command).");
         }
 
         if (dock.phase == DockingRuntimeState.DOCK_SOFT)
@@ -175,12 +240,31 @@ public class DockingComputer : UdonSharpBehaviour
 
             ApplyDockedKinematics(st, relPos, qCtoS);
 
-            // Hard once retract complete + very near target (optional)
-            if (dock.retractS >= 0.999f && IsNearHardTarget())
+            // Hard once retract complete + very near target
+            if (IsNearHardTarget())
             {
                 dock.phase = DockingRuntimeState.DOCK_HARD;
+
+                if (netCore != null)
+                {
+                    byte primary = st.primaryBodyId;
+                    netCore.SetDocked(
+                        dock.dockedStationIndex,
+                        (byte)dock.stationPortIndex,
+                        (byte)dock.craftPortIndex,
+                        DockingRuntimeState.DOCK_HARD,
+                        dock.captureTime,
+                        (netCore.dockRetractT0 > 0.0 ? netCore.dockRetractT0 : tNow),
+                        dock.targetRelPos_SB,
+                        dock.target_qCraftToStation,
+                        primary,
+                        true
+                    );
+                }
+
                 if (log) Debug.Log("[Docking] RETRACT -> HARD.");
             }
+
             return;
         }
 
@@ -218,7 +302,7 @@ public class DockingComputer : UdonSharpBehaviour
         dock.qCraftToStation = qEtoS * craftAtt.qBE;  // craft BODY -> station BODY
     }
 
-    private void ComputeHardTargetRelativePose(StationStateModel st)
+    public void ComputeHardTargetRelativePose(StationStateModel st)
     {
         if (craftPorts == null) return;
 
@@ -268,28 +352,31 @@ public class DockingComputer : UdonSharpBehaviour
 
     private void ApplyDockedKinematics(StationStateModel st, Vector3 relPos_SB, Quaternion qCraftToStation)
     {
-        // Station inertial pose
-        Vector3 rS_E = new Vector3((float)st.rx, (float)st.ry, (float)st.rz);
-        Vector3 vS_E = new Vector3((float)st.vx, (float)st.vy, (float)st.vz);
+        // Station attitude
         Quaternion qS = st.q_B2E; // station BODY -> E
 
-        // Craft inertial position
+        // Relative position in inertial, still small enough for float math
         Vector3 relPos_E = qS * relPos_SB;
-        Vector3 rC_E = rS_E + relPos_E;
 
         // Station angular rate (E)
         Vector3 wS_E = ComputeStationOmegaE(st);
 
-        // Craft inertial velocity
-        Vector3 vC_E = vS_E + Vector3.Cross(wS_E, relPos_E);
+        // Relative velocity contribution from station frame rotation
+        Vector3 relVel_E = Vector3.Cross(wS_E, relPos_E);
 
         // Craft inertial attitude:
         // qCraft_E = qStation_E * inv(qCraftToStation)
-        Quaternion qC_E = qS * Quaternion.Inverse(qCraftToStation);
+        Quaternion qC_E = qS * qCraftToStation;
 
-        // Write craft translational state (double)
-        craft.rx = (double)rC_E.x; craft.ry = (double)rC_E.y; craft.rz = (double)rC_E.z;
-        craft.vx = (double)vC_E.x; craft.vy = (double)vC_E.y; craft.vz = (double)vC_E.z;
+        // --- Write translational state in DOUBLE, using station doubles directly ---
+        craft.rx = st.rx + (double)relPos_E.x;
+        craft.ry = st.ry + (double)relPos_E.y;
+        craft.rz = st.rz + (double)relPos_E.z;
+
+        craft.vx = st.vx + (double)relVel_E.x;
+        craft.vy = st.vy + (double)relVel_E.y;
+        craft.vz = st.vz + (double)relVel_E.z;
+
         craft.primaryBodyId = st.primaryBodyId;
 
         // Write craft attitude
@@ -302,7 +389,7 @@ public class DockingComputer : UdonSharpBehaviour
         craftAtt.wy = (double)wC_B.y;
         craftAtt.wz = (double)wC_B.z;
 
-        // Persist "current" relative pose for error tests / smooth progression
+        // Persist current relative pose
         dock.relPos_SB = relPos_SB;
         dock.qCraftToStation = qCraftToStation;
     }
@@ -325,4 +412,144 @@ public class DockingComputer : UdonSharpBehaviour
         if (rMag < 1e-6f) return Vector3.zero;
         return h / (r2 * rMag); // h / r^3                  // rad/s approx
     }
+
+
+    /// <summary>
+    /// Remote-only: reconstruct docked craft pose deterministically from station state + netCore dock snapshot.
+    /// Call this from SimManager.Update when netCore.mode == MODE_DOCKED.
+    /// </summary>
+    public void EvaluateDockedRemote(double tNow)
+    {
+        if (Networking.IsOwner(gameObject)) return; // owner uses EvaluateDocked()
+        if (netCore == null || craft == null || craftAtt == null || stations == null) return;
+
+        int stIdx = netCore.dockStationIndex;
+        if (stIdx < 0 || stIdx >= stations.Length) return;
+
+        StationStateModel st = stations[stIdx];
+        if (st == null || !st.valid) return;
+
+        // Base pose: captured relative pose (station body frame)
+        Vector3 rel0 = netCore.dockRelPos_SB;
+        Quaternion q0 = netCore.dock_qCraftToStation;
+
+        // If retract is in progress or hard, compute target and interpolate by time (deterministic)
+        byte phase = netCore.dockPhase;
+
+        if (phase == DockingRuntimeState.DOCK_SOFT)
+        {
+            ApplyDockedKinematics(st, rel0, q0);
+            return;
+        }
+
+        // Need target pose for retract/hard
+        // Ensure DockingRuntimeState pairing indices match, then compute target from caches.
+        if (dock != null)
+        {
+            dock.dockedStationIndex = stIdx;
+            dock.stationPortIndex = netCore.dockStationPortIndex;
+            dock.craftPortIndex = netCore.dockCraftPortIndex;
+        }
+
+        // Compute target from cached port frames (purely deterministic)
+        // This uses your existing method (writes dock.targetRelPos_SB and dock.target_qCraftToStation).
+        // If dock is null, we can't store target, so just hold captured.
+        if (dock == null || craftPorts == null)
+        {
+            ApplyDockedKinematics(st, rel0, q0);
+            return;
+        }
+
+        ComputeHardTargetRelativePose(st);
+
+        if (phase == DockingRuntimeState.DOCK_HARD)
+        {
+            ApplyDockedKinematics(st, dock.targetRelPos_SB, dock.target_qCraftToStation);
+            return;
+        }
+
+        // DOCK_RETRACT: time-derived retract fraction
+        double t0 = netCore.dockRetractT0;
+        if (t0 <= 0.0)
+        {
+            // If retract time wasn't published for some reason, fall back to captured pose
+            ApplyDockedKinematics(st, rel0, q0);
+            return;
+        }
+
+        float s = (float)((tNow - t0) * (double)dock.retractSpeed);
+        if (s < 0f) s = 0f;
+        if (s > 1f) s = 1f;
+
+        Vector3 rel = Vector3.Lerp(rel0, dock.targetRelPos_SB, s);
+        Quaternion q = Quaternion.Slerp(q0, dock.target_qCraftToStation, s);
+
+        ApplyDockedKinematics(st, rel, q);
+    }
+
+    public bool CanUndock()
+    {
+        if (dock == null) return false;
+        return dock.active && dock.phase == DockingRuntimeState.DOCK_HARD;
+    }
+    public void CommandUndock()
+    {
+
+        Debug.Log(
+            "[Docking] CommandUndock called. " +
+            "active=" + (dock != null && dock.active) +
+            " phase=" + (dock != null ? dock.phase.ToString() : "null") +
+            " netMode=" + (netCore != null ? netCore.mode.ToString() : "null")
+        );
+
+        if (dock == null || netCore == null) return;
+        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!dock.active || dock.phase != DockingRuntimeState.DOCK_HARD) return;
+
+        requestUndock = true;
+
+        if (log) Debug.Log("[Docking] CommandUndock -> request queued.");
+    }
+    public void ExecuteUndockRelease(double tNow)
+    {
+        if (dock == null || craft == null || craftAtt == null || stations == null) return;
+        if (netCore == null) return;
+        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!dock.active || dock.phase != DockingRuntimeState.DOCK_HARD) return;
+
+        int stIdx = dock.dockedStationIndex;
+        if (stIdx < 0 || stIdx >= stations.Length) return;
+
+        StationStateModel st = stations[stIdx];
+        if (st == null || !st.valid) return;
+
+        int sPort = dock.stationPortIndex;
+        if (sPort < 0 || sPort >= st.dockingPortCount) return;
+
+        Quaternion qS_SB = st.dock_q_B[sPort];
+        Quaternion qS_E = st.q_B2E;
+
+        Vector3 sepDir_E = qS_E * (qS_SB * Vector3.forward);
+        if (sepDir_E.sqrMagnitude > 1e-10f) sepDir_E.Normalize();
+        else sepDir_E = Vector3.forward;
+
+        // IMPORTANT: apply release from the CURRENT already-updated docked craft state
+        craft.rx += (double)(sepDir_E.x * undockSeparationMeters);
+        craft.ry += (double)(sepDir_E.y * undockSeparationMeters);
+        craft.rz += (double)(sepDir_E.z * undockSeparationMeters);
+
+        craft.vx += (double)(sepDir_E.x * undockSeparationSpeedMps);
+        craft.vy += (double)(sepDir_E.y * undockSeparationSpeedMps);
+        craft.vz += (double)(sepDir_E.z * undockSeparationSpeedMps);
+
+        craft.primaryBodyId = st.primaryBodyId;
+
+        _recaptureBlockedUntil = tNow + (double)recaptureBlockSeconds;
+
+        requestLeaveDockedToRails = true;
+        requestUndock = false;
+
+        if (log) Debug.Log("[Docking] ExecuteUndockRelease -> released from current docked pose.");
+    }
+
 }

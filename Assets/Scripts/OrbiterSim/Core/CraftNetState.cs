@@ -7,6 +7,7 @@ public class CraftNetState : UdonSharpBehaviour
 {
     public const byte MODE_RAILS = 0;
     public const byte MODE_INTEGRATED = 1;
+    public const byte MODE_DOCKED = 2;
 
     [Header("Wiring")]
     public SimClock clock;
@@ -23,6 +24,18 @@ public class CraftNetState : UdonSharpBehaviour
     public byte mode = MODE_RAILS;
     public byte primaryBodyId = 1;
 
+
+    [Header("Read-only (docking mirrors synced)")]
+    public byte dockPhase = 0;
+    public int dockStationIndex = -1;
+    public byte dockStationPortIndex = 0;
+    public byte dockCraftPortIndex = 0;
+    public double dockCaptureT0 = 0.0;
+    public double dockRetractT0 = 0.0;
+
+    [Header("Read-only (docking pose mirrors synced)")]
+    public Vector3 dockRelPos_SB;
+    public Quaternion dock_qCraftToStation;
     // --- synced core ---
     [UdonSynced] private int _rev;
     [UdonSynced] private int _craftId;
@@ -39,6 +52,22 @@ public class CraftNetState : UdonSharpBehaviour
 
     // Optional: time the mode/meta was last published (sim time)
     [UdonSynced] private double _coreEpochT;
+
+
+    // --- synced dock attachment (valid when _mode == MODE_DOCKED) ---
+    [UdonSynced] private byte _dockPhase;              // your DockingRuntimeState phase enum byte
+    [UdonSynced] private int  _dockStationIndex;       // index into stations[]
+    [UdonSynced] private byte _dockStationPortIndex;   // station port idx
+    [UdonSynced] private byte _dockCraftPortIndex;     // craft port idx
+
+    // Deterministic animation timing (mission time)
+    [UdonSynced] private double _dockCaptureT0;        // when soft capture started
+    [UdonSynced] private double _dockRetractT0;        // when retract started; 0 if not started
+
+    // --- synced dock pose (station body frame) ---
+// --- synced dock pose (station body frame) ---
+    [UdonSynced] private Vector3 _dockRelPos_SB;
+    [UdonSynced] private Quaternion _dock_qCraftToStation;
 
     private float _accum;
     private int _appliedRev = -1;
@@ -61,6 +90,9 @@ public class CraftNetState : UdonSharpBehaviour
 
         _mode = newMode;
         _primaryBodyId = newPrimaryBodyId;
+
+        if (_mode != MODE_DOCKED)
+            ClearDockSynced();
 
         mode = _mode;
         primaryBodyId = _primaryBodyId;
@@ -101,6 +133,15 @@ public class CraftNetState : UdonSharpBehaviour
         _propMassKg = craft.propMassKg;
         _massKg = craft.massKg;
 
+        dockPhase = _dockPhase;
+        dockStationIndex = _dockStationIndex;
+        dockStationPortIndex = _dockStationPortIndex;
+        dockCraftPortIndex = _dockCraftPortIndex;
+        dockCaptureT0 = _dockCaptureT0;
+        dockRetractT0 = _dockRetractT0;
+        dockRelPos_SB = _dockRelPos_SB;
+        dock_qCraftToStation = _dock_qCraftToStation;
+
         // Fuel fraction convenience (avoid div by 0)
         double denom = craft.dryMassKg + craft.propMassKg;
         _fuel01 = (denom > 1e-6) ? (float)(craft.propMassKg / denom) : 0f;
@@ -119,6 +160,14 @@ public class CraftNetState : UdonSharpBehaviour
         mode = _mode;
         primaryBodyId = _primaryBodyId;
 
+        dockPhase = _dockPhase;
+        dockStationIndex = _dockStationIndex;
+        dockStationPortIndex = _dockStationPortIndex;
+        dockCraftPortIndex = _dockCraftPortIndex;
+        dockCaptureT0 = _dockCaptureT0;
+        dockRetractT0 = _dockRetractT0;        
+        dockRelPos_SB = _dockRelPos_SB;
+        dock_qCraftToStation = _dock_qCraftToStation;
         if (_rev == _appliedRev) return;
         _appliedRev = _rev;
 
@@ -129,6 +178,63 @@ public class CraftNetState : UdonSharpBehaviour
             craft.dryMassKg = _dryMassKg;
             craft.propMassKg = _propMassKg;
             craft.massKg = _massKg;
+
+            
         }
     }
+
+    public void SetDocked(
+        int stationIndex,
+        byte stationPortIndex,
+        byte craftPortIndex,
+        byte phase,
+        double captureT0,
+        double retractT0,
+        Vector3 relPos_SB,
+        Quaternion qCraftToStation,
+        byte primary,
+        bool forcePublish = true)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        _dockStationIndex = stationIndex;
+        _dockStationPortIndex = stationPortIndex;
+        _dockCraftPortIndex = craftPortIndex;
+        _dockPhase = phase;
+
+        _dockCaptureT0 = captureT0;
+        _dockRetractT0 = retractT0;
+        _dockRelPos_SB = relPos_SB;
+        _dock_qCraftToStation = qCraftToStation;
+
+        dockRelPos_SB = relPos_SB;
+        dock_qCraftToStation = qCraftToStation;
+        // Docked mode implies the craft primary matches the station’s primary
+        _mode = MODE_DOCKED;
+        _primaryBodyId = primary;
+
+        // Mirror public
+        mode = _mode;
+        primaryBodyId = _primaryBodyId;
+
+        if (forcePublish) ForcePublishCore();
+    }
+
+    private void ClearDockSynced()
+    {
+        _dockPhase = 0;
+        _dockStationIndex = -1;
+        _dockStationPortIndex = 0;
+        _dockCraftPortIndex = 0;
+        _dockCaptureT0 = 0.0;
+        _dockRetractT0 = 0.0;
+
+        _dockRelPos_SB = Vector3.zero;
+        _dock_qCraftToStation = Quaternion.identity;
+
+        dockRelPos_SB = Vector3.zero;
+        dock_qCraftToStation = Quaternion.identity;
+
+    }
+
 }

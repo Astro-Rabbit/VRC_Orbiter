@@ -25,6 +25,10 @@ public class SimManager : UdonSharpBehaviour
     [Header("Docking (craft <-> station attachment authority)")]
     public DockingComputer dockingComp;
     public DockingRuntimeState dock; // optional if dockingComp already has it
+    public StewartPlatformTargetResolver stewartResolver;
+    [Header("Docking policy")]
+    [Tooltip("If false, docking detection + docking motion authority are disabled (craft behaves as free-flight).")]
+    public bool dockingAllowed = true;
 
     [Header("Active craft")]
     public CraftStateModel craft;
@@ -77,13 +81,12 @@ public class SimManager : UdonSharpBehaviour
     public PrimaryOrbitDiagnostics primaryDiag;
     public OrbitRenderer orbitline;
     public SkyBoxDriver skyrender;
-    // [Header("Station Render")]
     public StationRenderManager stationRender;
 
     [Header("Initialize")]
     public OrbitInitializerFromPrimaryElements InitialConic;
     public CraftInitializer_NearStation initialNearStation;
-
+    public CraftInitializer_DockedToStation initialDocked;
 
     // --- internal ---
     private float _settleAccum = 0f;
@@ -97,7 +100,12 @@ public class SimManager : UdonSharpBehaviour
 
     void Start()
     {
-        // Prefer station-offset init if provided; fallback to element-based init
+        if (initialDocked != null)
+        {
+            bool okDocked = initialDocked.InitializeNow();
+            if (okDocked) return;
+        }
+
         if (initialNearStation != null)
         {
             bool ok = initialNearStation.InitializeNow();
@@ -130,13 +138,60 @@ public class SimManager : UdonSharpBehaviour
         // 2) Everyone runs rails objects (deterministic vs Tview)
         TickRailsObjects(Tview);
 
+
         // 3) Craft update-side handling:
         //    - Owner rails: rails propagation uses mission time (warp supported)
         //    - Owner integrated: stepped in FixedUpdate (no-op here)
-        //    - Remotes: apply net state (rails uses mission time)
+        //    - Owner docked: dock kinematics in Update (same timing as station/render)
+        //    - Remotes: apply net state
         TickCraft_UpdateSide(Tmission);
 
-        // 4) Contacts snapshot (render/GC/orrrery all read this)
+
+        // --- Undock release request: DockingComputer has already written released craft state.
+        // Switch directly to rails/conic to avoid integrated-mode transition oddities.
+        // If owner is docked and undock was requested, the craft has NOW been updated
+        // to the current docked pose for this frame. Release from that pose.
+        if (dockingComp != null && dockingComp.requestUndock)
+        {
+            dockingComp.ExecuteUndockRelease(Tmission);
+        }
+
+        // Now consume the leave-docked-to-rails request
+        if (dockingComp != null && dockingComp.requestLeaveDockedToRails)
+        {
+            dockingComp.requestLeaveDockedToRails = false;
+
+            _settleAccum = 0f;
+            _simTValid = false;
+            _accumSim = 0.0;
+
+            EnterRails();
+            dock.ResetState();
+        }
+
+        // --- Docking capture check (owner only, gated by dockingAllowed) ---
+        if (DockingAllowedNow() && dockingComp != null && netCore != null && clock != null)
+        {
+            bool isOwner = Networking.IsOwner(netCore.gameObject);
+
+            if (isOwner && netCore.mode != MODE_DOCKED)
+            {
+                dockingComp.EvaluateLatchAndStart(Tmission);
+
+                if (dockingComp.requestEnterDocked)
+                {
+                    // DockingComputer should already have called netCore.SetDocked(...) to populate dock snapshot.
+                    // We just switch mode here.
+                    byte pid = craft != null ? craft.primaryBodyId : (byte)0;
+                    netCore.SetMode(MODE_DOCKED, pid, true);
+
+                    // Immediate attitude publish helps remotes snap cleanly.
+                    if (netAtt != null) netAtt.ForcePublishAttitude();
+                }
+            }
+        }
+
+        // 4) Contacts snapshot (render/GC/orrery all read this)
         if (contactsComp != null)
         {
             contactsComp.craft = craft;
@@ -157,6 +212,8 @@ public class SimManager : UdonSharpBehaviour
         if (!isOwner) return;
 
         byte mode = netCore.mode;
+
+        // Integrated-only in FixedUpdate
         if (mode != MODE_INTEGRATED) return;
 
         // Integrated mode must be warp=1 (by policy)
@@ -173,15 +230,6 @@ public class SimManager : UdonSharpBehaviour
         }
 
         double targetT = clock.Now(); // mission time (warp is 1 by policy)
-
-        // Anchor sim time on first integrated tick (or after ownership changes)
-        // if (!_simTValid)
-        // {
-        //     _simT = targetT;
-        //     _accumSim = 0.0;
-        //     _settleAccum = 0f;
-        //     _simTValid = true;
-        // }
 
         // Accumulate mission-time that has elapsed since our last integrated step
         double dtMission = targetT - _simT;
@@ -201,9 +249,6 @@ public class SimManager : UdonSharpBehaviour
             double t0 = _simT;
             double t1 = t0 + h;
             _simT = t1;
-
-            // Ephemeris sampling at step end (gravity/frame snapshots)
-            // if (ephem != null) ephem.Evaluate(t1);
 
             // Owner attitude + actuation for THIS substep
             TickAttitudeOwner((float)h);
@@ -244,12 +289,10 @@ public class SimManager : UdonSharpBehaviour
             }
         }
 
-        // --- NEW: finish the remaining fractional time so _simT matches mission time ---
-        // Without this, _simT lags by up to fixedDt, causing a visible snap when entering integrated.
+        // Finish the remaining fractional time so _simT matches mission time.
         double rem = _accumSim;
         if (rem > 0.0)
         {
-            // Keep it bounded; rem should be < h by construction.
             if (rem > h) rem = h;
 
             _accumSim -= rem;
@@ -259,10 +302,8 @@ public class SimManager : UdonSharpBehaviour
             double t1r = t0r + rem;
             _simT = t1r;
 
-            // Attitude + actuation for remainder
             TickAttitudeOwner((float)rem);
 
-            // Propellant bookkeeping
             if (craft != null && actuation != null)
             {
                 double dProp = actuation.mainMdot_kgps * rem;
@@ -273,14 +314,12 @@ public class SimManager : UdonSharpBehaviour
                 }
             }
 
-            // Translation integration for remainder
             if (numeric != null && actuation != null)
             {
                 numeric.force_E = actuation.F_E;
                 numeric.Step(rem, t0r);
             }
 
-            // Auto settle logic should include remainder time too
             if (autoModeSwitch)
             {
                 double F = GetNetForceMagN();
@@ -296,22 +335,20 @@ public class SimManager : UdonSharpBehaviour
             }
         }
 
-
-        // If we hit the step budget, DO NOT "drop time on the floor" (that desyncs craft vs ephem/render).
-        // Clamp: snap sim time to mission time and clear accumulator.
+        // If we hit the step budget, clamp sim time to mission time and clear accumulator.
         if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit && _accumSim > 0.0)
         {
             _simT = targetT;
             _accumSim = 0.0;
         }
 
-        // Publish once per FixedUpdate (your publish scripts are already rate-limited internally)
+        // Publish once per FixedUpdate (publish scripts are already rate-limited internally)
         if (netCore != null) netCore.PublishCore();
         if (netKin != null)  netKin.PublishKinematics();
         if (netAtt != null)  netAtt.PublishAttitude();
     }
 
-    // Update-side craft handling: rails owner + all remote application
+    // Update-side craft handling: rails owner + docked owner + all remote application
     private void TickCraft_UpdateSide(double Tmission)
     {
         if (craft == null || netCore == null) return;
@@ -356,9 +393,27 @@ public class SimManager : UdonSharpBehaviour
                 if (netConic != null) netConic.PublishConic();
                 if (netAtt != null)   netAtt.PublishAttitude();
             }
+            else if (mode == MODE_DOCKED)
+            {
+                // Docked is kinematic, so keep it in Update with station/render timing.
+                if (!DockingAllowedNow())
+                {
+                    EnterRails();
+                    return;
+                }
+
+                if (dockingComp != null)
+                {
+                    float dtFrame = Mathf.Min(Time.deltaTime, 0.05f);
+                    dockingComp.EvaluateDocked(dtFrame, Tmission);
+                }
+
+                if (netAtt != null) netAtt.PublishAttitude();
+                if (netCore != null) netCore.PublishCore();
+            }
             else
             {
-                // Integrated owner is stepped in FixedUpdate; nothing to do here
+                // Integrated owner is stepped in FixedUpdate
             }
         }
         else
@@ -372,13 +427,30 @@ public class SimManager : UdonSharpBehaviour
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
             }
-            else
+            else if (mode == MODE_INTEGRATED)
             {
                 if (netKin != null)
                     netKin.ApplyRemoteKinematics();
 
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
+            }
+            else if (mode == MODE_DOCKED)
+            {
+                // IMPORTANT: do NOT apply netKin while docked; docking is deterministic from station + snapshot.
+                if (DockingAllowedNow() && dockingComp != null)
+                {
+                    dockingComp.EvaluateDockedRemote(Tmission);
+                }
+                else
+                {
+                    // If docking not allowed, fall back to remote rails propagation
+                    if (craftProp != null)
+                        craftProp.Evaluate(Tmission);
+
+                    if (netAtt != null)
+                        netAtt.ApplyRemoteAttitude();
+                }
             }
         }
     }
@@ -415,14 +487,11 @@ public class SimManager : UdonSharpBehaviour
 
         _settleAccum = 0f;
 
-        // --- NEW: hard-anchor integrated time NOW, and ensure craft state matches that time ---
         double T = (clock != null) ? clock.Now() : 0.0;
 
-        // Force ephem and stations can remain driven by Update(Tview), but craft must match T right now.
         if (craftProp != null)
             craftProp.Evaluate(T);
 
-        // Optional: if you want SOI switching to be consistent at the transition moment:
         if (soiSwitch != null)
             TryHandleSOISwitchRails(T);
 
@@ -430,10 +499,8 @@ public class SimManager : UdonSharpBehaviour
         _simTValid = true;
         _accumSim = 0.0;
 
-        // Now switch mode
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
-        // Push immediate snapshots
         if (netKin != null) netKin.ForcePublishKinematics();
         if (netAtt != null) netAtt.ForcePublishAttitude();
         if (netConic != null) netConic.ForcePublishConic();
@@ -446,8 +513,6 @@ public class SimManager : UdonSharpBehaviour
 
         _settleAccum = 0f;
 
-        // When leaving integrated, define rails conic at CURRENT authoritative time.
-        // Prefer integrated sim time if valid, else mission time.
         double T = _simTValid ? _simT : (clock != null ? clock.Now() : 0.0);
         byte pid = craft.primaryBodyId;
 
@@ -462,7 +527,6 @@ public class SimManager : UdonSharpBehaviour
         if (netAtt != null)
             netAtt.ForcePublishAttitude();
 
-        // Reset integrated time anchor
         _simTValid = false;
         _accumSim = 0.0;
     }
@@ -472,7 +536,6 @@ public class SimManager : UdonSharpBehaviour
         if (netCore == null) return;
         if (!Networking.IsOwner(netCore.gameObject)) return;
 
-        // New owner should re-anchor integrated sim time on next FixedUpdate
         _simTValid = false;
         _accumSim = 0.0;
         _settleAccum = 0f;
@@ -529,6 +592,12 @@ public class SimManager : UdonSharpBehaviour
         return (double)actuation.F_E.magnitude;
     }
 
+    private bool DockingAllowedNow()
+    {
+        if (!dockingAllowed) return false;
+        return true;
+    }
+
     private void ApplyRender()
     {
         if (orbit != null) orbit.Evaluate();
@@ -537,5 +606,9 @@ public class SimManager : UdonSharpBehaviour
         skyrender.Tick();
         if (stationRender != null)
             stationRender.Tick();
+
+        if (stewartResolver != null)
+            stewartResolver.Tick();
+
     }
 }

@@ -12,6 +12,8 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
     [Header("Target")]
     public GC_Core gc;
     public GC_RuntimeState runtime;
+    public DockingComputer Dock;
+    public DockingRuntimeState DockState;
 
     [Header("Test Settings")]
     public float deltaV_mps = 50f;      // test burn magnitude
@@ -157,6 +159,12 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
         gc.API_Dock_PointShipZAtTargetPort();
     }
 
+    public void Align_port()
+    {
+        gc.API_Dock_AlignPorts();
+    }
+
+
     public void kill_motion()
     {
         gc.API_Relative_KillVel_SelectedStation();
@@ -186,5 +194,13 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
         }
     }
 
+    public void Undock()
+    {
+        Dock.CommandUndock();
+    }
 
+    public void Retract()
+    {
+        DockState.CommandRetract();
+    }
 }
