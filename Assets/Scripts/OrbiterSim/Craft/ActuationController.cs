@@ -3,21 +3,30 @@ using UnityEngine;
 using VRC.SDKBase;
 
 /// <summary>
-/// ActuationController (V2.2)
+/// ActuationController (V3.0 - RCS smart allocator + anti-spam)
 /// - Wheels (torque clamp)
 /// - Main engines: thrust + fuel mdot
 /// - Gimbal:
-///     * MANUAL: applies pilot gimbal to thrust direction, but does NOT participate in attitude allocation
-///              (RCS will NOT "fight" manual gimbal when no attitude torque requested)
+///     * MANUAL: applies pilot gimbal to thrust direction, does NOT participate in attitude allocation
 ///     * AUTO:   uses attitude torque request to compute a SINGLE symmetric yaw/pitch for all running gimballed engines
-/// - RCS bang-bang (optional LOW)
+/// - RCS:
+///     * Unified wrench allocator (force+torque cross-control), top-M jets per tick
+///     * COLD/HOT latch with hysteresis based on combined cold capability
+///     * Anti-spam:
+///         - Channel engagement hysteresis + minimum dwell time
+///         - Per-jet min ON time (hold) + per-jet min OFF time (cooldown), separate cold vs hot
 ///
-/// Outputs:
+/// Outputs (unchanged):
 /// - F_E (N, inertial)
 /// - Tau_B (Nm, body)
 /// - rcsFire01[] for VFX
 /// - mainMdot_kgps (kg/s) for SimManager to subtract prop
 /// - mainGimbalYawDeg[] / mainGimbalPitchDeg[] for anim/VFX/debug
+///
+/// Requirements:
+/// - ThrusterCatalog must cache:
+///     rcsDir_B[], rcsPosRelCg_B[], rcsCached[]
+///     rcsTauPerNewton_B[] and rcsTauPerNewtonMag[]   (tauPerN = r x dir; Nm per N)
 /// </summary>
 public class ActuationController : UdonSharpBehaviour
 {
@@ -33,26 +42,17 @@ public class ActuationController : UdonSharpBehaviour
     [Header("Effects Sync (optional)")]
     public EffectsSyncState effectsSync;
 
-    [Header("Translation scaling (V1)")]
-    [Tooltip("Desired force command in BODY frame (N) = translateCmd_B * maxTranslateForceN.")]
+    // NOTE: translateCmd_B is now interpreted as Newtons in BODY frame (already scaled by UI/GC).
+    // Keeping this field for backwards compatibility / inspector sanity, but it is NOT used.
+    [Header("Translation scaling (legacy; unused)")]
     public float maxTranslateForceN = 50f;
 
-    [Header("RCS firing thresholds (V1 heuristic)")]
-    [Tooltip("If |forceCmd_B| < this, do not fire translation RCS.")]
+    [Header("Deadbands (legacy; still used for basic 'wanted' booleans)")]
+    [Tooltip("If |forceCmd_B| < this, translation RCS will not engage (subject to engage hysteresis).")]
     public float forceDeadbandN = 0.25f;
 
-    [Tooltip("If |tauCmd_B| < this, do not fire rotational RCS.")]
+    [Tooltip("If |tauCmd_B| < this, attitude RCS will not engage (subject to engage hysteresis).")]
     public float torqueDeadbandNm = 0.25f;
-
-    [Tooltip("Alignment threshold for selecting thrusters (0..1). Higher = fewer jets fire.")]
-    [Range(0f, 1f)] public float alignOnHigh = 0.6f;
-
-    [Tooltip("Alignment threshold for LOW mode selection (0..1). Must be <= alignOnHigh.")]
-    [Range(0f, 1f)] public float alignOnLow = 0.3f;
-
-    [Header("RCS anti-chatter")]
-    [Tooltip("Minimum OFF time (seconds) after a jet turns off before it can fire again.")]
-    public float minRcsOffTime = 0.06f;
 
     [Header("Gimbal AUTO stability")]
     [Tooltip("If |tauRemaining_B| below this, AUTO gimbal outputs stay at 0 (prevents chasing tiny residuals).")]
@@ -64,6 +64,67 @@ public class ActuationController : UdonSharpBehaviour
     [Tooltip("Optional: limit how fast gimbal angles can change (deg/s). 0 = no rate limit.")]
     public float gimbalMaxRateDegPerSec = 60f;
 
+    // -----------------------------
+    // NEW: RCS anti-spam + policy
+    // -----------------------------
+
+    [Header("RCS Blend Policy (NEW)")]
+    [Tooltip("0=ATT_FIRST, 1=TRANS_FIRST, 2=BALANCED (used only when cmd.rcsMode == BLENDED).")]
+    public byte rcsBlendPolicy = 0;
+
+    [Header("RCS Engage Hysteresis (NEW)")]
+    [Tooltip("Attitude engage threshold (Nm). If |tauRemaining| exceeds this, engage attitude RCS.")]
+    public float attEngageHiNm = 10f;
+
+    [Tooltip("Attitude disengage threshold (Nm). Must be < engageHi.")]
+    public float attEngageLoNm = 5f;
+
+    [Tooltip("Translation engage threshold (N). If |forceCmd| exceeds this, engage translation RCS.")]
+    public float transEngageHiN = 1.0f;
+
+    [Tooltip("Translation disengage threshold (N). Must be < engageHi.")]
+    public float transEngageLoN = 0.5f;
+
+    [Tooltip("Minimum time to stay engaged once engaged (seconds).")]
+    public float rcsMinEngageTimeAtt = 0.30f;
+
+    [Tooltip("Minimum time to stay engaged once engaged (seconds).")]
+    public float rcsMinEngageTimeTrans = 0.18f;
+
+    [Header("Cold/Hot hysteresis (NEW)")]
+    [Tooltip("Switch COLD->HOT if request > coldCapability * this.")]
+    [Range(0.5f, 1.5f)] public float coldToHotHiFrac = 0.95f;
+
+    [Tooltip("Switch HOT->COLD if request < coldCapability * this.")]
+    [Range(0.0f, 1.0f)] public float hotToColdLoFrac = 0.75f;
+
+    [Header("Cold/Hot timing (NEW)")]
+    public float minRcsOffTimeCold = 0.02f;
+    public float minRcsOffTimeHot  = 0.06f;
+
+    [Tooltip("Minimum ON time once a jet starts firing (prevents flicker).")]
+    public float minRcsOnTimeCold = 0.05f;
+
+    [Tooltip("Minimum ON time once a jet starts firing (prevents flicker).")]
+    public float minRcsOnTimeHot = 0.08f;
+
+    [Header("RCS Selection (NEW)")]
+    [Tooltip("Max RCS jets to fire per tick (hard cap).")]
+    public int rcsMaxJetsPerTick = 8;
+
+    [Tooltip("Eligibility alignment threshold for translation (0..1).")]
+    [Range(0f, 1f)] public float transAlignElig = 0.30f;
+
+    [Tooltip("Eligibility alignment threshold for attitude via torque axis (0..1).")]
+    [Range(0f, 1f)] public float attAlignElig = 0.20f;
+
+    [Header("Optional PWM toggles (GC use; not wired yet)")]
+    public bool rcsPwmEnableAtt = false;
+    public bool rcsPwmEnableTrans = false;
+
+    // -----------------------------
+    // Outputs
+    // -----------------------------
     [Header("Outputs")]
     [Tooltip("Net force in INERTIAL frame (N).")]
     public Vector3 F_E = Vector3.zero;
@@ -79,7 +140,7 @@ public class ActuationController : UdonSharpBehaviour
     public double mainMdot_kgps = 0.0;
 
     [Header("Per-thruster outputs (for animation/VFX)")]
-    [Tooltip("RCS fire level per jet: 0=OFF, lowScale=LOW, 1=HIGH.")]
+    [Tooltip("RCS fire level per jet: 0=OFF, coldScale=COLD, 1=HOT.")]
     public float[] rcsFire01;
 
     [Header("Main gimbal outputs (for animation/VFX/debug)")]
@@ -95,26 +156,33 @@ public class ActuationController : UdonSharpBehaviour
     [Tooltip("Treat values > 0 and < highThreshold as LOW.")]
     public float rcsLowThreshold = 1e-4f;
 
-    [Header("Translation LOW/HIGH (no PWM)")]
-    [Tooltip("If requested force is within (lowModeMarginFrac) of LOW capability, stay in LOW.")]
-    [Range(0f, 0.5f)] public float lowModeMarginFrac = 0.05f;
-
+    // -----------------------------
     // Internal scratch
+    // -----------------------------
     private Vector3 _forceCmd_B;
     private Vector3 _tauReq_B;
 
-    // Anti-chatter bookkeeping (per thruster)
-    private float[] _rcsCooldownUntil;
-    private bool[] _rcsPrevOn;
+    // Per-jet gating
+    private float[] _rcsCooldownUntil; // earliest time we may START firing (if not held-on)
+    private float[] _rcsHoldOnUntil;   // if now < holdUntil and prevLevel>0, we MUST keep firing (min ON)
+    private float[] _rcsPrevLevel;     // 0, coldScale, or 1
+
+    // Channel engagement latches
+    private bool _attRcsEngaged = false;
+    private bool _transRcsEngaged = false;
+    private float _attEngagedUntil = 0f;
+    private float _transEngagedUntil = 0f;
+
+    // Cold/Hot latches
+    private bool _attHotLatched = false;
+    private bool _transHotLatched = false;
 
     // Gimbal rate limiting state (single shared yaw/pitch for symmetric AUTO)
     private float _autoYawDegPrev = 0f;
     private float _autoPitchDegPrev = 0f;
 
     private const float G0 = 9.80665f;
-    // Translation PWM accumulator (sigma-delta)
-    // Keeps average translation force proportional to request.
-    private float _transPwmAcc = 0f;
+
     public void Evaluate()
     {
         F_E = Vector3.zero;
@@ -141,7 +209,7 @@ public class ActuationController : UdonSharpBehaviour
             if (attController != null) _tauReq_B = attController.tauCmd_B;
         }
 
-        // ---- translation force request (BODY) ----
+        // ---- translation force request (BODY, Newtons) ----
         _forceCmd_B = cmd.translateCmd_B;
 
         // ---- is any attitude torque actually desired? ----
@@ -190,8 +258,13 @@ public class ActuationController : UdonSharpBehaviour
 
         if (enginesRunningGlobal)
         {
-            Vector3 tauFromMains_B = AllocateMains(throttle01, useGimbalForAttitude ? tauRemaining_B : Vector3.zero,
-                                                  gimbalEnabled, useGimbalForAttitude, manualMode);
+            Vector3 tauFromMains_B = AllocateMains(
+                throttle01,
+                useGimbalForAttitude ? tauRemaining_B : Vector3.zero,
+                gimbalEnabled,
+                useGimbalForAttitude,
+                manualMode
+            );
 
             // Only subtract mains torque from remaining if we were using AUTO gimbal as an attitude actuator.
             if (useGimbalForAttitude)
@@ -205,14 +278,18 @@ public class ActuationController : UdonSharpBehaviour
         }
 
         // -----------------------------
-        // RCS allocation (attitude + translation)
+        // RCS allocation (unified wrench allocator)
         // -----------------------------
         int nRcs = (catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
-        bool rcsAvail = cmd.allowRCS &&
-                        (nRcs > 0) &&
-                        (catalog.rcsCached != null) &&
-                        (catalog.rcsDir_B != null) &&
-                        (catalog.rcsPosRelCg_B != null);
+
+        bool rcsAvail =
+            cmd.allowRCS &&
+            (nRcs > 0) &&
+            (catalog.rcsCached != null) &&
+            (catalog.rcsDir_B != null) &&
+            (catalog.rcsPosRelCg_B != null) &&
+            (catalog.rcsTauPerNewton_B != null) &&
+            (catalog.rcsTauPerNewtonMag != null);
 
         // Attitude RCS is only used if (a) attitude torque is desired, and (b) actuator policy allows it.
         bool allowRcsForAtt = rcsAvail &&
@@ -224,26 +301,13 @@ public class ActuationController : UdonSharpBehaviour
         if (cmd.attitudeActuatorMode == CraftCommandState.ATT_ACT_GIMBAL_ONLY)
             allowRcsForAtt = false;
 
-        // Translation RCS remains independent of attitudeActuatorMode (as before)
+        // Translation RCS remains independent of attitudeActuatorMode
         bool allowRcsForTrans = rcsAvail;
 
-        byte rcsMode = cmd.rcsMode;
-
-        if (rcsMode == CraftCommandState.RCS_MODE_ROTATE)
+        if (rcsAvail)
         {
-            if (allowRcsForAtt) AllocateRcsForTorque(tauRemaining_B);
+            AllocateRcsUnified(_forceCmd_B, tauRemaining_B, cmd.rcsMode, allowRcsForTrans, allowRcsForAtt);
         }
-        else if (rcsMode == CraftCommandState.RCS_MODE_TRANSLATE)
-        {
-            if (allowRcsForTrans) AllocateRcsForForce(_forceCmd_B);
-        }
-        else // BLENDED
-        {
-            if (allowRcsForAtt) AllocateRcsForTorque(tauRemaining_B);
-            if (allowRcsForTrans) AllocateRcsForForce(_forceCmd_B);
-        }
-
-        ApplyRcsCooldowns();
 
         Fx = (double)F_E.x;
         Fy = (double)F_E.y;
@@ -257,26 +321,16 @@ public class ActuationController : UdonSharpBehaviour
         }
 
         // ---------------- MAIN VFX SYNC (owner-only) ----------------
-        // Paste this right AFTER the existing RCS mask sync block in Evaluate().
-        // It will:
-        // - send main throttle (0..1)
-        // - send a SINGLE shared yaw/pitch (deg) (symmetric gimbal design)
-        // - send an onMask bitfield (bit i = engine i producing thrust this tick)
-        //
-        // Requires EffectsSyncState to have: SetMainVfx(float throttle01, float yawDeg, float pitchDeg, uint onMask)
-
         if (effectsSync != null && Networking.IsOwner(effectsSync.gameObject))
         {
             float t01 = Mathf.Clamp01(cmd != null ? cmd.mainThrottle01 : 0f);
 
-            // Shared yaw/pitch: actuator is symmetric, so take engine[0] if available.
+            // Shared yaw/pitch: symmetric gimbal, use engine[0] if available.
             float yawDeg = 0f;
             float pitchDeg = 0f;
             if (mainGimbalYawDeg != null && mainGimbalYawDeg.Length > 0) yawDeg = mainGimbalYawDeg[0];
             if (mainGimbalPitchDeg != null && mainGimbalPitchDeg.Length > 0) pitchDeg = mainGimbalPitchDeg[0];
 
-            // Build onMask based on "this engine actually produced thrust this tick"
-            // (respects: throttle deadband, per-engine maxF, and prop starvation for consuming engines).
             uint onMask = 0u;
 
             int nMain = (catalog != null && catalog.mainTf != null) ? catalog.mainTf.Length : 0;
@@ -291,22 +345,397 @@ public class ActuationController : UdonSharpBehaviour
                     float maxF = catalog.GetMainMaxForceN(i);
                     if (maxF <= 0f) continue;
 
-                    // Per-engine starvation gate only for consuming engines
                     float isp = catalog.GetMainIspSec(i);
                     bool consumesProp = isp > 1e-6f;
 
                     if (consumesProp && craft != null && craft.propMassKg <= 0.0) continue;
 
-                    // If we got here, AllocateMains would have applied thrust this tick
                     onMask |= (1u << i);
                 }
             }
 
-            // If you haven't added SetMainVfx yet, add it to EffectsSyncState (see earlier plan).
             effectsSync.SetMainVfx(t01, yawDeg, pitchDeg, onMask);
         }
+    }
 
+    /// <summary>
+    /// Unified RCS allocator with anti-spam gating and cross-control.
+    /// Selects up to rcsMaxJetsPerTick jets, and fires them at either COLD (rcsLowScale) or HOT (1.0).
+    /// </summary>
+    private void AllocateRcsUnified(Vector3 forceCmd_B, Vector3 tauCmd_B, byte rcsMode, bool allowTrans, bool allowAtt)
+    {
+        int n = (catalog != null && catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
+        if (n <= 0) return;
 
+        float now = Time.time;
+
+        // -------------
+        // Build residuals subject to mode + allow flags
+        // -------------
+        Vector3 fRes_B = Vector3.zero;
+        Vector3 tRes_B = Vector3.zero;
+
+        if (allowTrans && (rcsMode == CraftCommandState.RCS_MODE_TRANSLATE || rcsMode == CraftCommandState.RCS_MODE_BLENDED))
+            fRes_B = forceCmd_B;
+
+        if (allowAtt && (rcsMode == CraftCommandState.RCS_MODE_ROTATE || rcsMode == CraftCommandState.RCS_MODE_BLENDED))
+            tRes_B = tauCmd_B;
+
+        float fMag = fRes_B.magnitude;
+        float tMag = tRes_B.magnitude;
+
+        // Basic deadband guard (still useful), but engagement hysteresis dominates.
+        bool transWanted = fMag >= forceDeadbandN;
+        bool attWanted = tMag >= torqueDeadbandNm;
+
+        // -------------
+        // Channel engagement latches (anti-spam)
+        // -------------
+        // Translation engage/disengage
+        if (!_transRcsEngaged)
+        {
+            if (transWanted && fMag >= transEngageHiN)
+            {
+                _transRcsEngaged = true;
+                _transEngagedUntil = now + rcsMinEngageTimeTrans;
+            }
+        }
+        else
+        {
+            if (now >= _transEngagedUntil && (!transWanted || fMag <= transEngageLoN))
+                _transRcsEngaged = false;
+        }
+
+        // Attitude engage/disengage
+        if (!_attRcsEngaged)
+        {
+            if (attWanted && tMag >= attEngageHiNm)
+            {
+                _attRcsEngaged = true;
+                _attEngagedUntil = now + rcsMinEngageTimeAtt;
+            }
+        }
+        else
+        {
+            if (now >= _attEngagedUntil && (!attWanted || tMag <= attEngageLoNm))
+                _attRcsEngaged = false;
+        }
+
+        // Apply engagement results
+        if (!_transRcsEngaged) fRes_B = Vector3.zero;
+        if (!_attRcsEngaged)   tRes_B = Vector3.zero;
+
+        fMag = fRes_B.magnitude;
+        tMag = tRes_B.magnitude;
+
+        if (fMag < 1e-6f && tMag < 1e-6f)
+        {
+            // Nothing to do. We intentionally do NOT force jets off here;
+            // per-jet hold will expire and then cooldown will apply naturally.
+            UpdateJetTurnOffs(now);
+            return;
+        }
+
+        Vector3 fHat = (fMag > 1e-6f) ? (fRes_B / fMag) : Vector3.forward;
+        Vector3 tHat = (tMag > 1e-6f) ? (tRes_B / tMag) : Vector3.up;
+
+        // -------------
+        // Cold capability estimates (ignore cooldown to prevent mode-flip due to a cooling jet)
+        // -------------
+        bool hasCold = catalog.rcsHasLowMode && (catalog.rcsLowScale > 1e-6f);
+        float coldScale = hasCold ? catalog.rcsLowScale : 1f;
+
+        float capColdForce = 0f; // N along fHat
+        float capColdTau   = 0f; // Nm along tHat
+
+        if (hasCold)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (!catalog.rcsCached[i]) continue;
+
+                float maxFhot = catalog.GetRcsMaxForceN(i);
+                if (maxFhot <= 0f) continue;
+
+                float Fcold = maxFhot * coldScale;
+
+                if (fMag > 1e-6f)
+                {
+                    float a = Vector3.Dot(catalog.rcsDir_B[i], fHat);
+                    if (a >= transAlignElig) capColdForce += (Fcold * a);
+                }
+
+                if (tMag > 1e-6f)
+                {
+                    float projPerN = Vector3.Dot(catalog.rcsTauPerNewton_B[i], tHat); // Nm per N projected
+                    if (projPerN > 0f)
+                    {
+                        float alignTau = projPerN / Mathf.Max(1e-6f, catalog.rcsTauPerNewtonMag[i]);
+                        if (alignTau >= attAlignElig) capColdTau += (projPerN * Fcold);
+                    }
+                }
+            }
+
+            // Translation latch
+            if (!_transHotLatched)
+            {
+                if (fMag > 1e-6f && capColdForce > 1e-6f && fMag > capColdForce * coldToHotHiFrac)
+                    _transHotLatched = true;
+            }
+            else
+            {
+                if (fMag < 1e-6f || capColdForce < 1e-6f || fMag < capColdForce * hotToColdLoFrac)
+                    _transHotLatched = false;
+            }
+
+            // Attitude latch
+            if (!_attHotLatched)
+            {
+                if (tMag > 1e-6f && capColdTau > 1e-6f && tMag > capColdTau * coldToHotHiFrac)
+                    _attHotLatched = true;
+            }
+            else
+            {
+                if (tMag < 1e-6f || capColdTau < 1e-6f || tMag < capColdTau * hotToColdLoFrac)
+                    _attHotLatched = false;
+            }
+        }
+        else
+        {
+            // No cold mode available => always hot
+            _transHotLatched = true;
+            _attHotLatched = true;
+        }
+
+        // If either channel needs HOT this tick, run jets HOT (simple + stable).
+        bool useHotThisTick = _transHotLatched || _attHotLatched;
+        float levelBase = useHotThisTick ? 1f : coldScale;
+
+        // -------------
+        // Blend weights (att-first/trans-first/balanced)
+        // -------------
+        float wf = 0f, wt = 0f;
+        if (rcsMode == CraftCommandState.RCS_MODE_BLENDED)
+        {
+            if (rcsBlendPolicy == 0) { wt = 1.0f; wf = 0.35f; }      // ATT_FIRST
+            else if (rcsBlendPolicy == 1) { wf = 1.0f; wt = 0.35f; } // TRANS_FIRST
+            else { wf = 0.7f; wt = 0.7f; }                           // BALANCED
+        }
+        else if (rcsMode == CraftCommandState.RCS_MODE_TRANSLATE)
+        {
+            wf = 1f; wt = 0f;
+        }
+        else // ROTATE
+        {
+            wf = 0f; wt = 1f;
+        }
+
+        int M = Mathf.Clamp(rcsMaxJetsPerTick, 1, 32);
+
+        // Buffers for top-M
+        int[] bestIdx = new int[32];     // Udon note: fixed size avoids realloc risk; we only use [0..M)
+        float[] bestScore = new float[32];
+        for (int k = 0; k < 32; k++) { bestIdx[k] = -1; bestScore[k] = 0f; }
+
+        // -------------
+        // 1) Enforce per-jet min ON holds: if a jet is within its hold window, KEEP IT FIRING.
+        //    This is the most important anti-flicker piece.
+        // -------------
+        Quaternion qBE = attState.qBE;
+
+        int forcedCount = 0;
+        for (int i = 0; i < n && forcedCount < M; i++)
+        {
+            float prev = (_rcsPrevLevel != null && i < _rcsPrevLevel.Length) ? _rcsPrevLevel[i] : 0f;
+            if (prev <= 0f) continue;
+
+            float holdUntil = (_rcsHoldOnUntil != null && i < _rcsHoldOnUntil.Length) ? _rcsHoldOnUntil[i] : 0f;
+            if (now >= holdUntil) continue;
+
+            // Keep firing during hold. Use the max of (previous level, current global base level).
+            float level = (prev >= 0.95f || levelBase >= 0.95f) ? 1f : coldScale;
+
+            // Fire it
+            FireJet(i, level, qBE, now);
+
+            bestIdx[forcedCount] = i;  // mark selected to avoid duplicates
+            bestScore[forcedCount] = float.PositiveInfinity;
+            forcedCount++;
+        }
+
+        // -------------
+        // 2) Score remaining jets and fill remaining slots up to M
+        // -------------
+        for (int i = 0; i < n; i++)
+        {
+            if (!catalog.rcsCached[i]) continue;
+
+            // Skip if already selected (forced or previously inserted)
+            bool already = false;
+            for (int k = 0; k < forcedCount; k++) { if (bestIdx[k] == i) { already = true; break; } }
+            if (already) continue;
+
+            // Must be allowed to start (cooldown) if not held
+            if (!CanStartJet(i, now)) continue;
+
+            float maxFhot = catalog.GetRcsMaxForceN(i);
+            if (maxFhot <= 0f) continue;
+
+            float F = maxFhot * levelBase;
+
+            float sf = 0f, st = 0f;
+
+            // Force help (either)
+            if (fMag > 1e-6f && wf > 0f)
+            {
+                float a = Vector3.Dot(catalog.rcsDir_B[i], fHat);
+                if (a > 0f && a >= transAlignElig) sf = a * F; // N projected
+            }
+
+            // Torque help (either)
+            if (tMag > 1e-6f && wt > 0f)
+            {
+                float projPerN = Vector3.Dot(catalog.rcsTauPerNewton_B[i], tHat); // Nm per N projected
+                if (projPerN > 0f)
+                {
+                    float alignTau = projPerN / Mathf.Max(1e-6f, catalog.rcsTauPerNewtonMag[i]);
+                    if (alignTau >= attAlignElig) st = projPerN * F; // Nm projected
+                }
+            }
+
+            float score = wf * sf + wt * st;
+            if (score <= 0f) continue;
+
+            // Insert into best list starting at forcedCount (top-M insertion)
+            for (int k = forcedCount; k < M; k++)
+            {
+                if (score > bestScore[k])
+                {
+                    for (int s = M - 1; s > k; s--)
+                    {
+                        bestScore[s] = bestScore[s - 1];
+                        bestIdx[s] = bestIdx[s - 1];
+                    }
+                    bestScore[k] = score;
+                    bestIdx[k] = i;
+                    break;
+                }
+            }
+        }
+
+        // -------------
+        // 3) Fire selected (excluding forced already fired)
+        // -------------
+        for (int k = forcedCount; k < M; k++)
+        {
+            int i = bestIdx[k];
+            if (i < 0) continue;
+
+            // Might have become "not startable" due to earlier selections? (shouldn't)
+            if (!CanStartJet(i, now)) continue;
+
+            float level = levelBase;
+            FireJet(i, level, qBE, now);
+        }
+
+        // -------------
+        // 4) Turn-off bookkeeping (min ON + cooldown scheduling)
+        // -------------
+        UpdateJetTurnOffs(now);
+    }
+
+    private void FireJet(int i, float level, Quaternion qBE, float now)
+    {
+        int n = (catalog != null && catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
+        if (i < 0 || i >= n) return;
+
+        float maxFhot = catalog.GetRcsMaxForceN(i);
+        if (maxFhot <= 0f) return;
+
+        float F = maxFhot * level;
+
+        Vector3 f_B = catalog.rcsDir_B[i] * F;
+        Vector3 f_E = qBE * f_B;
+
+        F_E += f_E;
+        Tau_B += catalog.rcsTauPerNewton_B[i] * F;
+
+        if (rcsFire01 != null && i < rcsFire01.Length)
+            rcsFire01[i] = level;
+
+        MarkJetFired(i, level, now);
+    }
+
+    private bool CanStartJet(int i, float now)
+    {
+        if (_rcsCooldownUntil == null || i < 0 || i >= _rcsCooldownUntil.Length) return true;
+        return now >= _rcsCooldownUntil[i];
+    }
+
+    private void MarkJetFired(int i, float level, float now)
+    {
+        if (_rcsPrevLevel == null || _rcsHoldOnUntil == null) return;
+        if (i < 0 || i >= _rcsPrevLevel.Length || i >= _rcsHoldOnUntil.Length) return;
+
+        bool hot = level >= 0.95f;
+
+        bool wasOn = _rcsPrevLevel[i] > 0f;
+
+        // If starting from OFF, set min ON hold window
+        if (!wasOn)
+        {
+            float minOn = hot ? minRcsOnTimeHot : minRcsOnTimeCold;
+            if (minOn > 0f) _rcsHoldOnUntil[i] = now + minOn;
+        }
+        else
+        {
+            // If already on, keep extending hold slightly? NO.
+            // Do not extend; prevents "stuck on" under noisy commands.
+        }
+
+        _rcsPrevLevel[i] = hot ? 1f : catalog.rcsLowScale;
+    }
+
+    private void UpdateJetTurnOffs(float now)
+    {
+        if (rcsFire01 == null || _rcsPrevLevel == null || _rcsCooldownUntil == null || _rcsHoldOnUntil == null) return;
+
+        int n = rcsFire01.Length;
+
+        for (int i = 0; i < n; i++)
+        {
+            bool firedThisTick = rcsFire01[i] > 0f;
+            bool wasOn = _rcsPrevLevel[i] > 0f;
+
+            if (wasOn && !firedThisTick)
+            {
+                // If still within mandatory ON hold window, we should have fired it.
+                // But if we didn't (e.g., M too small), refuse to schedule cooldown or drop state yet.
+                if (now < _rcsHoldOnUntil[i])
+                {
+                    // Keep previous level "on" so we continue forcing it next tick.
+                    continue;
+                }
+
+                // Hold expired and it is not firing now => turn off and schedule cooldown based on previous level
+                bool hotWas = _rcsPrevLevel[i] >= 0.95f;
+
+                float off = hotWas ? minRcsOffTimeHot : minRcsOffTimeCold;
+                if (off > 0f) _rcsCooldownUntil[i] = now + off;
+
+                _rcsPrevLevel[i] = 0f;
+            }
+            else if (!wasOn && firedThisTick)
+            {
+                // Should not happen because MarkJetFired sets prevLevel, but be safe:
+                _rcsPrevLevel[i] = (rcsFire01[i] >= 0.95f) ? 1f : catalog.rcsLowScale;
+            }
+            else if (wasOn && firedThisTick)
+            {
+                // keep state consistent
+                _rcsPrevLevel[i] = (rcsFire01[i] >= 0.95f) ? 1f : catalog.rcsLowScale;
+            }
+        }
     }
 
     /// <summary>
@@ -328,13 +757,11 @@ public class ActuationController : UdonSharpBehaviour
         Quaternion qBE = attState.qBE;
         int n = catalog.mainTf.Length;
 
-        // Determine shared symmetric gimbal angles (AUTO) once per tick.
         float sharedYawDeg = 0f;
         float sharedPitchDeg = 0f;
 
         if (gimbalEnabled && useGimbalForAttitude)
         {
-            // AUTO symmetric solve across all running gimballed engines
             if (tauTarget_B.sqrMagnitude >= (gimbalTorqueDeadbandNm * gimbalTorqueDeadbandNm))
             {
                 Vector3 bPitchSum = Vector3.zero;
@@ -342,7 +769,6 @@ public class ActuationController : UdonSharpBehaviour
                 float expectedSum = 0f;
                 float maxGimbalDegMin = 1e9f;
 
-                // Sum bases across engines
                 for (int i = 0; i < n; i++)
                 {
                     if (catalog.mainCached == null || i >= catalog.mainCached.Length || !catalog.mainCached[i]) continue;
@@ -408,7 +834,6 @@ public class ActuationController : UdonSharpBehaviour
                     sharedPitchDeg = pitchRad * Mathf.Rad2Deg;
                     sharedYawDeg = yawRad * Mathf.Rad2Deg;
 
-                    // Rate limit the shared command
                     if (gimbalMaxRateDegPerSec > 0f)
                     {
                         float dt = Time.deltaTime;
@@ -427,22 +852,18 @@ public class ActuationController : UdonSharpBehaviour
         }
         else
         {
-            // Not using AUTO attitude gimbal => keep shared history tame
             _autoYawDegPrev = 0f;
             _autoPitchDegPrev = 0f;
         }
 
-        // Manual shared command (applied to all gimballed engines)
         float manualYawDeg = 0f;
         float manualPitchDeg = 0f;
         if (gimbalEnabled && manualMode)
         {
-            // NOTE: manual cmd is normalized [-1..1], scaled per-engine later by each engine max gimbal
             manualYawDeg = Mathf.Clamp(cmd.gimbalPitchYawCmd.x, -1f, 1f);
             manualPitchDeg = Mathf.Clamp(cmd.gimbalPitchYawCmd.y, -1f, 1f);
         }
 
-        // Now apply per-engine thrust + torque
         for (int i = 0; i < n; i++)
         {
             if (catalog.mainCached == null || i >= catalog.mainCached.Length || !catalog.mainCached[i]) continue;
@@ -489,18 +910,15 @@ public class ActuationController : UdonSharpBehaviour
             {
                 if (useGimbalForAttitude)
                 {
-                    // AUTO symmetric
                     yawDeg = Mathf.Clamp(sharedYawDeg, -maxGimbalDeg, maxGimbalDeg);
                     pitchDeg = Mathf.Clamp(sharedPitchDeg, -maxGimbalDeg, maxGimbalDeg);
                 }
                 else if (manualMode)
                 {
-                    // MANUAL shared normalized command, scaled by each engine max
                     yawDeg = manualYawDeg * maxGimbalDeg;
                     pitchDeg = manualPitchDeg * maxGimbalDeg;
                 }
 
-                // Apply yaw then pitch about BODY-frame axes
                 Vector3 aYawB = catalog.mainGimbalYawAxis_B[i];
                 Vector3 aPitchB = catalog.mainGimbalPitchAxis_B[i];
 
@@ -528,174 +946,13 @@ public class ActuationController : UdonSharpBehaviour
         return tauFromMains_B;
     }
 
-    // ------------------ RCS allocation (unchanged) ------------------
-
-    private void AllocateRcsForForce(Vector3 forceCmd_B)
-    {
-        float mag = forceCmd_B.magnitude;
-        if (mag < forceDeadbandN) return;
-
-        Vector3 dirCmd_B = forceCmd_B / mag;
-        Quaternion qBE = attState.qBE;
-
-        int n = (catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
-        if (n <= 0) return;
-
-        bool hasLow = catalog.rcsHasLowMode && (catalog.rcsLowScale > 1e-6f);
-
-        // 1) Estimate LOW capability along dirCmd using the LOW selection set
-        float capLow = 0f; // effective along command direction before lowScale
-        if (hasLow)
-        {
-            for (int i = 0; i < n; i++)
-            {
-                if (catalog.rcsCached == null || i >= catalog.rcsCached.Length || !catalog.rcsCached[i]) continue;
-                if (!CanFireRcs(i)) continue;
-
-                float maxF = catalog.GetRcsMaxForceN(i);
-                if (maxF <= 0f) continue;
-
-                Vector3 dir_B = catalog.rcsDir_B[i];
-                float align = Vector3.Dot(dir_B, dirCmd_B);
-                if (align < alignOnLow) continue;   // LOW set
-                capLow += maxF * align;
-            }
-        }
-
-        float capLowEff = hasLow ? (capLow * catalog.rcsLowScale) : 0f;
-
-        // 2) Choose LOW if LOW can cover requested magnitude (with a small margin)
-        bool useLowMode = false;
-        if (hasLow && capLowEff > 1e-6f)
-        {
-            float margin = 1f - Mathf.Clamp01(lowModeMarginFrac); // e.g. 0.95
-            useLowMode = mag <= (capLowEff * margin);
-        }
-
-        float scale = useLowMode ? catalog.rcsLowScale : 1f;
-        float alignThresh = useLowMode ? (hasLow ? alignOnLow : alignOnHigh) : alignOnHigh;
-
-        // 3) Fire jets continuously using chosen mode
-        for (int i = 0; i < n; i++)
-        {
-            if (catalog.rcsCached == null || i >= catalog.rcsCached.Length || !catalog.rcsCached[i]) continue;
-            if (!CanFireRcs(i)) continue;
-
-            float maxF = catalog.GetRcsMaxForceN(i);
-            if (maxF <= 0f) continue;
-
-            Vector3 dir_B = catalog.rcsDir_B[i];
-            float align = Vector3.Dot(dir_B, dirCmd_B);
-            if (align <= 0f) continue;
-            if (align < alignThresh) continue;
-
-            Vector3 f_B = dir_B * (maxF * scale);
-
-            Vector3 f_E = qBE * f_B;
-            F_E += f_E;
-
-            Vector3 r_B = catalog.rcsPosRelCg_B[i];
-            Tau_B += Vector3.Cross(r_B, f_B);
-
-            if (rcsFire01 != null && i < rcsFire01.Length)
-                rcsFire01[i] = scale; // LOW=lowScale, HIGH=1
-        }
-    }
-
-    private void AllocateRcsForTorque(Vector3 tauCmd_B)
-    {
-        float mag = tauCmd_B.magnitude;
-        if (mag < torqueDeadbandNm) return;
-
-        Vector3 tauHat_B = tauCmd_B / mag;
-        Quaternion qBE = attState.qBE;
-
-        int n = (catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
-
-        for (int i = 0; i < n; i++)
-        {
-            if (catalog.rcsCached == null || i >= catalog.rcsCached.Length || !catalog.rcsCached[i]) continue;
-            if (!CanFireRcs(i)) continue;
-
-            float maxF = catalog.GetRcsMaxForceN(i);
-            if (maxF <= 0f) continue;
-
-            Vector3 r_B = catalog.rcsPosRelCg_B[i];
-            Vector3 dir_B = catalog.rcsDir_B[i];
-
-            Vector3 f_B_high = dir_B * maxF;
-            Vector3 tau_B_high = Vector3.Cross(r_B, f_B_high);
-
-            float tauMag = tau_B_high.magnitude;
-            if (tauMag < 1e-6f) continue;
-
-            Vector3 tauHat_i = tau_B_high / tauMag;
-
-            float align = Vector3.Dot(tauHat_i, tauHat_B);
-            if (align <= 0f) continue;
-
-            float fireSel = SelectBangBangLevel(align);
-            if (fireSel <= 0f) continue;
-
-            float scale = (fireSel >= 1f) ? 1f : catalog.rcsLowScale;
-
-            Vector3 f_B = dir_B * (maxF * scale);
-
-            Vector3 f_E = qBE * f_B;
-            F_E += f_E;
-
-            Tau_B += Vector3.Cross(r_B, f_B);
-
-            if (rcsFire01 != null && i < rcsFire01.Length)
-                rcsFire01[i] = (fireSel >= 1f) ? 1f : catalog.rcsLowScale;
-        }
-    }
-
-    private bool CanFireRcs(int i)
-    {
-        if (minRcsOffTime <= 0f) return true;
-        if (_rcsCooldownUntil == null || i < 0 || i >= _rcsCooldownUntil.Length) return true;
-        return Time.time >= _rcsCooldownUntil[i];
-    }
-
-    private void ApplyRcsCooldowns()
-    {
-        if (minRcsOffTime <= 0f) return;
-        if (rcsFire01 == null || _rcsPrevOn == null || _rcsCooldownUntil == null) return;
-
-        int n = rcsFire01.Length;
-        float now = Time.time;
-
-        for (int i = 0; i < n; i++)
-        {
-            bool onNow = rcsFire01[i] > 0f;
-            bool wasOn = _rcsPrevOn[i];
-
-            if (wasOn && !onNow)
-                _rcsCooldownUntil[i] = now + minRcsOffTime;
-
-            _rcsPrevOn[i] = onNow;
-        }
-    }
-
-    private float SelectBangBangLevel(float align)
-    {
-        if (align >= alignOnHigh) return 1f;
-        if (catalog.rcsHasLowMode && align >= alignOnLow) return 0.5f;
-        return 0f;
-    }
+    // ------------------ Arrays / Utilities ------------------
 
     private void EnsureRcsArray()
     {
         int n = (catalog != null && catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
-        if (n <= 0)
-        {
-            rcsFire01 = null;
-            return;
-        }
-
-        if (rcsFire01 == null || rcsFire01.Length != n)
-            rcsFire01 = new float[n];
+        if (n <= 0) { rcsFire01 = null; return; }
+        if (rcsFire01 == null || rcsFire01.Length != n) rcsFire01 = new float[n];
     }
 
     private void EnsureRcsGateArrays()
@@ -704,49 +961,37 @@ public class ActuationController : UdonSharpBehaviour
         if (n <= 0)
         {
             _rcsCooldownUntil = null;
-            _rcsPrevOn = null;
+            _rcsHoldOnUntil = null;
+            _rcsPrevLevel = null;
             return;
         }
 
         if (_rcsCooldownUntil == null || _rcsCooldownUntil.Length != n) _rcsCooldownUntil = new float[n];
-        if (_rcsPrevOn == null || _rcsPrevOn.Length != n) _rcsPrevOn = new bool[n];
+        if (_rcsHoldOnUntil == null || _rcsHoldOnUntil.Length != n) _rcsHoldOnUntil = new float[n];
+        if (_rcsPrevLevel == null || _rcsPrevLevel.Length != n) _rcsPrevLevel = new float[n];
     }
 
     private void ClearRcsFires()
     {
         if (rcsFire01 == null) return;
-        for (int i = 0; i < rcsFire01.Length; i++)
-            rcsFire01[i] = 0f;
+        for (int i = 0; i < rcsFire01.Length; i++) rcsFire01[i] = 0f;
     }
 
     private void EnsureMainGimbalArrays()
     {
         int n = (catalog != null && catalog.mainTf != null) ? catalog.mainTf.Length : 0;
-        if (n <= 0)
-        {
-            mainGimbalYawDeg = null;
-            mainGimbalPitchDeg = null;
-            return;
-        }
+        if (n <= 0) { mainGimbalYawDeg = null; mainGimbalPitchDeg = null; return; }
 
         if (mainGimbalYawDeg == null || mainGimbalYawDeg.Length != n) mainGimbalYawDeg = new float[n];
         if (mainGimbalPitchDeg == null || mainGimbalPitchDeg.Length != n) mainGimbalPitchDeg = new float[n];
 
-        for (int i = 0; i < n; i++)
-        {
-            mainGimbalYawDeg[i] = 0f;
-            mainGimbalPitchDeg[i] = 0f;
-        }
+        for (int i = 0; i < n; i++) { mainGimbalYawDeg[i] = 0f; mainGimbalPitchDeg[i] = 0f; }
     }
 
     private void ClearMainGimbals()
     {
         if (mainGimbalYawDeg == null || mainGimbalPitchDeg == null) return;
-        for (int i = 0; i < mainGimbalYawDeg.Length; i++)
-        {
-            mainGimbalYawDeg[i] = 0f;
-            mainGimbalPitchDeg[i] = 0f;
-        }
+        for (int i = 0; i < mainGimbalYawDeg.Length; i++) { mainGimbalYawDeg[i] = 0f; mainGimbalPitchDeg[i] = 0f; }
     }
 
     private static Vector3 ClampMagnitude(Vector3 v, float maxMag)

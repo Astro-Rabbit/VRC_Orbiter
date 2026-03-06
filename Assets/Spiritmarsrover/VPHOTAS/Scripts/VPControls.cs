@@ -16,12 +16,28 @@ public class VPControls : UdonSharpBehaviour
     public float maxTwistAngle = 45f;
     public bool JoystickisGrabbed = false;
 
+    
+
     [Header("Translation Config")]
     public GameObject TranlatePointForRotation;
     public bool isTranslation = false;
     public float TranslationScale = 0.25f;
     public GameObject TranslatePoint;
     public GameObject TranslatePointInitial;
+
+
+    [Header("Manual Translation Mapping")]
+    public float translateDeadzone = 0.05f;
+
+    // Optional: invert axes if needed
+    public bool invertTransX = false;
+    public bool invertTransY = false;
+    public bool invertTransZ = false;
+
+    // Optional: if you want translation to automatically imply an RCS mode
+    // 0=TRANSLATE, 1=ROTATE, 2=BLENDED (your default), adjust to your project constants
+    public byte rcsModeWhenTranslating = 0; // TRANSLATE
+    public bool forceRcsModeOnTranslate = true;    
 
     [Header("UI/Output Debug")]
     public GameObject Yout;
@@ -73,7 +89,7 @@ public class VPControls : UdonSharpBehaviour
     public float maxYawRateDeg   = 20f;
     public float maxRollRateDeg  = 30f;
     // If you ever want direct-torque mode for testing
-    public float maxTauNm = 2000f;
+    public float maxTauNm = 4000f;
     // Deadzone for deciding “active”
     public float manualDeadzone = 0.02f;
 
@@ -130,24 +146,37 @@ public class VPControls : UdonSharpBehaviour
         // --- 5. WRITE TO MANUAL DRAFT ---
         if (manualDraft != null)
         {
-            // Decide whether manual attitude is “active”
+            // Attitude active?
             bool attActive =
                 JoystickisGrabbed ||
                 (Mathf.Abs(inputX) > manualDeadzone) ||
                 (Mathf.Abs(inputY) > manualDeadzone) ||
                 (Mathf.Abs(inputZ) > manualDeadzone);
 
-            // Decide whether manual throttle is “active”
+            // Translation active?
+            float tx = invertTransX ? -transX : transX;
+            float ty = invertTransY ? -transY : transY;
+            float tz = invertTransZ ? -transZ : transZ;
+
+            bool transActive =
+                TransGrabbing ||
+                (Mathf.Abs(tx) > translateDeadzone) ||
+                (Mathf.Abs(ty) > translateDeadzone) ||
+                (Mathf.Abs(tz) > translateDeadzone);
+
+            // Throttle active?
             bool thrActive =
                 ThrottleGrabbing ||
                 (ThrottleValue > manualDeadzone);
 
+            // Your draft only has attitude + throttle activity flags.
+            // Treat translation as part of "manualThrottleActive" (propulsion/RCS channel activity).
             manualDraft.manualAttitudeActive = attActive;
-            manualDraft.manualThrottleActive = thrActive;
+            manualDraft.manualThrottleActive = (thrActive || transActive);
 
+            // Attitude stick mapping (same as before)
             manualDraft.useRateControl = manualUseRateControl;
 
-            // Clear commands when inactive so guidance arbitration can fall back cleanly
             if (!attActive)
             {
                 manualDraft.rateCmd_B = Vector3.zero;
@@ -161,17 +190,15 @@ public class VPControls : UdonSharpBehaviour
                     float y = maxYawRateDeg   * Mathf.Deg2Rad;
                     float r = maxRollRateDeg  * Mathf.Deg2Rad;
 
-                    // inputZ=pitch stick, inputY=yaw stick, inputX=roll stick
                     manualDraft.rateCmd_B = new Vector3(
-                        inputZ * p,  // about +X
-                        inputY * y,  // about +Y
-                        inputX * r   // about +Z
+                        inputZ * p,  // pitch about +X
+                        inputY * y,  // yaw about +Y
+                        inputX * r   // roll about +Z
                     );
                     manualDraft.tauCmd_B = Vector3.zero;
                 }
                 else
                 {
-                    // Direct torque mode for testing only (body Nm)
                     manualDraft.tauCmd_B = new Vector3(
                         inputZ * maxTauNm,
                         inputY * maxTauNm,
@@ -181,13 +208,23 @@ public class VPControls : UdonSharpBehaviour
                 }
             }
 
-            // Throttle: map your single throttle lever to mainThrottle01 for now
+            // Throttle
             manualDraft.mainThrottle01 = thrActive ? Mathf.Clamp01(ThrottleValue) : 0f;
+            manualDraft.hoverThrottle01 = 0f; // still unused
 
-            // No translation yet
-            manualDraft.hoverThrottle01 = 0f;
+            // Translation command in BODY frame: X=right, Y=up, Z=forward
+            // Clamp + deadzone
+            Vector3 tCmd = new Vector3(tx, ty, tz);
+            if (!transActive) tCmd = Vector3.zero;
+            manualDraft.translateCmd_B = tCmd;
+
+            // Optional: set preferred RCS mode when translating
+            if (forceRcsModeOnTranslate && transActive)
+            {
+                manualDraft.rcsMode = rcsModeWhenTranslating;
+            }
+            // else: leave manualDraft.rcsMode as whatever UI/pilot last set (or default)
         }
-
 
     }
 

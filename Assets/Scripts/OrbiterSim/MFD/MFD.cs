@@ -3,6 +3,9 @@ using System;
 using System.Text;
 using UnityEngine;
 using TMPro;
+using VRC.SDKBase;
+using VRC.SDK3.UdonNetworkCalling;
+using VRC.Udon.Common.Interfaces;
 
 public enum ButtonSide
 {
@@ -12,15 +15,22 @@ public enum ButtonSide
     Bottom,
 }
 
+public enum MFDPageID : byte
+{
+Menu,
+Orbit,
+Align,
+}
+
 public class MFD : UdonSharpBehaviour
 {
+    public MFDPage[] pageList;
     public Canvas canvas;
     public TMP_Text text;
     public Material graphicsMaterial;
 
-    public MFDPage defaultPage;
-
     public MFDPage currentPage;
+    [UdonSynced] private byte currentPageId = (byte)MFDPageID.Menu;
 
     public const int TEXT_ROWS = 24;
     public const int TEXT_COLUMNS = 48;
@@ -74,8 +84,13 @@ public class MFD : UdonSharpBehaviour
         shapeData1 = new float[MAX_SHAPES];
         shapeData2 = new Vector4[MAX_SHAPES];
 
-        currentPage = defaultPage;
+        currentPage = pageList[currentPageId];
         currentPage.AddDisplay(this);
+        Redraw();
+    }
+
+    public void Update()
+    {
         Redraw();
     }
 
@@ -84,13 +99,25 @@ public class MFD : UdonSharpBehaviour
         currentPage.OnButton(this, side, num);
     }
 
-    public void SetPage(MFDPage page)
+    [NetworkCallable]
+    public void SetPage(byte pageId)
+    {
+        if (Networking.IsOwner(gameObject)) {
+            currentPageId = pageId;
+            RequestSerialization();
+            OnPageIdChange();
+        } else {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetPage", pageId);
+        }
+    }
+
+    private void OnPageIdChange()
     {
         currentPage.RemoveDisplay(this);
         ClearGraphics();
         ClearText();
 
-        currentPage = page;
+        currentPage = pageList[currentPageId];
         currentPage.AddDisplay(this);
         Redraw();
     }
@@ -182,5 +209,10 @@ public class MFD : UdonSharpBehaviour
         graphicsMaterial.SetFloatArray("shapeData1", shapeData1);
         graphicsMaterial.SetVectorArray("shapeData2", shapeData2);
         graphicsMaterial.SetInt("shapeCount", shapeCount);
+    }
+
+    public override void OnDeserialization()
+    {
+        OnPageIdChange();
     }
 }
