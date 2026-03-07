@@ -158,7 +158,7 @@ public class MFDAlignPage : MFDPage
         display.DrawLine(Vector2.zero, orbitSize * new Vector2((float)dx, (float)dy), Color.green);
         display.DrawLine(Vector2.zero, orbitSize * new Vector2((float)-dx, (float)-dy), Color.yellow);
         display.DrawLine(Vector2.zero, orbitSize * new Vector2((float)px, (float)py), Color.gray);
-        display.DrawConic(Vector2.zero, orbitSize, 0f, 0f, Color.green);
+        display.DrawConic(new Vector2(0f, -orbitSize), orbitSize, 0f, 0f, Color.green);
 
         display.ClearText();
         display.DrawText(FormatAngle("Inc", inclination), 2, 4, Color.green);

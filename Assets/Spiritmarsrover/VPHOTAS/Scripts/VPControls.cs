@@ -108,6 +108,19 @@ public class VPControls : UdonSharpBehaviour
     public GameObject translateOutputXZ;
     public GameObject translateOutputY;
 
+    [Header("Haptics")]
+    public float hapticAmp = 0.2f;
+    public float hapticDur = 0.04f;
+    public float hapticFreq = 1.0f;
+    public int hapticSegments = 30;
+
+    // Tracking indices to detect crossings
+    private int lastIdxX, lastIdxY, lastIdxZ;
+    private int lastIdxThrot;
+    private int lastIdxTX, lastIdxTY, lastIdxTZ;
+
+    public GameObject ThrottleRotation;
+
     private void Update()
     {
         float dt = Time.deltaTime;
@@ -242,6 +255,9 @@ public class VPControls : UdonSharpBehaviour
             if (CheckDist(hand.position, JoystickCol)) { JoystickGrabbing = true; objName = JoyString; busy = true; }
             else if (CheckDist(hand.position, ThrottleCol)) { ThrottleGrabbing = true; objName = ThrotString; busy = true; }
             else if (CheckDist(hand.position, TransCol)) { TransGrabbing = true; objName = TransString; busy = true; }
+
+            
+
         }
         // Grab End
         if (!grabbed && grabbedOld && busy)
@@ -283,6 +299,11 @@ public class VPControls : UdonSharpBehaviour
             TranslatePointInitial.transform.rotation = TranslatePoint.transform.rotation;
             InitialRotation.transform.rotation = RotationControl.transform.rotation;
             xPrev = inputX; yPrev = inputY; zPrev = inputZ;
+
+            // Inside UpdateJoystickInput grab start:
+            lastIdxX = Mathf.FloorToInt((inputX + 1f) * 0.5f * hapticSegments);
+            lastIdxY = Mathf.FloorToInt((inputY + 1f) * 0.5f * hapticSegments);
+            lastIdxZ = Mathf.FloorToInt((inputZ + 1f) * 0.5f * hapticSegments);
         }
 
         if (!JoystickGrabbing && JoystickGrabbingOld)
@@ -303,6 +324,11 @@ public class VPControls : UdonSharpBehaviour
             inputX = FilterAxis(inputX, dt, ref xPrev, ref xPrevD);
             inputY = FilterAxis(inputY, dt, ref yPrev, ref yPrevD);
             inputZ = FilterAxis(inputZ, dt, ref zPrev, ref zPrevD);
+
+            // Inside the if (JoystickisGrabbed) block, after inputX, Y, Z are filtered:
+            CheckHaptic(JoyString, inputX, ref lastIdxX, true);
+            CheckHaptic(JoyString, inputY, ref lastIdxY, true);
+            CheckHaptic(JoyString, inputZ, ref lastIdxZ, true);
         }
         else
         {
@@ -317,6 +343,9 @@ public class VPControls : UdonSharpBehaviour
             ThrottlePositoinInit.transform.position = ThrottlePositionTransfer.transform.position;
             ThrottleValueInit = ThrottleValue;
             ThrottlePrev = ThrottleValue;
+
+            // Inside UpdateThrottleInput grab start:
+            lastIdxThrot = Mathf.FloorToInt(ThrottleValue * hapticSegments);
         }
 
         if (ThrottleGrabbing)
@@ -325,9 +354,14 @@ public class VPControls : UdonSharpBehaviour
             ThrottleValue = Mathf.Clamp01(ThrottleValueInit + totalDisplacment);
             ThrottleValue = FilterAxis(ThrottleValue, dt, ref ThrottlePrev, ref ThrottlePrevD);
 
+            // Inside the if (ThrottleGrabbing) block, after ThrottleValue is filtered:
+            CheckHaptic(ThrotString, ThrottleValue, ref lastIdxThrot, false);
+
             ThrottleVis.transform.localPosition = new Vector3(0f, ThrottleValue * 0.5f - 0.5f, 0f);
-            ThrottleVis.transform.localScale = new Vector3(ThrottleValue, 1, 1);
-            ThrottleGripVis.transform.localPosition = new Vector3(0, 0, ThrottleValue * ThrottleDisplacment);
+            ThrottleVis.transform.localScale = new Vector3(ThrottleValue, ThrottleVis.transform.localScale.y, ThrottleVis.transform.localScale.z);
+            ThrottleGripVis.transform.localPosition = new Vector3(ThrottleGripVis.transform.localPosition.x, ThrottleGripVis.transform.localPosition.y, ThrottleValue * ThrottleDisplacment);
+
+            ThrottleRotation.transform.localRotation = Quaternion.Euler(new Vector3(0f, 90f, -49.619f - 50.381f * ThrottleValue));
         }
     }
 
@@ -347,6 +381,11 @@ public class VPControls : UdonSharpBehaviour
 
             txPrev = 0; tyPrev = 0; tzPrev = 0;
             txPrevD = 0; tyPrevD = 0; tzPrevD = 0;
+
+            // Inside UpdateTranslationInput grab start:
+            lastIdxTX = hapticSegments / 2; // Starts at 0, which is middle of 30 segments
+            lastIdxTY = hapticSegments / 2;
+            lastIdxTZ = hapticSegments / 2;
         }
 
         if (TransGrabbing)
@@ -379,6 +418,11 @@ public class VPControls : UdonSharpBehaviour
             transX = FilterAxis(rawX, dt, ref txPrev, ref txPrevD);
             transY = FilterAxis(rawY, dt, ref tyPrev, ref tyPrevD);
             transZ = FilterAxis(rawZ, dt, ref tzPrev, ref tzPrevD);
+
+            // Inside the if (TransGrabbing) block, after transX, Y, Z are filtered:
+            CheckHaptic(TransString, transX, ref lastIdxTX, true);
+            CheckHaptic(TransString, transY, ref lastIdxTY, true);
+            CheckHaptic(TransString, transZ, ref lastIdxTZ, true);
 
             // 5. VISUAL FEEDBACK
             if (TransGripVis != null)
@@ -471,5 +515,18 @@ public class VPControls : UdonSharpBehaviour
         float result = prev + alpha * (value - prev);
         prev = result;
         return result;
+    }
+    private void CheckHaptic(string objName, float value, ref int lastIdx, bool isBiDirectional)
+    {
+        // Map -1 to 1 range to 0 to 1 if bi-directional (Joystick/Translation)
+        float normalized = isBiDirectional ? (value + 1f) * 0.5f : value;
+        int currentIdx = Mathf.Clamp(Mathf.FloorToInt(normalized * hapticSegments), 0, hapticSegments);
+
+        if (currentIdx != lastIdx)
+        {
+            lastIdx = currentIdx;
+            VRC_Pickup.PickupHand hand = (LeftObject == objName) ? VRC_Pickup.PickupHand.Left : VRC_Pickup.PickupHand.Right;
+            Networking.LocalPlayer.PlayHapticEventInHand(hand, hapticDur, hapticAmp, hapticFreq);
+        }
     }
 }

@@ -160,7 +160,7 @@ Shader "Unlit/MFDGraphicsShader"
                         float major = (ap + pe) * 0.5;
                         float minor = sqrt(ap * pe);
 
-                        float2 center = (major - pe) * float2(-s, c);
+                        float2 center = major * float2(-s, c);
 
                         return sdfEllipse(pr - offset - center, float2(minor, major));
                     } else if (e > 1) {
