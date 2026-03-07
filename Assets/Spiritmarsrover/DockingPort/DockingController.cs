@@ -23,7 +23,6 @@ public class DockingController : UdonSharpBehaviour
         {
             state = DockingState.Ready;
             activeTargetPort = null;
-            //Debug.Log("[DockingController] Latched!");
             return;
         }
 
@@ -31,20 +30,18 @@ public class DockingController : UdonSharpBehaviour
         {
             state = DockingState.SoftCapture;
             activeTargetPort = localPort.GetTargetPort();
-           // Debug.Log("[DockingController] Soft Capture!");
+            return;
         }
 
         if (state == DockingState.SoftCapture && activeTargetPort != null)
         {
-            // Check if we are slow enough to Hard Capture
-            //Debug.Log("[DockingController] Ready for Hard Capture!");
-            Vector3 relV = new Vector3(
-                (float)(localPort.craftState.vx - activeTargetPort.craftState.vx),
-                (float)(localPort.craftState.vy - activeTargetPort.craftState.vy),
-                (float)(localPort.craftState.vz - activeTargetPort.craftState.vz)
-            );
+            // Relative velocity in solver inertial frame (E)
+            Vector3 vLocalE  = localPort.GetVelocityE();
+            Vector3 vTargE   = activeTargetPort.GetVelocityE();
+            Vector3 relV     = vLocalE - vTargE;
 
-            if (relV.sqrMagnitude < captureVelocityThreshold* captureVelocityThreshold)
+            float thr2 = captureVelocityThreshold * captureVelocityThreshold;
+            if (relV.sqrMagnitude < thr2)
             {
                 state = DockingState.HardCapture;
                 Debug.Log("[DockingController] Capture!");

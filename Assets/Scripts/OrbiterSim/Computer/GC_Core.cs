@@ -29,6 +29,9 @@ public class GC_Core : UdonSharpBehaviour
     public BodyCatalog bodies;
     public ThrusterCatalog thrusters;
 
+    [Header("Optional docking contacts (for docking helper APIs)")]
+    public GuidanceNavContactsState contacts;
+
     [Header("State Containers (owned by GC_Core)")]
     public GuidanceNavCoreState nav;
     public GC_RuntimeState runtime;
@@ -42,6 +45,20 @@ public class GC_Core : UdonSharpBehaviour
 
     [Header("Optional: craft defaults for intent.ClearToSafeDefaults")]
     public CraftCommandState craftDefaults;
+
+
+
+    // =====================================================================
+    // Docking helper tuning (V1)
+    // =====================================================================
+    [Header("Relative translation helper defaults")]
+    public float rel_kVel = 0.25f;
+    public float rel_kPos = 0.00f;
+    public float rel_maxCmd = 1.0f;
+    public Vector3 rel_axisWeights = new Vector3(1f, 1f, 0.5f);
+    public float rel_velDeadband = 0.02f;
+    public float rel_posDeadband = 0.05f;
+    public byte rel_rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
 
     // --------------------
     // Tolerances (match helper expectations; tweak later if needed)
@@ -152,7 +169,7 @@ public class GC_Core : UdonSharpBehaviour
         BuildManualDraftFromManualState();
 
         ApplyManualAutoModeSwitch();
-
+        ApplyManualTranslateAutoModeSwitch();
         // 4) Step executor slot (reserved; inactive in V1).
         // BuildExecutorDraft_None();
         BuildExecutorDraft_FromPlan();
@@ -455,7 +472,120 @@ public class GC_Core : UdonSharpBehaviour
                 _modeTau_B = modeParams.tauDirect_B;
                 _modeBlend = modeParams.blendDirectTorqueWithPD;
                 break;
+
+            case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
+            {
+                if (contacts == null || !contacts.dockValid0) break;
+
+                Vector3 craftPort_B = new Vector3((float)contacts.craftPort_px_B0, (float)contacts.craftPort_py_B0, (float)contacts.craftPort_pz_B0);
+                Vector3 targetPort_B = new Vector3((float)contacts.targetPort_px_B0, (float)contacts.targetPort_py_B0, (float)contacts.targetPort_pz_B0);
+
+                Vector3 err_B = targetPort_B - craftPort_B;
+                if (err_B.sqrMagnitude < 1e-8f) break;
+
+                Vector3 los_E = (nav.qBE * err_B).normalized;
+
+                // ship +Z in E
+                Vector3 shipAxis_E = (nav.qBE * Vector3.forward).normalized;
+
+                Quaternion qErr_E = Quaternion.FromToRotation(shipAxis_E, los_E);
+                Quaternion qDesired_BE = qErr_E * nav.qBE;
+
+                _modeWritesAtt = true;
+                _modeAttCmd = CraftCommandState.ATT_CMD_ATTITUDE_TARGET;
+                _modeQ_BE = qDesired_BE;
+                break;
+            }
+
+            case GC_RuntimeState.MODE_DOCK_ALIGN_PORTS:
+            {
+                if (contacts == null || !contacts.dockValid0) break;
+
+                Quaternion qTargetPort_E = contacts.qTargetPort_E0;  // port -> E
+                Quaternion qCraftPort_B  = contacts.qCraftPort_B0;   // port -> body
+
+                Quaternion qFlip = Quaternion.AngleAxis(180f, Vector3.up); // in port frame (+Y up)
+                Quaternion qDesired_BE = qTargetPort_E * qFlip * Quaternion.Inverse(qCraftPort_B);
+
+                _modeWritesAtt = true;
+                _modeAttCmd = CraftCommandState.ATT_CMD_ATTITUDE_TARGET;
+                _modeQ_BE = qDesired_BE;
+                break;
+            }
+
+            case GC_RuntimeState.MODE_RELVEL_PROGRADE:
+            case GC_RuntimeState.MODE_RELVEL_RETROGRADE:
+            {
+                if (contacts == null || !contacts.fullValid0) break;
+
+                Vector3 dv_E = new Vector3((float)contacts.dvx_E0, (float)contacts.dvy_E0, (float)contacts.dvz_E0);
+                if (dv_E.sqrMagnitude < 1e-10f) break;
+
+                // Select direction: +dv or -dv
+                Vector3 dir_E = (runtime.activeModeId == GC_RuntimeState.MODE_RELVEL_RETROGRADE) ? (-dv_E) : dv_E;
+                dir_E.Normalize();
+
+                _modeWritesAtt = true;
+                _modeAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
+
+                _modePointDir_E = dir_E;
+
+                // Which craft axis points? Use modeParams.bodyAxisToPoint (so UI can choose +X/+Z etc.)
+                _modeAxis = ClampAxis012(modeParams.bodyAxisToPoint);
+
+                break;
+            }
+
+
+
         }
+
+
+        // --------------------
+        // Translation assist (independent of attitude)
+        // --------------------
+        switch (runtime.activeTranslateModeId)
+        {
+            default:
+            case GC_RuntimeState.XLAT_MANUAL:
+                break;
+
+            case GC_RuntimeState.XLAT_KILL_RELVEL:
+            {
+                if (contacts == null || !contacts.fullValid0) break;
+
+                // dv_E is station - craft in E (root)
+                Vector3 dv_E = new Vector3((float)contacts.dvx_E0, (float)contacts.dvy_E0, (float)contacts.dvz_E0);
+
+                // E -> B
+                Quaternion qEB = Quaternion.Inverse(nav.qBE);
+                Vector3 dv_B = qEB * dv_E;
+
+                // deadband (component or magnitude; pick one)
+                if (dv_B.magnitude < rel_velDeadband) dv_B = Vector3.zero;
+
+                // optional position hold uses ROOT dr_B0 (not port error)
+                Vector3 dr_B = new Vector3((float)contacts.drx_B0, (float)contacts.dry_B0, (float)contacts.drz_B0);
+                if (rel_kPos > 0f && dr_B.magnitude < rel_posDeadband) dr_B = Vector3.zero;
+
+                Vector3 cmd_B = (-rel_kVel * dv_B) + (-rel_kPos * dr_B);
+
+                cmd_B = new Vector3(
+                    cmd_B.x * rel_axisWeights.x,
+                    cmd_B.y * rel_axisWeights.y,
+                    cmd_B.z * rel_axisWeights.z
+                );
+
+                float mag = cmd_B.magnitude;
+                if (mag > rel_maxCmd && mag > 1e-6f)
+                    cmd_B = (rel_maxCmd / mag) * cmd_B;
+
+                _modeWritesXlat = true;
+                _modeTranslate_B = cmd_B;
+                _modeRcsMode = rel_rcsMode;
+                break;
+            }
+        }     
 
         // V1 choice: throttle is manual-owned unless an executor later overrides it.
     }
@@ -656,6 +786,48 @@ public class GC_Core : UdonSharpBehaviour
         return false;
     }
 
+
+    private void ApplyManualTranslateAutoModeSwitch()
+    {
+        if (!runtime.autoSwitchTranslateToManualOnInput) return;
+
+        // Don't change translation mode during executor burn phases if you want it protected (optional).
+        // If you DO want manual translation to always win even during exec, remove this guard.
+        if (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_SLEW ||
+            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
+            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST)
+        {
+            // For docking translation assist, I'd still allow manual translation to kick you out,
+            // but keep this if you want consistency with attitude.
+            // return;
+        }
+
+        bool active = ManualTranslateIsActive();
+        if (active)
+        {
+            runtime.lastManualTranslateInputTime = nav.t;
+
+            if (runtime.activeTranslateModeId != GC_RuntimeState.XLAT_MANUAL)
+            {
+                runtime.lastNonManualTranslateModeId = runtime.activeTranslateModeId;
+                runtime.activeTranslateModeId = GC_RuntimeState.XLAT_MANUAL;
+            }
+            return;
+        }
+
+        if (runtime.latchTranslateTakeover) return;
+
+        double dtSince = nav.t - runtime.lastManualTranslateInputTime;
+        if (dtSince >= runtime.translateReleaseTimeoutSec)
+        {
+            if (runtime.activeTranslateModeId == GC_RuntimeState.XLAT_MANUAL)
+            {
+                byte prev = runtime.lastNonManualTranslateModeId;
+                if (prev != GC_RuntimeState.XLAT_MANUAL)
+                    runtime.activeTranslateModeId = prev;
+            }
+        }
+    }
     private void ApplyManualAutoModeSwitch()
     {
         if (!runtime.autoSwitchToManualOnInput) return;
@@ -1169,6 +1341,15 @@ public class GC_Core : UdonSharpBehaviour
                 runtime.activeProgramId = GC_RuntimeState.PROG_MANUAL; // or add PROG_DIRECT_TORQUE
                 return;
 
+            case GC_RuntimeState.MODE_RELVEL_PROGRADE:
+                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_PRO;  // if you added it
+                return;
+
+            case GC_RuntimeState.MODE_RELVEL_RETROGRADE:
+                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_RETRO; // if you added it
+                return;
+
+
             default:
                 runtime.activeProgramId = GC_RuntimeState.PROG_NONE;
                 return;
@@ -1334,7 +1515,70 @@ public class GC_Core : UdonSharpBehaviour
         plan.API_DeleteNode(i);
     }
 
+    // =====================================================================
+    // Docking Helper APIs (UI-friendly)
+    // =====================================================================
 
+
+    public bool API_Dock_PointShipZAtTargetPort()
+    {
+        if (contacts == null || !contacts.dockValid0) return false;
+        runtime.activeModeId = GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT;
+        runtime.modeStartTime = nav.t;
+        return true;
+    }
+
+    public bool API_Dock_AlignPorts()
+    {
+        if (contacts == null || !contacts.dockValid0) return false;
+        runtime.activeModeId = GC_RuntimeState.MODE_DOCK_ALIGN_PORTS;
+        runtime.modeStartTime = nav.t;
+        return true;
+    }
+
+
+    public bool API_Relative_KillVel_SelectedStation()
+    {
+        if (contacts == null) return false;
+        if (!contacts.fullValid0) return false;
+
+        runtime.activeTranslateModeId = GC_RuntimeState.XLAT_KILL_RELVEL;
+        runtime.lastNonManualTranslateModeId = runtime.activeTranslateModeId; // optional
+        return true;
+    }
+
+    public void API_Relative_StopTranslationAssist()
+    {
+        runtime.activeTranslateModeId = GC_RuntimeState.XLAT_MANUAL;
+    }
+
+    public void API_Relative_ToggleKillVel()
+    {
+        if (runtime.activeTranslateModeId == GC_RuntimeState.XLAT_KILL_RELVEL)
+            runtime.activeTranslateModeId = GC_RuntimeState.XLAT_MANUAL;
+        else if (contacts != null && contacts.fullValid0)
+            runtime.activeTranslateModeId = GC_RuntimeState.XLAT_KILL_RELVEL;
+    }
+
+    public bool API_Attitude_PointAlongRelVel(byte axis012)
+    {
+        if (contacts == null || !contacts.fullValid0) return false;
+
+        modeParams.bodyAxisToPoint = ClampAxis012(axis012);
+        runtime.activeModeId = GC_RuntimeState.MODE_RELVEL_PROGRADE;
+        runtime.modeStartTime = nav.t;
+        return true;
+    }
+
+    public bool API_Attitude_PointAgainstRelVel(byte axis012)
+    {
+        if (contacts == null || !contacts.fullValid0) return false;
+
+        modeParams.bodyAxisToPoint = ClampAxis012(axis012);
+        runtime.activeModeId = GC_RuntimeState.MODE_RELVEL_RETROGRADE;
+        runtime.modeStartTime = nav.t;
+        return true;
+    }
 
 
 }
