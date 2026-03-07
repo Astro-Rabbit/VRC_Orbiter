@@ -132,6 +132,17 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         double drzE = contacts.drz_E[stationIndex];
         RotateEToBody(craftAtt.qBE, drxE, dryE, drzE, out contacts.drx_B0, out contacts.dry_B0, out contacts.drz_B0);
 
+        contacts.selValid = true;
+        contacts.sel_drx_E = contacts.drx_E[stationIndex];
+        contacts.sel_dry_E = contacts.dry_E[stationIndex];
+        contacts.sel_drz_E = contacts.drz_E[stationIndex];
+        contacts.sel_drx_B = contacts.drx_B0;
+        contacts.sel_dry_B = contacts.dry_B0;
+        contacts.sel_drz_B = contacts.drz_B0;
+        contacts.sel_dvx_E = contacts.dvx_E0;
+        contacts.sel_dvy_E = contacts.dvy_E0;
+        contacts.sel_dvz_E = contacts.dvz_E0;
+
         // qTargetInB = inv(qCraftBE) * qTargetBE
         Quaternion qC = craftAtt.qBE;
         Quaternion qT = st.q_B2E;
@@ -191,6 +202,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
             (float)st.dock_pz_B[sPort]
         );
         Quaternion portRot_SB = st.dock_q_B[sPort];
+        contacts.qTargetPort_E0 = st.q_B2E * portRot_SB;
 
         // Convert station port to craft body frame:
         // pPort_B = dr_B + qTargetInB * pPort_stationBody
@@ -243,7 +255,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
             (float)st.dock_pz_B[sPort]
         );
         Quaternion portRot_SB = st.dock_q_B[sPort];
-
+        contacts.qTargetPort_E1 = st.q_B2E * portRot_SB;
         Vector3 drB = new Vector3((float)contacts.drx_B1, (float)contacts.dry_B1, (float)contacts.drz_B1);
         Quaternion qTargetInB = contacts.qTargetInB1;
 
