@@ -122,7 +122,7 @@ public class CraftInitializer_DockedToStation : UdonSharpBehaviour
 
         // 5) Compose craft inertial pose from station inertial pose
         Quaternion qS_E = st.q_B2E;                    // station BODY -> E
-        Quaternion qC_E = qS_E * Quaternion.Inverse(qCraftToStation);
+        Quaternion qC_E = qS_E * qCraftToStation;
 
         Vector3 rS_E = new Vector3((float)st.rx, (float)st.ry, (float)st.rz);
         Vector3 vS_E = new Vector3((float)st.vx, (float)st.vy, (float)st.vz);

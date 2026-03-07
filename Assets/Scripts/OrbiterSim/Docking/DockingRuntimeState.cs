@@ -80,7 +80,7 @@ public class DockingRuntimeState : UdonSharpBehaviour
     [Header("Debug")]
     public bool debugLatched = false;
 
-    private void Start()
+    private void Awake()
     {
         // Set default mate convention once (safe even if overwritten later)
         // 180° about +Y: keeps +Y, flips +Z and +X. Common "ports face each other" convention when +Z is "out".
