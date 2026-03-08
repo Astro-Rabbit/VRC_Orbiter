@@ -284,7 +284,7 @@ public class TabletPen : UdonSharpBehaviour
     }
     public void PlayButtonDownClip()
     {
-        Debug.Log("[TabletPen] Button Down Clip");
+        //Debug.Log("[TabletPen] Button Down Clip");
         if (ButtonDownClip.Length == 0) return;
         ButtonAudioSource.pitch = Random.Range(.9f, 1.1f);
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
