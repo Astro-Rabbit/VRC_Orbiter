@@ -11,7 +11,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
 
     [Header("Publish rate")]
     [Tooltip("Attitude publish rate (Hz). Works in both rails and integrated.")]
-    public float attHz = 10f;
+    public float attHz = 15f;
 
     [Header("Remote apply")]
     [Tooltip("If > 0, slerp toward received attitude at this rate (1/sec). 0 = hard set.")]
@@ -23,7 +23,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     // -------------------------
     [Header("Remote interpolation (render sampling)")]
     [Tooltip("Render this many seconds behind remote time to enable interpolation.")]
-    public float interpBackTimeSeconds = 0.15f;
+    public float interpBackTimeSeconds = 0.1f;
 
     [Tooltip("Max seconds to extrapolate beyond newest sample.")]
     public float extrapClampSeconds = 0.25f;

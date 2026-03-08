@@ -383,7 +383,7 @@ public class SimManager : UdonSharpBehaviour
                             if (forceWarpTo1OnIntegrated) clock.SetTimeScale(1.0);
                         }
 
-                        EnterIntegrated(); // anchors next FixedUpdate
+                        EnterIntegrated(Tmission); // anchors next FixedUpdate
                         return;
                     }
                 }
@@ -480,21 +480,14 @@ public class SimManager : UdonSharpBehaviour
         }
     }
 
-    public void EnterIntegrated()
+    public void EnterIntegrated(double T)
     {
         if (netCore == null) return;
         if (!Networking.IsOwner(netCore.gameObject)) return;
 
         _settleAccum = 0f;
 
-        double T = (clock != null) ? clock.Now() : 0.0;
-
-        if (craftProp != null)
-            craftProp.Evaluate(T);
-
-        if (soiSwitch != null)
-            TryHandleSOISwitchRails(T);
-
+        // Do NOT re-evaluate rails here if caller already did it at T
         _simT = T;
         _simTValid = true;
         _accumSim = 0.0;

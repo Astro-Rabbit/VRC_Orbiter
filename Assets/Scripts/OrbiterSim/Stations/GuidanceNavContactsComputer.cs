@@ -1,7 +1,7 @@
 using UdonSharp;
 using UnityEngine;
 using System;
-
+using VRC.SDKBase;
 public class GuidanceNavContactsComputer : UdonSharpBehaviour
 {
     [Header("Inputs")]
@@ -27,12 +27,30 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     [Header("Debug")]
     public bool logMissing = false;
 
+    [Header("Remote render attitude (optional)")]
+    public SimClock clock;
+    public CraftNetState netCore;
+    public CraftNetAttitude netAtt;
+
+    private Quaternion _qCraftForRender = Quaternion.identity;
+
     public void Evaluate()
     {
         if (craft == null || craftAtt == null || contacts == null || stations == null)
         {
             if (logMissing) Debug.Log("[GuidanceNavContactsComputer] Missing references.");
             return;
+        }
+
+        _qCraftForRender = craftAtt.qBE;
+
+        if (clock != null && netCore != null && netAtt != null)
+        {
+            if (!Networking.IsOwner(netCore.gameObject))
+            {
+                double tRender = clock.Now() - (double)netAtt.interpBackTimeSeconds;
+                _qCraftForRender = netAtt.SampleRenderQuaternion(tRender);
+            }
         }
 
         int n = stations.Length;
@@ -130,7 +148,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         double drxE = contacts.drx_E[stationIndex];
         double dryE = contacts.dry_E[stationIndex];
         double drzE = contacts.drz_E[stationIndex];
-        RotateEToBody(craftAtt.qBE, drxE, dryE, drzE, out contacts.drx_B0, out contacts.dry_B0, out contacts.drz_B0);
+        RotateEToBody(_qCraftForRender, drxE, dryE, drzE, out contacts.drx_B0, out contacts.dry_B0, out contacts.drz_B0);
 
         contacts.selValid = true;
         contacts.sel_drx_E = contacts.drx_E[stationIndex];
@@ -144,7 +162,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         contacts.sel_dvz_E = contacts.dvz_E0;
 
         // qTargetInB = inv(qCraftBE) * qTargetBE
-        Quaternion qC = craftAtt.qBE;
+        Quaternion qC = _qCraftForRender;
         Quaternion qT = st.q_B2E;
         contacts.qTargetInB0 = Quaternion.Inverse(qC) * qT;
 
@@ -166,9 +184,9 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         double drxE = contacts.drx_E[stationIndex];
         double dryE = contacts.dry_E[stationIndex];
         double drzE = contacts.drz_E[stationIndex];
-        RotateEToBody(craftAtt.qBE, drxE, dryE, drzE, out contacts.drx_B1, out contacts.dry_B1, out contacts.drz_B1);
+        RotateEToBody(_qCraftForRender, drxE, dryE, drzE, out contacts.drx_B1, out contacts.dry_B1, out contacts.drz_B1);
 
-        Quaternion qC = craftAtt.qBE;
+        Quaternion qC = _qCraftForRender;
         Quaternion qT = st.q_B2E;
         contacts.qTargetInB1 = Quaternion.Inverse(qC) * qT;
 
