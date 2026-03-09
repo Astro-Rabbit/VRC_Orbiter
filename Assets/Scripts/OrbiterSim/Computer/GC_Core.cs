@@ -58,7 +58,7 @@ public class GC_Core : UdonSharpBehaviour
     public Vector3 rel_axisWeights = new Vector3(1f, 1f, 0.5f);
     public float rel_velDeadband = 0.02f;
     public float rel_posDeadband = 0.05f;
-    public byte rel_rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
+    public byte rel_rcsMode = CraftCommandState.RCS_MODE_BLENDED;
 
     // --------------------
     // Tolerances (match helper expectations; tweak later if needed)
