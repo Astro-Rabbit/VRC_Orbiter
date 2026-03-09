@@ -2,17 +2,40 @@
 using UnityEngine;
 using VRC.SDKBase;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.Continuous)]
+/// <summary>
+/// CraftNetKinematics
+///
+/// Manual-sync network stream for craft translational kinematics while in INTEGRATED mode.
+///
+/// Philosophy (cleaned-up version):
+/// - Remote raw snapshot state is the authoritative received craft translation state.
+/// - Remote craft state can be written directly from that raw snapshot.
+/// - Optional visual smoothing is maintained as a SEPARATE presentation output.
+/// - No synthetic interpolation timeline / playback axis / interpolated sim-time.
+/// - Attitude keeps using its own shared interp-back path elsewhere.
+///
+/// This avoids the previous failure mode where interpolated position + interpolated
+/// sim-time could become visually inconsistent and create along-track jitter.
+/// </summary>
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class CraftNetKinematics : UdonSharpBehaviour
 {
+    // -------------------------------------------------------------------------
+    // Wiring
+    // -------------------------------------------------------------------------
+
     [Header("Wiring")]
     public SimClock clock;
     public CraftStateModel craft;
     public CraftNetState core;
 
+    // -------------------------------------------------------------------------
+    // Owner publish policy
+    // -------------------------------------------------------------------------
+
     [Header("Publish rate")]
-    [Tooltip("Kinematics publish rate (Hz) while integrated. 0 disables.")]
-    public float kinHz = 20f;
+    [Tooltip("Kinematics publish rate (Hz) while integrated. 0 disables periodic publishing.")]
+    public float kinHz = 4f;
 
     [Header("Owner sample time")]
     [Tooltip("Exact owner sim-time corresponding to the current craft state. SimManager should set this before publishing integrated snapshots.")]
@@ -21,65 +44,130 @@ public class CraftNetKinematics : UdonSharpBehaviour
     [Tooltip("If true, publish currentOwnerSimT as the snapshot sim-time. If false, fallback to clock.Now().")]
     public bool useCurrentOwnerSimT = true;
 
-    [Header("Remote reconstruction")]
-    public bool remoteDeadReckon = true;
+    // -------------------------------------------------------------------------
+    // Remote raw application policy
+    // -------------------------------------------------------------------------
 
-    [Tooltip("Clamp dt for dead-reckon / extrapolation to avoid huge jumps if packets stall (seconds).")]
+    [Header("Remote raw application")]
+    [Tooltip("If true, ApplyRemoteRawToCraft() dead-reckons the raw snapshot forward slightly before writing craft state. Usually leave OFF.")]
+    public bool applyRawDeadReckonToCraft = false;
+
+    [Tooltip("Clamp dt for raw dead-reckon / extrapolation (seconds).")]
     public float deadReckonClampSeconds = 0.25f;
 
-    [Header("Remote interpolation (render sampling)")]
-    [Tooltip("Snapshot ring buffer size (>=4 recommended).")]
-    public int snapBufferSize = 8;
+    // -------------------------------------------------------------------------
+    // Optional visual presentation smoothing
+    // -------------------------------------------------------------------------
 
-    private double[] _tBuf;     // network/server time
-    private double[] _simTBuf;  // corresponding owner sim-time
-    private double[] _rxBuf;
-    private double[] _ryBuf;
-    private double[] _rzBuf;
-    private double[] _vxBuf;
-    private double[] _vyBuf;
-    private double[] _vzBuf;
-    private int _bufCount = 0;
-    private int _bufHead = 0;
+    [Header("Visual presentation smoothing")]
+    [Tooltip("If true, maintain a separate smoothed visual translation output from latest raw snapshots.")]
+    public bool enableVisualSmoothing = true;
 
+    [Tooltip("If true, dead-reckon the VISUAL TARGET slightly from the latest raw snapshot before smoothing.")]
+    public bool visualDeadReckonTarget = false;
 
-    [Header("Read-only sampled render cache")]
-    public double cachedSampleRenderNetT;
-    public int cachedSampleFrame = -1;
+    [Tooltip("Smoothing time constant in seconds. Smaller = tighter / less lag.")]
+    public float visualSmoothTimeSeconds = 0.12f;
 
-    public double cachedSimRenderT;
-    public double cachedRx, cachedRy, cachedRz;
-    public double cachedVx, cachedVy, cachedVz;
+    [Tooltip("Clamp dt for visual target dead-reckon (seconds).")]
+    public float visualTargetDeadReckonClampSeconds = 0.15f;
+
+    // -------------------------------------------------------------------------
+    // Debug
+    // -------------------------------------------------------------------------
+
+    [Header("Debug")]
+    public bool debugNetKin = false;
+    public float debugLogPeriod = 1.0f;
+
+    [Header("Read-only raw snapshot state")]
+    public bool rawValid = false;
+    public int rawRevision = -1;
+    public double rawReceiveTime;
+    public double rawSendTime;
+    public double rawEpochT;
+    public double rawSimT;
+    public double rawRx, rawRy, rawRz;
+    public double rawVx, rawVy, rawVz;
+
+    [Header("Read-only presented visual state")]
+    public bool presentedValid = false;
+    public double presentedRx, presentedRy, presentedRz;
+    public double presentedVx, presentedVy, presentedVz;
+
+    [Header("Read-only visual target state")]
+    public double targetRx, targetRy, targetRz;
+    public double targetVx, targetVy, targetVz;
+    public double targetDtEx;
+
+    [Header("Read-only debug")]
+    public double dbgLastReceiveDelta;
+    public double dbgAvgReceiveDelta;
+    public double dbgSimLagSeconds;
+    public double dbgPresentedOffsetMeters;
+    public double dbgPresentedVelOffset;
+    public double dbgAppliedRawDtEx;
+
+    // -------------------------------------------------------------------------
+    // Synced snapshot fields
+    // -------------------------------------------------------------------------
 
     [UdonSynced] private int _rev;
-    [UdonSynced] private double _epochT;    // NETWORK/server time for render buffering
-    [UdonSynced] private double _simEpochT; // OWNER sim-time corresponding to this kinematic sample
+    [UdonSynced] private double _epochT;
+    [UdonSynced] private double _simEpochT;
     [UdonSynced] private double _rx, _ry, _rz;
     [UdonSynced] private double _vx, _vy, _vz;
 
+    // -------------------------------------------------------------------------
+    // Local bookkeeping
+    // -------------------------------------------------------------------------
+
     private float _accum;
+    private float _debugAccum;
     private int _appliedRev = -1;
 
     private float Period => (kinHz > 0f) ? (1f / kinHz) : 999999f;
 
+    // -------------------------------------------------------------------------
+    // Init
+    // -------------------------------------------------------------------------
 
     void Start()
     {
-        int n = snapBufferSize;
-        if (n < 4) n = 4;
-        snapBufferSize = n;
-
-        _tBuf = new double[n];
-        _simTBuf = new double[n];
-        _rxBuf = new double[n];
-        _ryBuf = new double[n];
-        _rzBuf = new double[n];
-        _vxBuf = new double[n];
-        _vyBuf = new double[n];
-        _vzBuf = new double[n];
-        _bufCount = 0;
-        _bufHead = 0;
+        if (Networking.IsOwner(gameObject))
+        {
+            SnapPresentedToCraft();
+        }
     }
+
+    void Update()
+    {
+        if (!debugNetKin) return;
+        if (Networking.IsOwner(gameObject)) return;
+
+        _debugAccum += Time.deltaTime;
+        if (_debugAccum < debugLogPeriod) return;
+        _debugAccum = 0f;
+
+        dbgSimLagSeconds = (double)Time.realtimeSinceStartup - Networking.SimulationTime(gameObject);
+
+        Debug.Log(
+            "[NetKinDbg] rawValid=" + rawValid +
+            " rev=" + rawRevision +
+            " recvDt=" + dbgLastReceiveDelta.ToString("F3") +
+            " avgRecvDt=" + dbgAvgReceiveDelta.ToString("F3") +
+            " simLag=" + dbgSimLagSeconds.ToString("F3") +
+            " rawSimT=" + rawSimT.ToString("F3") +
+            " rawDtEx=" + dbgAppliedRawDtEx.ToString("F3") +
+            " targetDtEx=" + targetDtEx.ToString("F3") +
+            " posOff=" + dbgPresentedOffsetMeters.ToString("F3") +
+            " velOff=" + dbgPresentedVelOffset.ToString("F3")
+        );
+    }
+
+    // -------------------------------------------------------------------------
+    // Owner publish API
+    // -------------------------------------------------------------------------
 
     public void PublishKinematics()
     {
@@ -89,7 +177,9 @@ public class CraftNetKinematics : UdonSharpBehaviour
 
         _accum += Time.deltaTime;
         if (_accum < Period) return;
-        _accum = 0f;
+
+        _accum -= Period;
+        if (_accum > Period) _accum = 0f;
 
         WriteSnapshotAndSerialize();
     }
@@ -114,187 +204,201 @@ public class CraftNetKinematics : UdonSharpBehaviour
         _simEpochT = simSampleT;
         _epochT = netSampleT;
 
-        _rx = craft.rx; _ry = craft.ry; _rz = craft.rz;
-        _vx = craft.vx; _vy = craft.vy; _vz = craft.vz;
+        _rx = craft.rx;
+        _ry = craft.ry;
+        _rz = craft.rz;
+
+        _vx = craft.vx;
+        _vy = craft.vy;
+        _vz = craft.vz;
 
         _rev++;
         RequestSerialization();
         _appliedRev = _rev;
     }
 
-    public void ApplyRemoteKinematics()
+    // -------------------------------------------------------------------------
+    // Remote raw application
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Apply latest raw received snapshot to local craft state on remotes.
+    /// This is the coherent network snapshot path, not the smoothed visual path.
+    /// </summary>
+    public void ApplyRemoteRawToCraft()
     {
         if (Networking.IsOwner(gameObject)) return;
         if (clock == null || craft == null || core == null) return;
         if (core.GetMode() != CraftNetState.MODE_INTEGRATED) return;
 
-        double rx = _rx, ry = _ry, rz = _rz;
-        double vx = _vx, vy = _vy, vz = _vz;
+        double rx = rawValid ? rawRx : _rx;
+        double ry = rawValid ? rawRy : _ry;
+        double rz = rawValid ? rawRz : _rz;
 
-        if (remoteDeadReckon)
+        double vx = rawValid ? rawVx : _vx;
+        double vy = rawValid ? rawVy : _vy;
+        double vz = rawValid ? rawVz : _vz;
+
+        dbgAppliedRawDtEx = 0.0;
+
+        if (applyRawDeadReckonToCraft)
         {
-            double dt = clock.NowNetwork() - _epochT;
+            double refT = rawValid ? rawReceiveTime : (double)Time.realtimeSinceStartup;
+            double dt = (double)Time.realtimeSinceStartup - refT;
             double c = (double)deadReckonClampSeconds;
-            if (dt >  c) dt =  c;
+
+            if (dt > c) dt = c;
             if (dt < -c) dt = -c;
+
+            dbgAppliedRawDtEx = dt;
 
             rx += vx * dt;
             ry += vy * dt;
             rz += vz * dt;
         }
 
-        craft.rx = rx; craft.ry = ry; craft.rz = rz;
-        craft.vx = vx; craft.vy = vy; craft.vz = vz;
+        craft.rx = rx;
+        craft.ry = ry;
+        craft.rz = rz;
+
+        craft.vx = vx;
+        craft.vy = vy;
+        craft.vz = vz;
     }
+
+    // -------------------------------------------------------------------------
+    // Visual presentation state
+    // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Remote-only: sample buffered craft state for rendering at tRenderNet (NETWORK/server time).
-    /// Also returns the matching interpolated owner sim-time for this sample.
+    /// Update the separate visual presentation translation from latest raw snapshot.
+    /// This does NOT write into craft state.
     /// </summary>
-    public void SampleRenderState(
-        double tRenderNet,
-        out double simRenderT,
-        out double rx, out double ry, out double rz,
-        out double vx, out double vy, out double vz)
+    public void UpdatePresentedState()
     {
-        simRenderT = _simEpochT;
-        rx = _rx; ry = _ry; rz = _rz;
-        vx = _vx; vy = _vy; vz = _vz;
-
-        if (_tBuf == null || _bufCount <= 0)
+        if (Networking.IsOwner(gameObject))
         {
-            // if (remoteDeadReckon)
-            // {
-            //     double dt0 = tRenderNet - _epochT;
-            //     double c0 = (double)deadReckonClampSeconds;
-            //     if (dt0 >  c0) dt0 =  c0;
-            //     if (dt0 < -c0) dt0 = -c0;
-
-            //     rx += vx * dt0;
-            //     ry += vy * dt0;
-            //     rz += vz * dt0;
-            //     simRenderT += dt0; // approximate matching sim-time forward too
-            // }
-            // return;
-        }
-
-        int n = snapBufferSize;
-        int oldest = (_bufHead - _bufCount + n) % n;
-
-        double tPrev = _tBuf[oldest];
-        double simPrev = _simTBuf[oldest];
-        double rxPrev = _rxBuf[oldest];
-        double ryPrev = _ryBuf[oldest];
-        double rzPrev = _rzBuf[oldest];
-        double vxPrev = _vxBuf[oldest];
-        double vyPrev = _vyBuf[oldest];
-        double vzPrev = _vzBuf[oldest];
-
-        if (tRenderNet <= tPrev)
-        {
-            simRenderT = simPrev;
-            rx = rxPrev; ry = ryPrev; rz = rzPrev;
-            vx = vxPrev; vy = vyPrev; vz = vzPrev;
+            SnapPresentedToCraft();
             return;
         }
 
-        for (int k = 1; k < _bufCount; k++)
+        // choose coherent latest raw target
+        double rx = rawValid ? rawRx : _rx;
+        double ry = rawValid ? rawRy : _ry;
+        double rz = rawValid ? rawRz : _rz;
+
+        double vx = rawValid ? rawVx : _vx;
+        double vy = rawValid ? rawVy : _vy;
+        double vz = rawValid ? rawVz : _vz;
+
+        targetDtEx = 0.0;
+
+        if (visualDeadReckonTarget)
         {
-            int idx = (oldest + k) % n;
-            double tCur = _tBuf[idx];
+            double refT = rawValid ? rawReceiveTime : (double)Time.realtimeSinceStartup;
+            double dt = (double)Time.realtimeSinceStartup - refT;
+            double c = (double)visualTargetDeadReckonClampSeconds;
 
-            if (tRenderNet <= tCur)
-            {
-                double dt = tCur - tPrev;
-                double u = (dt > 1e-9) ? ((tRenderNet - tPrev) / dt) : 1.0;
+            if (dt > c) dt = c;
+            if (dt < -c) dt = -c;
 
-                double simCur = _simTBuf[idx];
-                double rxCur = _rxBuf[idx];
-                double ryCur = _ryBuf[idx];
-                double rzCur = _rzBuf[idx];
-                double vxCur = _vxBuf[idx];
-                double vyCur = _vyBuf[idx];
-                double vzCur = _vzBuf[idx];
+            targetDtEx = dt;
 
-                simRenderT = simPrev + (simCur - simPrev) * u;
-
-                double dtSeg = simCur - simPrev;
-                if (dtSeg < 1e-9) dtSeg = 1e-9;
-                double u2 = u * u;
-                double u3 = u2 * u;
-
-                double h00 =  2.0 * u3 - 3.0 * u2 + 1.0;
-                double h10 =        u3 - 2.0 * u2 + u;
-                double h01 = -2.0 * u3 + 3.0 * u2;
-                double h11 =        u3 -       u2;
-
-                rx = h00 * rxPrev + h10 * dtSeg * vxPrev + h01 * rxCur + h11 * dtSeg * vxCur;
-                ry = h00 * ryPrev + h10 * dtSeg * vyPrev + h01 * ryCur + h11 * dtSeg * vyCur;
-                rz = h00 * rzPrev + h10 * dtSeg * vzPrev + h01 * rzCur + h11 * dtSeg * vzCur;
-
-                vx = vxPrev + (vxCur - vxPrev) * u;
-                vy = vyPrev + (vyCur - vyPrev) * u;
-                vz = vzPrev + (vzCur - vzPrev) * u;
-                return;
-            }
-
-            tPrev = tCur;
-            simPrev = _simTBuf[idx];
-            rxPrev = _rxBuf[idx];
-            ryPrev = _ryBuf[idx];
-            rzPrev = _rzBuf[idx];
-            vxPrev = _vxBuf[idx];
-            vyPrev = _vyBuf[idx];
-            vzPrev = _vzBuf[idx];
+            rx += vx * dt;
+            ry += vy * dt;
+            rz += vz * dt;
         }
 
-        int newest = (_bufHead - 1 + n) % n;
-        double tn = _tBuf[newest];
+        targetRx = rx;
+        targetRy = ry;
+        targetRz = rz;
+        targetVx = vx;
+        targetVy = vy;
+        targetVz = vz;
 
-        simRenderT = _simTBuf[newest];
-        rx = _rxBuf[newest];
-        ry = _ryBuf[newest];
-        rz = _rzBuf[newest];
-        vx = _vxBuf[newest];
-        vy = _vyBuf[newest];
-        vz = _vzBuf[newest];
-
-        if (remoteDeadReckon)
+        if (!presentedValid || !enableVisualSmoothing)
         {
-            double dtEx = tRenderNet - tn;
-            double c = (double)deadReckonClampSeconds;
-            if (dtEx >  c) dtEx =  c;
-            if (dtEx < -c) dtEx = -c;
+            presentedRx = targetRx;
+            presentedRy = targetRy;
+            presentedRz = targetRz;
 
-            rx += vx * dtEx;
-            ry += vy * dtEx;
-            rz += vz * dtEx;
-            simRenderT += dtEx; // approximate matching sim-time forward too
-        }
-    }
+            presentedVx = targetVx;
+            presentedVy = targetVy;
+            presentedVz = targetVz;
 
-    public void UpdateRenderSampleCache(double tRenderNet)
-    {
-        if (cachedSampleFrame == Time.frameCount && cachedSampleRenderNetT == tRenderNet)
+            presentedValid = true;
+            UpdatePresentedDebugOffsets();
             return;
+        }
 
-        cachedSampleRenderNetT = tRenderNet;
-        cachedSampleFrame = Time.frameCount;
+        float dtFrame = Time.deltaTime;
+        if (dtFrame < 0f) dtFrame = 0f;
+        if (dtFrame > 0.25f) dtFrame = 0.25f;
 
-        SampleRenderState(
-            tRenderNet,
-            out cachedSimRenderT,
-            out cachedRx, out cachedRy, out cachedRz,
-            out cachedVx, out cachedVy, out cachedVz
-        );
+        float tau = visualSmoothTimeSeconds;
+        if (tau < 0.0001f) tau = 0.0001f;
+
+        float alpha = 1f - Mathf.Exp(-dtFrame / tau);
+
+        presentedRx += (targetRx - presentedRx) * (double)alpha;
+        presentedRy += (targetRy - presentedRy) * (double)alpha;
+        presentedRz += (targetRz - presentedRz) * (double)alpha;
+
+        presentedVx += (targetVx - presentedVx) * (double)alpha;
+        presentedVy += (targetVy - presentedVy) * (double)alpha;
+        presentedVz += (targetVz - presentedVz) * (double)alpha;
+
+        UpdatePresentedDebugOffsets();
     }
+
+    private void SnapPresentedToCraft()
+    {
+        if (craft == null) return;
+
+        presentedRx = craft.rx;
+        presentedRy = craft.ry;
+        presentedRz = craft.rz;
+
+        presentedVx = craft.vx;
+        presentedVy = craft.vy;
+        presentedVz = craft.vz;
+
+        targetRx = presentedRx;
+        targetRy = presentedRy;
+        targetRz = presentedRz;
+
+        targetVx = presentedVx;
+        targetVy = presentedVy;
+        targetVz = presentedVz;
+
+        presentedValid = true;
+        UpdatePresentedDebugOffsets();
+    }
+
+    private void UpdatePresentedDebugOffsets()
+    {
+        double dx = targetRx - presentedRx;
+        double dy = targetRy - presentedRy;
+        double dz = targetRz - presentedRz;
+        dbgPresentedOffsetMeters = System.Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+        double dvx = targetVx - presentedVx;
+        double dvy = targetVy - presentedVy;
+        double dvz = targetVz - presentedVz;
+        dbgPresentedVelOffset = System.Math.Sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+    }
+
+    // -------------------------------------------------------------------------
+    // Networking callbacks
+    // -------------------------------------------------------------------------
 
     public override void OnPostSerialization(VRC.Udon.Common.SerializationResult result)
     {
+        if (!debugNetKin) return;
         Debug.Log("[NetKin] success=" + result.success + " bytes=" + result.byteCount);
     }
 
-    public override void OnDeserialization()
+    public override void OnDeserialization(VRC.Udon.Common.DeserializationResult result)
     {
         if (Networking.IsOwner(gameObject))
         {
@@ -302,42 +406,57 @@ public class CraftNetKinematics : UdonSharpBehaviour
             return;
         }
 
-        if (_tBuf == null || _tBuf.Length == 0) Start();
-
-        int n = snapBufferSize;
-
-        // Reject stale / duplicate revisions
         if (_rev <= _appliedRev)
             return;
 
-        // Reject non-monotonic time inserts, since SampleRenderState assumes
-        // the ring buffer is ordered by increasing _epochT.
-        if (_bufCount > 0)
-        {
-            int newest = (_bufHead - 1 + n) % n;
-            double lastT = _tBuf[newest];
+        double recvT = result.receiveTime;
+        double sendT = result.sendTime;
 
-            // Small epsilon to avoid duplicate-time inserts from precision noise.
-            if (_epochT <= lastT + 1e-9)
-            {
-                _appliedRev = _rev;
-                return;
-            }
+        if (rawValid)
+        {
+            dbgLastReceiveDelta = recvT - rawReceiveTime;
+
+            if (dbgAvgReceiveDelta <= 0.0) dbgAvgReceiveDelta = dbgLastReceiveDelta;
+            else dbgAvgReceiveDelta = dbgAvgReceiveDelta * 0.85 + dbgLastReceiveDelta * 0.15;
         }
 
-        int i = _bufHead;
+        rawValid = true;
+        rawRevision = _rev;
 
-        _tBuf[i] = _epochT;
-        _simTBuf[i] = _simEpochT;
-        _rxBuf[i] = _rx;
-        _ryBuf[i] = _ry;
-        _rzBuf[i] = _rz;
-        _vxBuf[i] = _vx;
-        _vyBuf[i] = _vy;
-        _vzBuf[i] = _vz;
+        rawReceiveTime = recvT;
+        rawSendTime = sendT;
+        rawEpochT = _epochT;
+        rawSimT = _simEpochT;
 
-        _bufHead = (i + 1) % n;
-        if (_bufCount < n) _bufCount++;
+        rawRx = _rx;
+        rawRy = _ry;
+        rawRz = _rz;
+
+        rawVx = _vx;
+        rawVy = _vy;
+        rawVz = _vz;
+
+        if (!presentedValid)
+        {
+            presentedRx = rawRx;
+            presentedRy = rawRy;
+            presentedRz = rawRz;
+
+            presentedVx = rawVx;
+            presentedVy = rawVy;
+            presentedVz = rawVz;
+
+            targetRx = rawRx;
+            targetRy = rawRy;
+            targetRz = rawRz;
+
+            targetVx = rawVx;
+            targetVy = rawVy;
+            targetVz = rawVz;
+
+            presentedValid = true;
+            UpdatePresentedDebugOffsets();
+        }
 
         _appliedRev = _rev;
     }

@@ -10,11 +10,14 @@ using System;
 /// Assumptions (matches your SkyBoxDriver contract):
 /// - Unity WORLD axes == craft BODY axes (craft mesh does not rotate).
 /// - Sky/planets are shader-driven using craftAtt.qBE.
-/// - contacts snapshot provides station pose in craft body frame:
-///     dr_B  (meters)  : station position relative to craft CG, expressed in craft body axes
-///     qTargetInB      : station orientation expressed in craft body frame
+/// - GuidanceNavContactsState provides station pose in craft body frame:
+///     dr_B        : station position relative to craft CG, expressed in craft body axes
+///     qTargetInB  : station orientation expressed in craft body frame
 ///
-/// This script does NOT compute relative transforms; it only consumes GuidanceNavContactsState.
+/// This script is PRESENTATION ONLY:
+/// - It does not compute relative transforms.
+/// - It may optionally smooth the rendered relative pose.
+/// - Raw contact truth remains in GuidanceNavContactsComputer / GuidanceNavContactsState.
 /// </summary>
 public class StationRenderManager : UdonSharpBehaviour
 {
@@ -26,8 +29,8 @@ public class StationRenderManager : UdonSharpBehaviour
     public GameObject[] stationRenderRoots;
 
     [Header("Distance culling (meters)")]
-    public double renderOnRangeMeters = 100000.0;   // 200 km example
-    public double renderOffRangeMeters = 150000.0;  // hysteresis; must be >= on
+    public double renderOnRangeMeters = 100000.0;
+    public double renderOffRangeMeters = 150000.0;
 
     [Header("Pose")]
     [Tooltip("If true, apply station pose as world-space (recommended).")]
@@ -36,12 +39,37 @@ public class StationRenderManager : UdonSharpBehaviour
     [Tooltip("Optional global model fix applied after qTargetInB (rare; prefer per-station prefab).")]
     public Quaternion globalModelFix = Quaternion.identity;
 
+    [Header("Visual smoothing")]
+    [Tooltip("If true, smooth rendered station relative position in craft/body space.")]
+    public bool smoothRelativePosition = true;
+
+    [Tooltip("Position smoothing time constant (seconds). Smaller = tighter, less lag.")]
+    public float positionSmoothTimeSeconds = 0.10f;
+
+    [Tooltip("If relative position jump exceeds this, snap instead of smoothing (meters). 0 disables snapping.")]
+    public float positionSnapDistanceMeters = 500f;
+
+    [Tooltip("If true, also smooth rendered station rotation.")]
+    public bool smoothRelativeRotation = false;
+
+    [Tooltip("Rotation smoothing gain in 1/seconds. Higher = tighter.")]
+    public float rotationLerpRate = 12f;
+
     [Header("Debug")]
     public bool logSwitches = false;
 
-    // internal
+    [Header("Read-only smoothing debug")]
+    public Vector3 smoothedDrB;
+    public Quaternion smoothedQTargetInB = Quaternion.identity;
+    public float dbgPositionErrorMeters = 0f;
+
+    // internal active station state
     private int _activeIndex = -1;
     private bool _active = false;
+
+    // smoothing state for currently active rendered station
+    private bool _poseInitialized = false;
+    private Vector3 _smoothVelB = Vector3.zero;
 
     public void Tick()
     {
@@ -84,7 +112,6 @@ public class StationRenderManager : UdonSharpBehaviour
         // Apply active state transitions with hysteresis
         if (_active)
         {
-            // If currently active, check OFF condition using off range
             if (_activeIndex >= 0 && _activeIndex < n)
             {
                 double r2 = SafeRange2(_activeIndex);
@@ -101,7 +128,6 @@ public class StationRenderManager : UdonSharpBehaviour
         }
         else
         {
-            // If inactive, check ON condition
             if (idx >= 0)
                 SetActiveStation(idx);
         }
@@ -116,10 +142,8 @@ public class StationRenderManager : UdonSharpBehaviour
             else
             {
                 // Slot mismatch (e.g., selection changed). Re-resolve quickly:
-                // Prefer whichever slot matches active index.
                 if (_activeIndex == contacts.fullStationIndex0 && contacts.fullValid0) ApplyPoseFromSlot0(_activeIndex);
                 else if (_activeIndex == contacts.fullStationIndex1 && contacts.fullValid1) ApplyPoseFromSlot1(_activeIndex);
-                // else we lack full data; hide to avoid wrong pose.
                 else SetActiveStation(-1);
             }
         }
@@ -143,12 +167,17 @@ public class StationRenderManager : UdonSharpBehaviour
         if (newIndex == _activeIndex && ((_active && newIndex >= 0) || (!_active && newIndex < 0)))
             return;
 
-        // Disable all (cheap given small N; you can optimize later)
+        // Disable all
         for (int i = 0; i < stationRenderRoots.Length; i++)
         {
             GameObject go = stationRenderRoots[i];
             if (go != null) go.SetActive(false);
         }
+
+        // Reset smoothing whenever active rendered station changes
+        _poseInitialized = false;
+        _smoothVelB = Vector3.zero;
+        dbgPositionErrorMeters = 0f;
 
         if (newIndex >= 0 && newIndex < stationRenderRoots.Length && stationRenderRoots[newIndex] != null)
         {
@@ -173,7 +202,7 @@ public class StationRenderManager : UdonSharpBehaviour
         Vector3 drB = new Vector3((float)contacts.drx_B0, (float)contacts.dry_B0, (float)contacts.drz_B0);
         Quaternion qTB = contacts.qTargetInB0 * globalModelFix;
 
-        ApplyPose(root.transform, drB, qTB);
+        ApplyPoseSmoothed(root.transform, drB, qTB);
     }
 
     private void ApplyPoseFromSlot1(int stationIndex)
@@ -184,7 +213,77 @@ public class StationRenderManager : UdonSharpBehaviour
         Vector3 drB = new Vector3((float)contacts.drx_B1, (float)contacts.dry_B1, (float)contacts.drz_B1);
         Quaternion qTB = contacts.qTargetInB1 * globalModelFix;
 
-        ApplyPose(root.transform, drB, qTB);
+        ApplyPoseSmoothed(root.transform, drB, qTB);
+    }
+
+    private void ApplyPoseSmoothed(Transform stationRoot, Vector3 targetDrB, Quaternion targetQTargetInB)
+    {
+        float dt = Time.deltaTime;
+        if (dt < 0f) dt = 0f;
+        if (dt > 0.25f) dt = 0.25f;
+
+        // Initialize on first valid frame after activation/switch
+        if (!_poseInitialized)
+        {
+            smoothedDrB = targetDrB;
+            smoothedQTargetInB = targetQTargetInB;
+            _smoothVelB = Vector3.zero;
+            _poseInitialized = true;
+
+            dbgPositionErrorMeters = 0f;
+            ApplyPose(stationRoot, smoothedDrB, smoothedQTargetInB);
+            return;
+        }
+
+        // --- Position smoothing ---
+        if (!smoothRelativePosition)
+        {
+            smoothedDrB = targetDrB;
+            _smoothVelB = Vector3.zero;
+            dbgPositionErrorMeters = 0f;
+        }
+        else
+        {
+            Vector3 err = targetDrB - smoothedDrB;
+            float errMag = err.magnitude;
+            dbgPositionErrorMeters = errMag;
+
+            if (positionSnapDistanceMeters > 0f && errMag > positionSnapDistanceMeters)
+            {
+                smoothedDrB = targetDrB;
+                _smoothVelB = Vector3.zero;
+            }
+            else
+            {
+                float smoothT = positionSmoothTimeSeconds;
+                if (smoothT < 0.0001f) smoothT = 0.0001f;
+
+                smoothedDrB = Vector3.SmoothDamp(
+                    smoothedDrB,
+                    targetDrB,
+                    ref _smoothVelB,
+                    smoothT,
+                    Mathf.Infinity,
+                    dt
+                );
+            }
+        }
+
+        // --- Rotation smoothing ---
+        if (!smoothRelativeRotation)
+        {
+            smoothedQTargetInB = targetQTargetInB;
+        }
+        else
+        {
+            float rate = rotationLerpRate;
+            if (rate < 0f) rate = 0f;
+
+            float alpha = 1f - Mathf.Exp(-rate * dt);
+            smoothedQTargetInB = Quaternion.Slerp(smoothedQTargetInB, targetQTargetInB, alpha);
+        }
+
+        ApplyPose(stationRoot, smoothedDrB, smoothedQTargetInB);
     }
 
     private void ApplyPose(Transform stationRoot, Vector3 drB, Quaternion qTargetInB)
@@ -197,7 +296,6 @@ public class StationRenderManager : UdonSharpBehaviour
         }
         else
         {
-            // If you parent station roots under craftCG, you can set local pose instead.
             stationRoot.localPosition = drB;
             stationRoot.localRotation = qTargetInB;
         }

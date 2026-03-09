@@ -23,7 +23,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     // -------------------------
     [Header("Remote interpolation (render sampling)")]
     [Tooltip("Render this many seconds behind remote time to enable interpolation.")]
-    public float interpBackTimeSeconds = 0.2f;
+    public float interpBackTimeSeconds = 0.25f;
 
     [Tooltip("Max seconds to extrapolate beyond newest sample.")]
     public float extrapClampSeconds = 0.25f;

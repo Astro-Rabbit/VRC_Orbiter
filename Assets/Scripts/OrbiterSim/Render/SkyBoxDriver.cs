@@ -33,6 +33,11 @@ public class SkyBoxDriver : UdonSharpBehaviour
     public SimClock clock;
     public CraftNetState netCore;
     public CraftNetAttitude netAtt;
+    public CraftNetKinematics netKin;
+
+    [Header("Remote integrated translation presentation")]
+    [Tooltip("If true, Sun/Moon body-relative vectors use CraftNetKinematics presented translation on remotes in integrated mode.")]
+    public bool usePresentedRemoteTranslation = true;    
 
     [Header("Target skybox material (RenderSettings.skybox)")]
     public Material skyboxMat;
@@ -100,14 +105,21 @@ public class SkyBoxDriver : UdonSharpBehaviour
         // -------------
         if (driveSun && bodies != null && craft != null)
         {
-            // bodies.GetCraftToBodyVector gives craft->body in SSB/ECL:
-            //   dx = craft - body
-            // We need direction FROM craft TO sun:
-            //   sunDir = (sun - craft) = -(craft - sun) = -(dx,dy,dz)
+            // Base helper gives (craft - body) in ECL.
             double dx, dy, dz;
             bodies.GetCraftToBodyVector(bodies.sunId, craft, out dx, out dy, out dz);
 
-            // craft->sun (ECL) = -(craft->sun from helper which returns craft - sun)
+            // Optional remote integrated visual translation offset:
+            // (presentedCraft - body) = (rawCraft - body) + (presentedCraft - rawCraft)
+            double drx, dry, drz;
+            GetRemotePresentedCraftOffset(out drx, out dry, out drz);
+
+            dx += drx;
+            dy += dry;
+            dz += drz;
+
+            // Need direction FROM craft TO sun:
+            // craft->sun = -(craft - sun)
             double sx = -dx;
             double sy = -dy;
             double sz = -dz;
@@ -120,10 +132,8 @@ public class SkyBoxDriver : UdonSharpBehaviour
                 float uy = (float)(sy * invD);
                 float uz = (float)(sz * invD);
 
-                // Shader hook: Sun direction in ECLIPTIC inertial
                 skyboxMat.SetVector("_SunDirEcl", new Vector4(ux, uy, uz, 0f));
 
-                // Optional: angular radius (radians) = atan(R / d)
                 if (driveSunAngularSize && sunRadiusM > 0.0)
                 {
                     double dist = 1.0 / invD;
@@ -131,27 +141,13 @@ public class SkyBoxDriver : UdonSharpBehaviour
                     skyboxMat.SetFloat("_SunAngRad", (float)angRad);
                 }
 
-                // -------------
-                // Directional light
-                // -------------
-                // Unity directional light points along its -forward axis (by convention, it illuminates opposite forward).
-                // We want light rays traveling from Sun -> craft, i.e. along (-sunDirEcl).
-                // -------------
-                // Directional light (WORLD == BODY in your setup)
-                // -------------
                 if (sunLight != null)
                 {
-                    // craft->sun in ECL
                     Vector3 sunDirEcl = new Vector3(ux, uy, uz);
-
-                    // Convert to BODY/WORLD: sunDirBody = qEB * sunDirEcl
                     Quaternion qBEq = q;
-                    Quaternion qEB = new Quaternion(-qBEq.x, -qBEq.y, -qBEq.z, qBEq.w); // inverse (conjugate)
+                    Quaternion qEB = new Quaternion(-qBEq.x, -qBEq.y, -qBEq.z, qBEq.w);
                     Vector3 sunDirBody = qEB * sunDirEcl;
 
-                    // Unity directional light emits along -transform.forward.
-                    // To get light rays coming from the Sun (sun->craft = -sunDirBody),
-                    // set forward to craft->sun (sunDirBody).
                     if (sunDirBody.sqrMagnitude > 1e-10f)
                         sunLight.transform.rotation = Quaternion.LookRotation(-sunDirBody, Vector3.up);
                 }
@@ -164,11 +160,19 @@ public class SkyBoxDriver : UdonSharpBehaviour
         // -------------
         if (driveMoon && bodies != null && craft != null)
         {
-            // GetCraftToBodyVector returns (craft - body) in SSB/ECL.
-            // Shader expects craft->moon center (moon - craft), so NEGATE.
+            // Base helper gives (craft - moon) in ECL.
             double dx, dy, dz;
             bodies.GetCraftToBodyVector(bodies.moonId, craft, out dx, out dy, out dz);
 
+            // Optional remote integrated visual translation offset
+            double drx, dry, drz;
+            GetRemotePresentedCraftOffset(out drx, out dry, out drz);
+
+            dx += drx;
+            dy += dry;
+            dz += drz;
+
+            // Shader expects craft->moon = -(craft - moon)
             float mx = (float)(-dx);
             float my = (float)(-dy);
             float mz = (float)(-dz);
@@ -178,14 +182,29 @@ public class SkyBoxDriver : UdonSharpBehaviour
             double Rm = (moonRadiusOverrideM > 0.0) ? moonRadiusOverrideM : bodies.moonRadiusM;
             skyboxMat.SetFloat("_MoonRadiusM", (float)Rm);
 
-            // Orientation hook for Stage C (albedo UV): body-fixed -> inertial ECL.
-            // Do NOT conjugate here. If later the texture appears mirrored/retrograde,
-            // we will fix it with ONE controlled inversion (driver OR shader), not both.
             Quaternion qMoon = bodies.GetBodyFixedToInertial(bodies.moonId);
             skyboxMat.SetVector("_MoonBodyToEcl", new Vector4(qMoon.x, qMoon.y, qMoon.z, qMoon.w));
         }
 
 
-
     }
+
+    private void GetRemotePresentedCraftOffset(
+        out double drx, out double dry, out double drz)
+    {
+        drx = 0.0;
+        dry = 0.0;
+        drz = 0.0;
+
+        if (craft == null || netCore == null || netKin == null) return;
+        if (Networking.IsOwner(netCore.gameObject)) return;
+        if (!usePresentedRemoteTranslation) return;
+        if (netCore.GetMode() != CraftNetState.MODE_INTEGRATED) return;
+        if (!netKin.presentedValid) return;
+
+        drx = netKin.presentedRx - craft.rx;
+        dry = netKin.presentedRy - craft.ry;
+        drz = netKin.presentedRz - craft.rz;
+    }
+
 }

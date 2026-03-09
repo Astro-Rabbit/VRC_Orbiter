@@ -74,13 +74,18 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
 
                 if (presentedMode == CraftNetState.MODE_INTEGRATED && netKin != null)
                 {
-                    _simRenderT = netKin.cachedSimRenderT;
-                    _crxRender = netKin.cachedRx;
-                    _cryRender = netKin.cachedRy;
-                    _crzRender = netKin.cachedRz;
-                    _cvxRender = netKin.cachedVx;
-                    _cvyRender = netKin.cachedVy;
-                    _cvzRender = netKin.cachedVz;
+                    // Contacts remain based on RAW coherent craft translation, not smoothed presentation.
+                    // StationRenderManager does the visual smoothing later in body-relative space.
+                    if (netKin.rawValid)
+                    {
+                        _simRenderT = netKin.rawSimT;
+                        _crxRender = netKin.rawRx;
+                        _cryRender = netKin.rawRy;
+                        _crzRender = netKin.rawRz;
+                        _cvxRender = netKin.rawVx;
+                        _cvyRender = netKin.rawVy;
+                        _cvzRender = netKin.rawVz;
+                    }
                 }
             }
         }
