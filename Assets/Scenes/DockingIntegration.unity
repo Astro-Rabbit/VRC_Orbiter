@@ -44690,6 +44690,9 @@ MonoBehaviour:
   coreHz: 2
   mode: 0
   primaryBodyId: 1
+  prevMode: 0
+  prevPrimaryBodyId: 1
+  modeChangeNetT: 0
   dockPhase: 0
   dockStationIndex: -1
   dockStationPortIndex: 0
@@ -51384,6 +51387,9 @@ MonoBehaviour:
   lastSimDt: 0
   heartbeatSeconds: 0
   slewRate: 0
+  cachedRenderTimeNet: 0
+  cachedRenderBackTime: 0
+  cachedRenderFrame: -1
 --- !u!114 &857553314
 MonoBehaviour:
   m_ObjectHideFlags: 2
@@ -73274,7 +73280,7 @@ PrefabInstance:
     - target: {fileID: 1948233767204510348, guid: eb3fefabf35f86b4fa231e42ab348e2a,
         type: 3}
       propertyPath: m_Enabled
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 1948233767204510348, guid: eb3fefabf35f86b4fa231e42ab348e2a,
         type: 3}
@@ -73310,7 +73316,7 @@ PrefabInstance:
     - target: {fileID: 2688458087727763157, guid: eb3fefabf35f86b4fa231e42ab348e2a,
         type: 3}
       propertyPath: m_Enabled
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 2688458087727763157, guid: eb3fefabf35f86b4fa231e42ab348e2a,
         type: 3}
@@ -79955,9 +79961,21 @@ MonoBehaviour:
   clock: {fileID: 857553313}
   craft: {fileID: 265503658}
   core: {fileID: 616762990}
-  kinHz: 10
-  remoteDeadReckon: 1
-  deadReckonClampSeconds: 2
+  kinHz: 5
+  currentOwnerSimT: 0
+  useCurrentOwnerSimT: 1
+  remoteDeadReckon: 0
+  deadReckonClampSeconds: 0.25
+  snapBufferSize: 8
+  cachedSampleRenderNetT: 0
+  cachedSampleFrame: -1
+  cachedSimRenderT: 0
+  cachedRx: 0
+  cachedRy: 0
+  cachedRz: 0
+  cachedVx: 0
+  cachedVy: 0
+  cachedVz: 0
 --- !u!114 &1332272894
 MonoBehaviour:
   m_ObjectHideFlags: 2
@@ -80455,7 +80473,7 @@ MonoBehaviour:
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 1359538628}
   ownerOnlyWrite: 1
-  minSendInterval: 0.15
+  minSendInterval: 0.2
   rcsHiMask: 0
   rcsLoMask: 0
   fxMask: 0
@@ -97582,9 +97600,9 @@ MonoBehaviour:
   _udonSharpBackingUdonBehaviour: {fileID: 1687101844}
   clock: {fileID: 857553313}
   att: {fileID: 1069797748}
-  attHz: 10
+  attHz: 5
   slerpRate: 0
-  interpBackTimeSeconds: 0.15
+  interpBackTimeSeconds: 0.5
   extrapClampSeconds: 0.25
   snapBufferSize: 8
 --- !u!114 &1687101844
@@ -105466,9 +105484,10 @@ MonoBehaviour:
   fullDetailRangeMeters: 20000
   allowSlot1BeyondRange: 0
   logMissing: 0
-  clock: {fileID: 0}
-  netCore: {fileID: 0}
-  netAtt: {fileID: 0}
+  clock: {fileID: 857553313}
+  netCore: {fileID: 616762990}
+  netAtt: {fileID: 1687101843}
+  netKin: {fileID: 1332272893}
 --- !u!1 &2018833347
 GameObject:
   m_ObjectHideFlags: 0
@@ -120679,24 +120698,17 @@ MonoBehaviour:
   useAssignedLayers: 0
   DynamicPrefabs: []
   DynamicMaterials:
-  - {fileID: 2100000, guid: aa60a8da9af431349adc49a86250b382, type: 2}
   - {fileID: 2100000, guid: 87c63a229a3144f4384a8f7c48132206, type: 2}
-  - {fileID: 2100000, guid: 5df4b8ed08befff4caaab619b2851929, type: 2}
-  - {fileID: 2100000, guid: 4f9bc8c529d16b74b8a349581891da3c, type: 2}
-  - {fileID: 2100000, guid: 18a05016dfdc4364eb48d61474fa1a5a, type: 2}
+  - {fileID: -4187724231692053404, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 10303, guid: 0000000000000000f000000000000000, type: 0}
+  - {fileID: 2100000, guid: 4f9bc8c529d16b74b8a349581891da3c, type: 2}
+  - {fileID: 8459476934309628958, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 2100000, guid: d27def4fd61513c4ca186bbdb6ab8e32, type: 2}
   - {fileID: 2100000, guid: c3d33675eef2cdb4d95652fd11991a27, type: 2}
-  - {fileID: -4187724231692053404, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: 4474073298537395550, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 2100000, guid: c8e3ae9c76f588d4c9779d6aeb02f65d, type: 2}
-  - {fileID: -399574525857257761, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: -4891474291887946702, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: 8459476934309628958, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: -6272595304418858389, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: -3522955778539423533, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: -4192297992474313835, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: 2100000, guid: 2cd24e4ddeb71c74eb7c05908f2a9d46, type: 2}
+  - {fileID: -6272595304418858389, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: -2055249903310890193, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
   - {fileID: -2181910099031881108, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
   - {fileID: 651787899999066173, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
@@ -120717,11 +120729,17 @@ MonoBehaviour:
   - {fileID: 3737498044657563010, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
   - {fileID: 5629288762869737322, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
   - {fileID: -168533257612475326, guid: 1494f77dc4be923489f4a83cd814b21a, type: 3}
-  - {fileID: 2100000, guid: 6fe6f0b66fe1ef749939d38839c2e8a9, type: 2}
+  - {fileID: 2100000, guid: aa60a8da9af431349adc49a86250b382, type: 2}
+  - {fileID: 2100000, guid: 2cd24e4ddeb71c74eb7c05908f2a9d46, type: 2}
   - {fileID: 2100000, guid: d9522bd7d975b69468bf3e54d7e3be38, type: 2}
-  - {fileID: 6709204623401420152, guid: 2266838b90039184397367bac5eeddaa, type: 3}
-  - {fileID: 4041202868057311792, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: 4474073298537395550, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 2100000, guid: a1d4b370d7872de4f9f1118d72cb6287, type: 2}
+  - {fileID: -4891474291887946702, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: 6709204623401420152, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: 2100000, guid: 6fe6f0b66fe1ef749939d38839c2e8a9, type: 2}
+  - {fileID: 4041202868057311792, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: -399574525857257761, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: 2100000, guid: 18a05016dfdc4364eb48d61474fa1a5a, type: 2}
   - {fileID: 2100000, guid: 6dc4aa75d454ceb4198911e37cc1410a, type: 2}
   - {fileID: 2100000, guid: d8909e4b082209f4e8a8734a4c7327f6, type: 2}
   - {fileID: 2100000, guid: 72404391391413a49a2d2f8c49b47662, type: 2}
@@ -120736,6 +120754,7 @@ MonoBehaviour:
   - {fileID: 2100000, guid: ac96c2b3f094e8b46accdeda5cdadc91, type: 2}
   - {fileID: 2100000, guid: 9a2abf313ea2307489753d31de84f45d, type: 2}
   - {fileID: 2100000, guid: 9ad9919b6f7e7b4408ee2f667389c771, type: 2}
+  - {fileID: 2100000, guid: 5df4b8ed08befff4caaab619b2851929, type: 2}
   - {fileID: 2100000, guid: 68bb5fdc683b4f1428178e6ee2e6a6bb, type: 2}
   LightMapsNear: []
   LightMapsFar: []

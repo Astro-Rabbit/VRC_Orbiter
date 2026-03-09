@@ -23,7 +23,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     // -------------------------
     [Header("Remote interpolation (render sampling)")]
     [Tooltip("Render this many seconds behind remote time to enable interpolation.")]
-    public float interpBackTimeSeconds = 0.1f;
+    public float interpBackTimeSeconds = 0.2f;
 
     [Tooltip("Max seconds to extrapolate beyond newest sample.")]
     public float extrapClampSeconds = 0.25f;
@@ -74,7 +74,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
         if (_accum < Period) return;
         _accum = 0f;
 
-        _epochT = clock.Now();
+        _epochT = clock.NowNetwork();
 
         Quaternion q = att.qBE;
         _qX = q.x; _qY = q.y; _qZ = q.z; _qW = q.w;
@@ -117,7 +117,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
         if (att == null || clock == null) return;
 
         _accum = 0f;
-        _epochT = clock.Now();
+        _epochT = clock.NowNetwork();
 
         Quaternion q = att.qBE;
         _qX = q.x; _qY = q.y; _qZ = q.z; _qW = q.w;

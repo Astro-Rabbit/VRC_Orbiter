@@ -122,16 +122,44 @@ public class SimManager : UdonSharpBehaviour
 
         double Tmission = clock.Now();
 
-        // Choose a single authoritative time for "world/ephem rendering" this frame.
-        // - Owner + integrated: use _simT (craft state is integrated against _simT)
-        // - Everyone else: use mission time
+        bool hasNetCore = (netCore != null);
+        bool isOwner = hasNetCore && Networking.IsOwner(netCore.gameObject);
+
+        double backTime = 0.0;
+        if (netAtt != null) backTime = (double)netAtt.interpBackTimeSeconds;
+
+
+        if (!isOwner)
+            clock.UpdateRemoteRenderTimeCache(backTime);
+
+        double tRenderNet = clock.GetCachedRemoteRenderTime();
+
+        byte presentedMode = isOwner
+            ? (netCore != null ? netCore.mode : MODE_RAILS)
+            : (netCore != null ? netCore.GetPresentedMode(tRenderNet) : MODE_RAILS);
+        // Choose a single authoritative time for world/ephem/render this frame.
+        // - Owner + integrated: use _simT
+        // - Owner otherwise: use mission time
+        // - Remote: use delayed presentation time
         double Tview = Tmission;
-        if (netCore != null && netCore.mode == MODE_INTEGRATED)
+
+        if (isOwner)
         {
-            if (Networking.IsOwner(netCore.gameObject) && _simTValid)
+            if (netCore != null && netCore.mode == MODE_INTEGRATED && _simTValid)
                 Tview = _simT;
         }
+        else
+        {
+            // Default remote delayed sim-time for rails/docked presentation
+            Tview = Tmission - backTime * clock.timeScale;
 
+            // For integrated presentation, align remote world timing to ONE cached sampled integrated craft timeline
+            if (presentedMode == MODE_INTEGRATED && netKin != null)
+            {
+                netKin.UpdateRenderSampleCache(tRenderNet);
+                Tview = netKin.cachedSimRenderT;
+            }
+        }
         // 1) Everyone runs ephemeris for rails + rendering
         if (ephem != null) ephem.Evaluate(Tview);
 
@@ -144,7 +172,7 @@ public class SimManager : UdonSharpBehaviour
         //    - Owner integrated: stepped in FixedUpdate (no-op here)
         //    - Owner docked: dock kinematics in Update (same timing as station/render)
         //    - Remotes: apply net state
-        TickCraft_UpdateSide(Tmission);
+        TickCraft_UpdateSide(Tmission, Tview, tRenderNet, isOwner);
 
 
         // --- Undock release request: DockingComputer has already written released craft state.
@@ -172,7 +200,6 @@ public class SimManager : UdonSharpBehaviour
         // --- Docking capture check (owner only, gated by dockingAllowed) ---
         if (DockingAllowedNow() && dockingComp != null && netCore != null && clock != null)
         {
-            bool isOwner = Networking.IsOwner(netCore.gameObject);
 
             if (isOwner && netCore.mode != MODE_DOCKED)
             {
@@ -207,10 +234,8 @@ public class SimManager : UdonSharpBehaviour
     private void FixedUpdate()
     {
         if (paused || clock == null || netCore == null || craft == null) return;
-
         bool isOwner = Networking.IsOwner(netCore.gameObject);
         if (!isOwner) return;
-
         byte mode = netCore.mode;
 
         // Integrated-only in FixedUpdate
@@ -344,17 +369,20 @@ public class SimManager : UdonSharpBehaviour
 
         // Publish once per FixedUpdate (publish scripts are already rate-limited internally)
         if (netCore != null) netCore.PublishCore();
-        if (netKin != null)  netKin.PublishKinematics();
+        if (netKin != null)
+        {
+            netKin.currentOwnerSimT = _simT;
+            netKin.PublishKinematics();
+        }
         if (netAtt != null)  netAtt.PublishAttitude();
     }
 
     // Update-side craft handling: rails owner + docked owner + all remote application
-    private void TickCraft_UpdateSide(double Tmission)
+    private void TickCraft_UpdateSide(double Tmission, double Tview, double tRenderNet, bool isOwner)
     {
         if (craft == null || netCore == null) return;
 
-        bool isOwner = Networking.IsOwner(netCore.gameObject);
-        byte mode = netCore.mode;
+        byte mode = isOwner ? netCore.mode : netCore.GetPresentedMode(tRenderNet);
 
         if (isOwner)
         {
@@ -422,15 +450,15 @@ public class SimManager : UdonSharpBehaviour
             if (mode == MODE_RAILS)
             {
                 if (craftProp != null)
-                    craftProp.Evaluate(Tmission);
+                    craftProp.Evaluate(Tview);
 
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
             }
             else if (mode == MODE_INTEGRATED)
             {
-                if (netKin != null)
-                    netKin.ApplyRemoteKinematics();
+                // if (netKin != null)
+                    // netKin.ApplyRemoteKinematics();
 
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
@@ -440,13 +468,13 @@ public class SimManager : UdonSharpBehaviour
                 // IMPORTANT: do NOT apply netKin while docked; docking is deterministic from station + snapshot.
                 if (DockingAllowedNow() && dockingComp != null)
                 {
-                    dockingComp.EvaluateDockedRemote(Tmission);
+                    dockingComp.EvaluateDockedRemote(Tview);
                 }
                 else
                 {
                     // If docking not allowed, fall back to remote rails propagation
                     if (craftProp != null)
-                        craftProp.Evaluate(Tmission);
+                        craftProp.Evaluate(Tview);
 
                     if (netAtt != null)
                         netAtt.ApplyRemoteAttitude();
@@ -494,7 +522,11 @@ public class SimManager : UdonSharpBehaviour
 
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
-        if (netKin != null) netKin.ForcePublishKinematics();
+        if (netKin != null)
+        {
+            netKin.currentOwnerSimT = _simT;
+            netKin.ForcePublishKinematics();
+        }
         if (netAtt != null) netAtt.ForcePublishAttitude();
         if (netConic != null) netConic.ForcePublishConic();
     }
@@ -538,7 +570,11 @@ public class SimManager : UdonSharpBehaviour
         byte mode = netCore.mode;
         if (mode == MODE_INTEGRATED)
         {
-            if (netKin != null) netKin.ForcePublishKinematics();
+            if (netKin != null)
+            {
+                netKin.currentOwnerSimT = _simTValid ? _simT : (clock != null ? clock.Now() : 0.0);
+                netKin.ForcePublishKinematics();
+            }
             if (netAtt != null) netAtt.ForcePublishAttitude();
         }
         else

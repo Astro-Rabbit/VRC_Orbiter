@@ -88,7 +88,7 @@ public class SkyBoxDriver : UdonSharpBehaviour
         {
             if (!Networking.IsOwner(netCore.gameObject))
             {
-                double tRender = clock.Now() - (double)netAtt.interpBackTimeSeconds;
+                double tRender = clock.GetCachedRemoteRenderTime();
                 q = netAtt.SampleRenderQuaternion(tRender);
             }
         }
