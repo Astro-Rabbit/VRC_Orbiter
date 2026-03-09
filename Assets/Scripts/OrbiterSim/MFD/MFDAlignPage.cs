@@ -31,12 +31,6 @@ public class MFDAlignPage : MFDPage
     private double descM;
     private double period;
 
-    private string[] suffixes =  new[] {"", "k", "M", "G"};
-
-    void Start()
-    {
-    }
-
     void Update()
     {
         if (srcConic.epochT0 != srcLastEpochT0 || tgtConic.epochT0 != tgtLastEpochT0) {
@@ -126,29 +120,6 @@ public class MFDAlignPage : MFDPage
             display.SetPage((byte)MFDPageID.Menu);
         }
     }
-    private string FormatNumber(string title, double num)
-    {
-        int i;
-        for (i = 0; i < 4; i++) {
-            if (num < 10.0) {
-                break;
-            }
-
-            num /= 1000.0;
-        }
-
-        // FIXME: Is there a better way to fall back?
-        if (i == 4) {
-            return "";
-        }
-
-        return title.PadRight(4) + num.ToString(i == 0 ? "0.0000" : "0.000") + suffixes[i];
-    }
-
-    private string FormatAngle(string title, double angle)
-    {
-        return title.PadRight(4) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(5) + "°";
-    }
 
     public override void DrawDisplay(MFD display)
     {
@@ -161,9 +132,9 @@ public class MFDAlignPage : MFDPage
         display.DrawConic(new Vector2(0f, -orbitSize), orbitSize, 0f, 0f, Color.green);
 
         display.ClearText();
-        display.DrawText(FormatAngle("Inc", inclination), 2, 4, Color.green);
-        display.DrawText(FormatNumber("ANT", ascTime), 2, 19, Color.green);
-        display.DrawText(FormatNumber("DNT", descTime), 2, 34, Color.green);
+        display.DrawText(MFD.FormatAngle("Inc", inclination), 2, 4, Color.green);
+        display.DrawText(MFD.FormatNumber("ANT", ascTime), 2, 19, Color.green);
+        display.DrawText(MFD.FormatNumber("DNT", descTime), 2, 34, Color.green);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }
