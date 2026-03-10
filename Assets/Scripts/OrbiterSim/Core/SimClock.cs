@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -14,6 +14,10 @@ using VRC.SDKBase;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class SimClock : UdonSharpBehaviour
 {
+
+    [Header("Authority")]
+    public SimManager simManager;
+
     [Header("Mode")]
     [Tooltip("If true, derive simTime from VRChat server time and a synced epoch (recommended for multiplayer).")]
     public bool useNetworkTime = true;
@@ -55,17 +59,24 @@ public class SimClock : UdonSharpBehaviour
     private int _appliedRevision = -2;            // distinct from -1 sentinel
     private float _hbAccum = 0f;
 
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
+
     void Start()
     {
         // Initialize local copies from inspector defaults
         _timeScale = timeScale;
 
         // Owner should publish an initial epoch so late joiners have a stable reference immediately.
-        if (useNetworkTime && Networking.IsOwner(gameObject))
+        if (useNetworkTime && Networking.IsOwner(gameObject) && HasSimAuthority())
         {
             PublishEpochNow(); // will set revision from -1 -> 0
         }
     }
+
+
 
     void Update()
     {
@@ -114,7 +125,7 @@ public class SimClock : UdonSharpBehaviour
         lastSimDt = simTime - prev;
 
         // Optional heartbeat: rebroadcast the current synced values WITHOUT re-anchoring.
-        if (useNetworkTime && heartbeatSeconds > 0f && Networking.IsOwner(gameObject))
+        if (useNetworkTime && heartbeatSeconds > 0f && Networking.IsOwner(gameObject) && HasSimAuthority())
         {
             _hbAccum += Time.deltaTime;
             if (_hbAccum >= heartbeatSeconds)
@@ -194,6 +205,7 @@ public class SimClock : UdonSharpBehaviour
         timeScale = newScale;
 
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;
         if (!Networking.IsOwner(gameObject)) return;
 
         PublishEpochNow(); // re-anchors using derived sim-now, and syncs
@@ -207,6 +219,7 @@ public class SimClock : UdonSharpBehaviour
     public void PublishEpochNow()
     {
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
 
         double serverNow = Networking.GetServerTimeInSeconds();
@@ -242,6 +255,7 @@ public class SimClock : UdonSharpBehaviour
     public void Rebroadcast()
     {
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (_revision < 0) return;
 
@@ -277,10 +291,10 @@ public class SimClock : UdonSharpBehaviour
     {
         if (!useNetworkTime) return;
 
-        // New owner becomes authoritative: publish fresh epoch so everyone locks to it.
-        if (Networking.IsOwner(gameObject))
+        // Only the object's new local owner AND current sim authority should republish.
+        if (HasSimAuthority() && Networking.IsOwner(gameObject))
         {
-            PublishEpochNow();
+            // PublishEpochNow();
         }
     }
 

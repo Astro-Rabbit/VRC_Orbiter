@@ -8,6 +8,8 @@ public class CraftNetAttitude : UdonSharpBehaviour
     [Header("Wiring")]
     public SimClock clock;
     public CraftAttitudeState att;
+    public SimManager simManager;
+
 
     [Header("Publish rate")]
     [Tooltip("Attitude publish rate (Hz). Works in both rails and integrated.")]
@@ -50,6 +52,12 @@ public class CraftNetAttitude : UdonSharpBehaviour
 
     private float Period => (attHz > 0f) ? (1f / attHz) : 999999f;
 
+
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
+
     void Start()
     {
         int n = snapBufferSize;
@@ -67,6 +75,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     /// <summary>Owner: publish attitude at cadence. Safe to call every frame.</summary>
     public void PublishAttitude()
     {
+        if (!HasSimAuthority()) return;
         if (!Networking.IsOwner(gameObject)) return;
         if (att == null || clock == null) return;
 
@@ -91,7 +100,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     /// <summary>Remote: apply attitude each frame (or on deserialization if you prefer).</summary>
     public void ApplyRemoteAttitude()
     {
-        if (Networking.IsOwner(gameObject)) return;
+        if (HasSimAuthority()) return;
         if (att == null) return;
 
         Quaternion target = new Quaternion(_qX, _qY, _qZ, _qW);
@@ -113,6 +122,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
 
     public void ForcePublishAttitude()
     {
+        if (!HasSimAuthority()) return;    
         if (!Networking.IsOwner(gameObject)) return;
         if (att == null || clock == null) return;
 
@@ -217,7 +227,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     {
         // Keep your current preference: SimManager calls ApplyRemoteAttitude() per-frame
         // But we DO buffer the received sample for render interpolation.
-        if (Networking.IsOwner(gameObject)) { _appliedRev = _rev; return; }
+        if (HasSimAuthority()) { _appliedRev = _rev; return; }
 
         if (_tBuf == null || _tBuf.Length == 0) Start();
 

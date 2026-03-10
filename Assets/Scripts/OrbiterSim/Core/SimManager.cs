@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -102,6 +102,10 @@ public class SimManager : UdonSharpBehaviour
     public CraftNetConic netConic;
     public CraftNetAttitude netAtt;
 
+    [Header("Ownership handoff")]
+    [Tooltip("Objects that should follow SimManager ownership during sim authority handoff.")]
+    public GameObject[] ownershipObjects;
+
     // -------------------------------------------------------------------------
     // Integrated stepping
     // -------------------------------------------------------------------------
@@ -198,7 +202,7 @@ public class SimManager : UdonSharpBehaviour
         double Tmission = clock.Now();
 
         bool hasNetCore = (netCore != null);
-        bool isOwner = hasNetCore && Networking.IsOwner(netCore.gameObject);
+        bool isOwner = hasNetCore && Networking.IsOwner(gameObject);
 
         double backTime = 0.0;
         if (netAtt != null)
@@ -323,7 +327,7 @@ public class SimManager : UdonSharpBehaviour
         if (paused || clock == null || netCore == null || craft == null)
             return;
 
-        bool isOwner = Networking.IsOwner(netCore.gameObject);
+        bool isOwner = Networking.IsOwner(gameObject);
         if (!isOwner) return;
 
         byte mode = netCore.mode;
@@ -637,7 +641,7 @@ public class SimManager : UdonSharpBehaviour
     public void EnterIntegrated(double T)
     {
         if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         _settleAccum = 0f;
 
@@ -664,7 +668,7 @@ public class SimManager : UdonSharpBehaviour
     public void EnterRails()
     {
         if (netCore == null || craft == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         _settleAccum = 0f;
 
@@ -688,35 +692,150 @@ public class SimManager : UdonSharpBehaviour
 
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
-        if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        string playerName = player != null ? player.displayName : "null";
+        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
 
-        _simTValid = false;
+        Debug.Log("[SimManager] OnOwnershipTransferred: local=" + localName +
+                " newOwner=" + playerName +
+                " amOwner=" + Networking.IsOwner(gameObject));
+
+        if (!Networking.IsOwner(gameObject)) return;
+
         _accumSim = 0.0;
         _settleAccum = 0f;
 
-        netCore.ForcePublishCore();
+        if (netCore != null && netCore.mode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
+        {
+            // adopt the same integrated snapshot timeline the remote view was using
+            if (craft != null)
+            {
+                craft.rx = netKin.rawRx;
+                craft.ry = netKin.rawRy;
+                craft.rz = netKin.rawRz;
 
-        byte mode = netCore.mode;
+                craft.vx = netKin.rawVx;
+                craft.vy = netKin.rawVy;
+                craft.vz = netKin.rawVz;
+            }
+
+            _simT = netKin.rawSimT;
+            _simTValid = true;
+        }
+        else
+        {
+            _simTValid = false;
+        }
+
+
+        TransferSubordinateOwnershipsToLocal();
+        ForcePublishAuthoritativeState();
+
+        Debug.Log("[SimManager] OnOwnershipTransferred: takeover complete.");
+    }
+
+    public override bool OnOwnershipRequest(VRCPlayerApi requester, VRCPlayerApi newOwner)
+    {
+        string requesterName = requester != null ? requester.displayName : "null";
+        string newOwnerName = newOwner != null ? newOwner.displayName : "null";
+        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
+
+        Debug.Log("[SimManager] OnOwnershipRequest: local=" + localName +
+                " requester=" + requesterName +
+                " newOwner=" + newOwnerName +
+                " amOwner=" + Networking.IsOwner(gameObject));
+
+        if (Networking.IsOwner(gameObject))
+        {
+            ForcePublishAuthoritativeState();
+        }
+
+        Debug.Log("[SimManager] OnOwnershipRequest: approving transfer.");
+        return true;
+    }
+
+    public bool IsSimOwner()
+    {
+        return Networking.IsOwner(gameObject);
+    }
+
+    /// <summary>
+    /// Called by the LOCAL requester to ask for sim ownership.
+    /// This does NOT guarantee success; it triggers OnOwnershipRequest on the current owner.
+    /// </summary>
+    public void BeginOwnershipTransfer()
+    {
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null)
+        {
+            Debug.Log("[SimManager] BeginOwnershipTransfer: local player null.");
+            return;
+        }
+
+        bool alreadyOwner = Networking.IsOwner(gameObject);
+        Debug.Log("[SimManager] BeginOwnershipTransfer: local=" + local.displayName +
+                " alreadyOwner=" + alreadyOwner +
+                " managerOwner=" + Networking.GetOwner(gameObject).displayName);
+
+        if (alreadyOwner) return;
+
+        Networking.SetOwner(local, gameObject);
+
+        Debug.Log("[SimManager] BeginOwnershipTransfer: SetOwner called.");
+    }
+
+    /// <summary>
+    /// Current manager owner publishes the latest authoritative state before approving handoff.
+    /// </summary>
+    public void ForcePublishAuthoritativeState()
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        // if (clock != null)
+            // clock.PublishEpochNow();
+
+        if (netCore != null)
+            netCore.ForcePublishCore();
+
+        byte mode = (netCore != null) ? netCore.mode : MODE_RAILS;
 
         if (mode == MODE_INTEGRATED)
         {
             if (netKin != null)
             {
-                netKin.currentOwnerSimT = _simTValid ? _simT : (clock != null ? clock.Now() : 0.0);
+                netKin.currentOwnerSimT = _simT;
                 netKin.ForcePublishKinematics();
             }
-
-            if (netAtt != null)
-                netAtt.ForcePublishAttitude();
         }
         else
         {
             if (netConic != null)
                 netConic.ForcePublishConic();
+        }
 
-            if (netAtt != null)
-                netAtt.ForcePublishAttitude();
+        if (netAtt != null)
+            netAtt.ForcePublishAttitude();
+    }
+
+    /// <summary>
+    /// New manager owner pulls subordinate sync objects under the same owner.
+    /// </summary>
+    private void TransferSubordinateOwnershipsToLocal()
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return;
+        if (ownershipObjects == null) return;
+
+        int n = ownershipObjects.Length;
+        for (int i = 0; i < n; i++)
+        {
+            GameObject go = ownershipObjects[i];
+            if (go == null) continue;
+            if (go == gameObject) continue;
+
+            if (!Networking.IsOwner(go))
+                Networking.SetOwner(local, go);
         }
     }
 
@@ -728,7 +847,7 @@ public class SimManager : UdonSharpBehaviour
     {
         if (soiSwitch == null) return;
         if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         byte newPrimary;
         double dMoon, rSOI;

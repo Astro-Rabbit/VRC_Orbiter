@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -10,6 +10,7 @@ public class CraftNetState : UdonSharpBehaviour
     public const byte MODE_DOCKED = 2;
 
     [Header("Wiring")]
+    public SimManager simManager;
     public SimClock clock;
     public CraftStateModel craft;
 
@@ -87,6 +88,11 @@ public class CraftNetState : UdonSharpBehaviour
 
     private float Period => (coreHz > 0f) ? (1f / coreHz) : 999999f;
 
+
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
     void Start()
     {
         mode = _mode;
@@ -112,7 +118,7 @@ public class CraftNetState : UdonSharpBehaviour
     /// </summary>
     public byte GetPresentedMode(double tRender)
     {
-        if (Networking.IsOwner(gameObject)) return _mode;
+        if (HasSimAuthority()) return _mode;
         if (tRender < _modeChangeNetT) return _prevMode;
         return _mode;
     }
@@ -122,7 +128,7 @@ public class CraftNetState : UdonSharpBehaviour
     /// </summary>
     public byte GetPresentedPrimaryBodyId(double tRender)
     {
-        if (Networking.IsOwner(gameObject)) return _primaryBodyId;
+        if (HasSimAuthority()) return _primaryBodyId;
         if (tRender < _modeChangeNetT) return _prevPrimaryBodyId;
         return _primaryBodyId;
     }
@@ -130,6 +136,7 @@ public class CraftNetState : UdonSharpBehaviour
     /// <summary>Owner: set mode (and optionally primary) and publish immediately.</summary>
     public void SetMode(byte newMode, byte newPrimaryBodyId, bool forcePublish = true)
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
 
         // Record previous authoritative values for delayed remote presentation
@@ -157,6 +164,7 @@ public class CraftNetState : UdonSharpBehaviour
     /// <summary>Owner: publish core/meta at its configured cadence. Safe to call every frame.</summary>
     public void PublishCore()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (craft == null || clock == null) return;
 
@@ -236,7 +244,7 @@ public class CraftNetState : UdonSharpBehaviour
         _appliedRev = _rev;
 
         // Apply mass/fuel to local craft model (remote follow / UI)
-        if (!Networking.IsOwner(gameObject) && craft != null)
+        if (!HasSimAuthority() && craft != null)
         {
             craft.primaryBodyId = _primaryBodyId;
             craft.dryMassKg = _dryMassKg;
@@ -258,7 +266,7 @@ public class CraftNetState : UdonSharpBehaviour
         bool forcePublish = true)
     {
         if (!Networking.IsOwner(gameObject)) return;
-
+        if (!HasSimAuthority()) return;
         _dockStationIndex = stationIndex;
         _dockStationPortIndex = stationPortIndex;
         _dockCraftPortIndex = craftPortIndex;
