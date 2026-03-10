@@ -5773,7 +5773,7 @@ MonoBehaviour:
   fontSdfSoftness: 0.1
   targetName: Gate
   dockPortMarkerRoot: {fileID: 1739926354}
-  dockMarkerFaceCamera: 1
+  dockMarkerFaceCamera: 0
   dockMarkerForwardOffset: 0.05
   dockGateRoots:
   - {fileID: 248860785}
@@ -39045,8 +39045,8 @@ MonoBehaviour:
   useWorldSpace: 1
   globalModelFix: {x: 0, y: 0, z: 0, w: 1}
   smoothRelativePosition: 1
-  positionSmoothTimeSeconds: 0.01
-  positionSnapDistanceMeters: 50
+  positionSmoothTimeSeconds: 0.1
+  positionSnapDistanceMeters: 500
   smoothRelativeRotation: 0
   rotationLerpRate: 12
   logSwitches: 0
@@ -44800,7 +44800,7 @@ MonoBehaviour:
   clock: {fileID: 857553313}
   craft: {fileID: 265503658}
   craftId: 0
-  coreHz: 2
+  coreHz: 1
   mode: 0
   primaryBodyId: 1
   prevMode: 0
@@ -80372,9 +80372,9 @@ MonoBehaviour:
   deadReckonClampSeconds: 0.25
   enableVisualSmoothing: 1
   visualDeadReckonTarget: 0
-  visualSmoothTimeSeconds: 0.01
+  visualSmoothTimeSeconds: 0.12
   visualTargetDeadReckonClampSeconds: 0.15
-  debugNetKin: 0
+  debugNetKin: 1
   debugLogPeriod: 1
   rawValid: 0
   rawRevision: -1
@@ -125540,6 +125540,7 @@ MonoBehaviour:
   - {fileID: 6709204623401420152, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 2100000, guid: d27def4fd61513c4ca186bbdb6ab8e32, type: 2}
   - {fileID: -4187724231692053404, guid: 2266838b90039184397367bac5eeddaa, type: 3}
+  - {fileID: 2100000, guid: c3d33675eef2cdb4d95652fd11991a27, type: 2}
   - {fileID: 2100000, guid: c8e3ae9c76f588d4c9779d6aeb02f65d, type: 2}
   - {fileID: 4474073298537395550, guid: 2266838b90039184397367bac5eeddaa, type: 3}
   - {fileID: 2100000, guid: 18a05016dfdc4364eb48d61474fa1a5a, type: 2}
