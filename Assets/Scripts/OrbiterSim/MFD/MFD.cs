@@ -156,7 +156,7 @@ public class MFD : UdonSharpBehaviour
 
         shapeColors[shapeCount] = color;
         shapeData1[shapeCount] = vertexDist;
-        shapeData2[shapeCount] = new Vector4(eccentricity,  angle, focus.x, focus.y);
+        shapeData2[shapeCount] = new Vector4(eccentricity, angle, focus.x, focus.y);
 
         shapeCount++;
     }

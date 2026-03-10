@@ -112184,11 +112184,11 @@ MonoBehaviour:
   _udonSharpBackingUdonBehaviour: {fileID: 1739331587}
   bodies: {fileID: 1559119461}
   clock: {fileID: 857553313}
-  conicPropagator: {fileID: 607253493}
   src: {fileID: 103881736}
   tgt: {fileID: 65900890}
   tfr: {fileID: 589287637}
   fitter: {fileID: 2042547069}
+  transferPropagator: {fileID: 1249211014}
   tgtPx: 0
   tgtPy: 0
   tfrPx: 0
@@ -124350,6 +124350,12 @@ MonoBehaviour:
   _udonSharpBackingUdonBehaviour: {fileID: 2042547068}
   bodies: {fileID: 1559119461}
   conic: {fileID: 1665720969}
+  rx: 0
+  ry: 0
+  rz: 0
+  vx: 0
+  vy: 0
+  vz: 0
   eTol: 0.000001
   iTolRad: 0.000001
   logFits: 0

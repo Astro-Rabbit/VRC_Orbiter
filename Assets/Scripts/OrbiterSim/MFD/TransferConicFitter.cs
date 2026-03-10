@@ -9,7 +9,7 @@ public class TransferConicFitter : UdonSharpBehaviour
     public BodyCatalog bodies;
     public ConicState conic;
 
-    double rx, ry, rz, vx, vy, vz;
+    public double rx, ry, rz, vx, vy, vz;
 
     [Header("Tolerances")]
     public double eTol = 1e-6;     // treat smaller as circular
@@ -41,6 +41,7 @@ public class TransferConicFitter : UdonSharpBehaviour
         double hz = rx * vy - ry * vx;
         double hMag = Math.Sqrt(hx * hx + hy * hy + hz * hz);
         if (hMag <= 0.0) return;
+
 
         // Inclination (about +Z pole of solver inertial frame)
         double iRad = Math.Acos(Clamp(hz / hMag, -1.0, 1.0));

@@ -28,7 +28,7 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         }
     }
 
-    private void UpdateInfo() 
+    public void UpdateInfo()
     {
         lastEpochT0 = conic.epochT0;
 
@@ -52,7 +52,7 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         double ci = Math.Cos(conic.iRad);
         double si = Math.Sin(conic.iRad);
         double ca = Math.Cos(conic.argpRad);
-        double sa = Math.Cos(conic.argpRad);
+        double sa = Math.Sin(conic.argpRad);
 
         m00 =  cr*ca - sr*sa*ci;
         m01 = -cr*sa - sr*ca*ci;
@@ -74,22 +74,26 @@ public class OrbitAnalyzer : UdonSharpBehaviour
     public void GetAligned(OrbitAnalyzer other, out double px, out double py)
     {
         // dot product of plane normals
-        double dot = m20*other.m20 + m21*other.m21 + m22*other.m22;
+        double dot = m02*other.m02 + m12*other.m12 + m22*other.m22;
 
         // cross product of plane normals
-        double cx = m21*other.m22 - m22*other.m21;
-        double cy = m22*other.m20 - m20*other.m22;
-        double cz = m20*other.m21 - m21*other.m20;
+        double cx = other.m12*m22 - other.m22*m12;
+        double cy = other.m22*m02 - other.m02*m22;
+        double cz = other.m02*m12 - other.m12*m02;
+
+        double cdot = other.m00*cx + other.m10*cy + other.m20*cz;
+        cdot /= cx*cx + cy*cy + cz*cz;
 
         // rotated periapsis direction
-        double rx = other.m00*dot + other.m01*cz - other.m02*cy;
-        double ry = other.m01*dot + other.m02*cx - other.m00*cz;
-        double rz = other.m02*dot + other.m00*cy - other.m01*cx;
+        double rx = other.m00*dot + cx*cdot*(1 - dot) + cy*other.m20 - cz*other.m10;
+        double ry = other.m10*dot + cy*cdot*(1 - dot) + cz*other.m00 - cx*other.m20;
+        double rz = other.m20*dot + cz*cdot*(1 - dot) + cx*other.m10 - cy*other.m00;
 
         // project to perifocal frame for this orbit (z should always be zero so it's left out)
-        px = rx*m00 + ry*m01 + rz*m02;
-        py = rx*m10 + ry*m11 + rz*m12;
+        px = rx*m00 + ry*m10 + rz*m20;
+        py = rx*m01 + ry*m11 + rz*m21;
 
+        // Ensure it's normalized even in edge cases
         double mag = Math.Sqrt(px*px + py*py);
         if (mag > 0) {
             px /= mag;

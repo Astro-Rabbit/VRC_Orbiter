@@ -13,11 +13,15 @@ public class MFDTransferPage : MFDPage
     [Header("References")]
     public BodyCatalog bodies;
     public SimClock clock;
-    public ConicPropagator conicPropagator;
     public OrbitAnalyzer src;
     public OrbitAnalyzer tgt;
     public OrbitAnalyzer tfr;
+
+    // for calculating transfer orbit parameters
     public TransferConicFitter fitter;
+
+    // for calculating position and velocity at burn time
+    public ConicPropagator transferPropagator;
 
     [Header("Display Data")]
     public double tgtPx;
@@ -36,6 +40,7 @@ public class MFDTransferPage : MFDPage
     private double stepRatio;
     private double srcLastEpochT0 = Double.NegativeInfinity;
     private double tgtLastEpochT0 = Double.NegativeInfinity;
+    private bool burnChanged = true;
 
     private const int MAX_STEP_SIZE = 0;
     private const int MIN_STEP_SIZE = -10;
@@ -48,16 +53,49 @@ public class MFDTransferPage : MFDPage
 
     void Update()
     {
-        calcBurnTime = Math.Min(burnTime, clock.simTime);
-
-        if (srcLastEpochT0 != src.conic.epochT0 || tgtLastEpochT0 != tgt.conic.epochT0) {
+        if (srcLastEpochT0 != src.conic.epochT0 || tgtLastEpochT0 != tgt.conic.epochT0 || burnChanged) {
             srcLastEpochT0 = src.conic.epochT0;
             tgtLastEpochT0 = tgt.conic.epochT0;
 
             src.GetAligned(tgt, out tgtPx, out tgtPy);
             tgtArgpDiff = Math.Atan2(tgtPy, tgtPx);
+        }
 
-            src.GetAligned(tgt, out tfrPx, out tfrPy);
+        calcBurnTime = Math.Max(burnTime, clock.simTime);
+        if (burnChanged || (calcBurnTime != burnTime && burnDv > 0)) {
+            burnChanged = false;
+
+            transferPropagator.conic = src.conic;
+            transferPropagator.Evaluate(calcBurnTime);
+
+            // prograde direction unit vector
+            double dx = transferPropagator.rel_vx;
+            double dy = transferPropagator.rel_vy;
+            double dz = transferPropagator.rel_vz;
+
+            double mag = Math.Sqrt(dx*dx + dy*dy + dz*dz);
+            if (mag == 0) {
+                // Shouldn't normally happen, but avoid blowing up in case it does
+                dx = 1;
+                dy = 0;
+                dz = 0;
+            } else {
+                dx /= mag;
+                dy /= mag;
+                dz /= mag;
+            }
+
+            fitter.rx = transferPropagator.rel_rx;
+            fitter.ry = transferPropagator.rel_ry;
+            fitter.rz = transferPropagator.rel_rz;
+            fitter.vx = transferPropagator.rel_vx + dx*burnDv;
+            fitter.vy = transferPropagator.rel_vy + dy*burnDv;
+            fitter.vz = transferPropagator.rel_vz + dz*burnDv;
+
+            fitter.Fit(src.conic.primaryBodyId, calcBurnTime);
+            tfr.UpdateInfo();
+
+            src.GetAligned(tfr, out tfrPx, out tfrPy);
             tfrArgpDiff = Math.Atan2(tfrPy, tfrPx);
         }
     }
@@ -112,6 +150,8 @@ public class MFDTransferPage : MFDPage
             burnTime = clock.simTime;
             burnDv = 0;
             RequestSerialization();
+            OnStepSizeChange();
+            burnChanged = true;
         } else {
             SendCustomNetworkEvent(NetworkEventTarget.Owner, "ResetState");
         }
@@ -149,6 +189,7 @@ public class MFDTransferPage : MFDPage
         if (Networking.IsOwner(gameObject)) {
             burnTime = newBurnTime;
             RequestSerialization();
+            burnChanged = true;
         } else {
             SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetBurnTime", newBurnTime);
         }
@@ -160,6 +201,7 @@ public class MFDTransferPage : MFDPage
         if (Networking.IsOwner(gameObject)) {
             burnDv = newBurnDv;
             RequestSerialization();
+            burnChanged = true;
         } else {
             SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetBurnDv", newBurnDv);
         }
@@ -173,7 +215,7 @@ public class MFDTransferPage : MFDPage
         float scale = orbitSize / (float)src.a;
 
         Vector2 tfrPePos = scale * (float)tfr.pe * new Vector2((float)tfrPy, -(float)tfrPx);
-        //display.DrawConic(tfrPePos, (float)tfr.pe * scale, (float)tgtArgpDiff, (float)tfr.e, Color.gray);
+        display.DrawConic(tfrPePos, (float)tfr.pe * scale, (float)tfrArgpDiff, (float)tfr.e, Color.gray);
 
         Vector2 pePos = new Vector2(0f, -scale * (float)src.pe);
         display.DrawConic(pePos, (float)src.pe * scale, 0f, (float)src.e, Color.green);
@@ -200,5 +242,6 @@ public class MFDTransferPage : MFDPage
     public override void OnDeserialization()
     {
         OnStepSizeChange();
+        burnChanged = true;
     }
 }
