@@ -17,9 +17,12 @@ public enum ButtonSide
 
 public enum MFDPageID : byte
 {
-Menu,
-Orbit,
-Align,
+    Menu,
+    Orbit,
+    Align,
+    Settings,
+    PenAdjust,
+    Docking
 }
 
 public class MFD : UdonSharpBehaviour
