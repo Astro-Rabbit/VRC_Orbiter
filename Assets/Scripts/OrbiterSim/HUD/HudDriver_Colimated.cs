@@ -57,6 +57,37 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     public float[] dockGateDistancesMeters = new float[] { 30f, 24f, 18f, 12f, 6f, 3f };
     public float dockGateForwardOffset = 0.0f;
 
+
+    [Header("Panel Control Inputs")]
+    [Tooltip("Raw knob value for HUD mode selection.")]
+    public float hudModeKnobValue = 180f;
+
+    [Tooltip("Raw knob value for HUD intensity control.")]
+    public float hudIntensityKnobValue = 100f;
+
+    [Tooltip("Raw knob value for glass tint/dim control.")]
+    public float glassTintKnobValue = 0f;
+
+    [Header("HUD panel tuning")]
+    [Tooltip("Intensity multiplier at knob minimum.")]
+    public float minHudIntensity = 0.0f;
+
+    [Tooltip("Intensity multiplier at knob maximum.")]
+    public float maxHudIntensity = 2.0f;
+
+    [Tooltip("Glass alpha at tint knob minimum.")]
+    public float minGlassAlpha = 0.02f;
+
+    [Tooltip("Glass alpha at tint knob maximum.")]
+    public float maxGlassAlpha = 0.18f;
+
+    [Tooltip("Glass tint color at tint knob minimum.")]
+    public Color minGlassTint = new Color(0.00f, 0.00f, 0.00f, 1.0f);
+
+    [Tooltip("Glass tint color at tint knob maximum.")]
+    public Color maxGlassTint = new Color(0.15f, 0.35f, 0.18f, 1.0f);
+
+
     // Active material cache
     private Material _activeMat;
     private Material _lastAssignedMat;
@@ -69,10 +100,17 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     private float _lastFontSignWidthScale;
     private float _lastFontSignHeightScale;
 
+    private float _appliedHudIntensity = 1.0f;
+    private float _appliedGlassAlpha = 0.08f;
+    private Color _appliedGlassTint = new Color(0.15f, 0.35f, 0.18f, 1.0f);
     private string _lastTargetName;
 
     private void Start()
     {
+        ApplyHudModeFromKnob();
+        ApplyHudIntensityFromKnob();
+        ApplyGlassTintFromKnob();
+
         UpdateActiveMaterial(true);
         PushStaticMaterialState(true);
     }
@@ -94,7 +132,9 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         _activeMat.SetFloat("_HudMode", (float)hudMode);
         _activeMat.SetFloat("_HudHalfFovX", hudHalfFovX);
         _activeMat.SetFloat("_HudHalfFovY", hudHalfFovY);
-
+        _activeMat.SetFloat("_HudIntensity", _appliedHudIntensity);
+        _activeMat.SetFloat("_GlassAlpha", _appliedGlassAlpha);
+        _activeMat.SetColor("_GlassTint", _appliedGlassTint);
         if (hudMode == 2)
         {
             WriteOrbitMode();
@@ -125,13 +165,9 @@ public class HudDriver_Colimated : UdonSharpBehaviour
 
         if (!force && _lastAssignedMat == _activeMat) return;
 
-        Material[] mats = hudRenderer.sharedMaterials;
-        if (mats == null || mats.Length <= 2) return;
-
-        if (mats[1] != _activeMat)
+        if (hudRenderer.sharedMaterial != _activeMat)
         {
-            mats[1] = _activeMat;
-            hudRenderer.sharedMaterials = mats;
+            hudRenderer.sharedMaterial = _activeMat;
         }
 
         _lastAssignedMat = _activeMat;
@@ -628,6 +664,38 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             // For now, just use true port orientation.
             dockPortMarkerRoot.localRotation = portRot_B;
         }
+    }
+
+
+    public void ApplyHudModeFromKnob()
+    {
+        // 4-position knob example:
+        //   0   = OFF
+        //   90  = GROUND
+        //   180 = ORBIT
+        //   270 = DOCK
+        //
+        // We map by nearest quadrant center.
+        float v = hudModeKnobValue;
+
+        if (v < 22.5f) hudMode = 0;
+        else if (v < 67.5f) hudMode = 1;
+        else if (v < 112.5f) hudMode = 2;
+        else hudMode = 3;
+    }
+
+    public void ApplyHudIntensityFromKnob()
+    {
+        float t = Mathf.InverseLerp(0f, 100f, hudIntensityKnobValue);
+        _appliedHudIntensity = Mathf.Lerp(minHudIntensity, maxHudIntensity, t);
+    }
+
+    public void ApplyGlassTintFromKnob()
+    {
+        float t = Mathf.InverseLerp(0f, 100f, glassTintKnobValue);
+
+        _appliedGlassAlpha = Mathf.Lerp(minGlassAlpha, maxGlassAlpha, t);
+        _appliedGlassTint = Color.Lerp(minGlassTint, maxGlassTint, t);
     }
 
 }

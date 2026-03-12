@@ -34,6 +34,13 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
     public double drx_B1, dry_B1, drz_B1;
     public Quaternion qTargetInB1 = Quaternion.identity;
 
+    [Header("Render-only smoothed full-slot pose (presentation only)")]
+    public bool renderFullValid0 = false;
+    public bool renderFullValid1 = false;
+
+    public double render_drx_B0, render_dry_B0, render_drz_B0;
+    public double render_drx_B1, render_dry_B1, render_drz_B1;
+
     [Header("Selection (set by UI/GC/etc.)")]
     [Tooltip("Selected station index in the stations[] list. -1 means none.")]
     public int selectedStationIndex = -1;
@@ -44,20 +51,12 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
     [Tooltip("Selected craft docking port. -1 means none.")]
     public int selectedCraftDockPortIndex = 0;
 
-
     [Header("Selected station root relative (computed)")]
     public bool selValid = false;
     public double sel_drx_E, sel_dry_E, sel_drz_E;
-    public double sel_drx_B, sel_dry_B, sel_drz_B;  // same as drx_B0 if slot0==selected
-    public double sel_dvx_E, sel_dvy_E, sel_dvz_E;  // same as dv*_E0
+    public double sel_drx_B, sel_dry_B, sel_drz_B;
+    public double sel_dvx_E, sel_dvy_E, sel_dvz_E;
 
-    // --------------------------------------------------------------------
-    // Docking targeting outputs (computed; targeting only, no latch logic)
-    // Frames:
-    // - All *_B values are in craft BODY frame (Unity world in your render model), relative to craft CG origin.
-    // - qTargetPortInB: target station port frame expressed in craft BODY frame.
-    // - qCraftPort_B:   craft port frame expressed in craft BODY frame.
-    // --------------------------------------------------------------------
     [Header("Docking target (computed)")]
     [Tooltip("If true, compute docking targeting for slot1 too (usually unnecessary).")]
     public bool computeDockForSlot1 = false;
@@ -69,14 +68,13 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
 
     public double targetPort_px_B0, targetPort_py_B0, targetPort_pz_B0;
     public Quaternion qTargetPortInB0 = Quaternion.identity;
-    // Target port orientation in inertial (E): port frame -> E
     public Quaternion qTargetPort_E0 = Quaternion.identity;
 
     public double craftPort_px_B0, craftPort_py_B0, craftPort_pz_B0;
     public Quaternion qCraftPort_B0 = Quaternion.identity;
 
     public double dockErr_px_B0, dockErr_py_B0, dockErr_pz_B0;
-    public Quaternion qDockErr0 = Quaternion.identity; // inv(craftPort) * targetPort
+    public Quaternion qDockErr0 = Quaternion.identity;
 
     // Slot 1 docking (optional)
     public bool dockValid1 = false;
@@ -130,6 +128,11 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
         drx_B1 = dry_B1 = drz_B1 = 0.0;
         qTargetInB1 = Quaternion.identity;
 
+        renderFullValid0 = false;
+        renderFullValid1 = false;
+        render_drx_B0 = render_dry_B0 = render_drz_B0 = 0.0;
+        render_drx_B1 = render_dry_B1 = render_drz_B1 = 0.0;
+
         ClearDocking();
     }
 
@@ -156,7 +159,6 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
         qDockErr1 = Quaternion.identity;
 
         qTargetPort_E0 = Quaternion.identity;
-        qTargetPort_E1 = Quaternion.identity; // if you add it
-
+        qTargetPort_E1 = Quaternion.identity;
     }
 }

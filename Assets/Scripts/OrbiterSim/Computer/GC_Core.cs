@@ -28,7 +28,7 @@ public class GC_Core : UdonSharpBehaviour
     public EphemSnapshot ephem;
     public BodyCatalog bodies;
     public ThrusterCatalog thrusters;
-
+    public GC_NodePlanNetState nodeNet;
     [Header("Optional docking contacts (for docking helper APIs)")]
     public GuidanceNavContactsState contacts;
 
@@ -647,7 +647,6 @@ public class GC_Core : UdonSharpBehaviour
                 _manActMode, _manAllowWheels, _manAllowRCS, _manAllowGimbal);
         }
 
-        ApplyActuatorOverrides();
 
 
         // --------------------
@@ -670,6 +669,7 @@ public class GC_Core : UdonSharpBehaviour
         intent.translateCmd_B = xlat;
         intent.rcsMode = rcsMode;
 
+        ApplyActuatorOverrides();
 
         // --------------------
         // THROTTLE CHANNEL: SAFETY > EXECUTOR > MODE > MANUAL
@@ -747,6 +747,15 @@ public class GC_Core : UdonSharpBehaviour
         // actuator selection mode override (0 means no override)
         if (overrides.overrideAttitudeActuatorMode != 0)
             intent.attitudeActuatorMode = overrides.overrideAttitudeActuatorMode;
+
+        // translation RCS mode override
+        if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_TRANSLATE)
+            intent.rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
+        else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_ROTATE)
+            intent.rcsMode = CraftCommandState.RCS_MODE_ROTATE;
+        else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_BLENDED)
+            intent.rcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
     }
     private bool ManualAttitudeIsActive()
     {
@@ -1193,6 +1202,8 @@ public class GC_Core : UdonSharpBehaviour
             runtime.activeModeId = runtime.cachedModeBeforeExec;
             runtime.modeStartTime = nowT;
         }
+        if (nodeNet != null) nodeNet.ForcePublish();
+
     }
 
     private void AbortExecutor(double nowT)
@@ -1482,7 +1493,8 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
         plan.burnThrottle01[idx] = ok ? 1.0f : 0f; // if can’t compute, burn disabled
-
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
         return idx;
     }
 
@@ -1499,7 +1511,8 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
         plan.burnThrottle01[idx] = ok ? 1.0f : 0f;
-
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
         return idx;
     }
 
@@ -1507,12 +1520,17 @@ public class GC_Core : UdonSharpBehaviour
     {
         if (plan == null) return;
         plan.ClearAll();
+        if (nodeNet != null)
+            nodeNet.ForcePublish();        
     }
 
     public void API_Node_Delete(int i)
     {
         if (plan == null) return;
         plan.API_DeleteNode(i);
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
+
     }
 
     // =====================================================================

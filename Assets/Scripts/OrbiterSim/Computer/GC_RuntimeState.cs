@@ -111,7 +111,7 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public byte resumeModeId = MODE_MANUAL;
 
     [Tooltip("If true, executor should resume resumeModeId on completion.")]
-    public bool resumeModeOnExecutorDone = true;
+    public bool resumeModeOnExecutorDone = false;
 
     [Header("Timestamps (seconds, mission time)")]
     public double modeStartTime;

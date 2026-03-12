@@ -26,10 +26,7 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
         if (cacheOnStart)
             CacheNow();
     }
-    void Awake()
-    {
-        CacheNow();
-    }
+
     public void CacheNow()
     {
         if (station == null || stationBody == null || portTransforms == null)
@@ -41,8 +38,6 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
         int n = portTransforms.Length;
         station.EnsureDockPortSize(n);
 
-        Quaternion qSB = Quaternion.Inverse(stationBody.rotation); // world -> station body rotation
-
         for (int i = 0; i < n; i++)
         {
             Transform p = portTransforms[i];
@@ -53,16 +48,18 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
                 continue;
             }
 
-            // position in station body axes (meters)
+            // Position in station body frame
             Vector3 pB = stationBody.InverseTransformPoint(p.position);
             station.dock_px_B[i] = (double)pB.x;
             station.dock_py_B[i] = (double)pB.y;
             station.dock_pz_B[i] = (double)pB.z;
 
-            // orientation in station body axes
-            station.dock_q_B[i] = qSB * p.rotation;
+            // Rotation in station body frame
+            station.dock_q_B[i] = Quaternion.Inverse(stationBody.rotation) * p.rotation;
         }
 
-        if (log) Debug.Log($"[StationDockingPortsAuthoring] Cached {n} ports.");
+        station.dockingPortCount = n;
+
+        if (log) Debug.Log("[StationDockingPortsAuthoring] Cached " + n + " ports.");
     }
 }

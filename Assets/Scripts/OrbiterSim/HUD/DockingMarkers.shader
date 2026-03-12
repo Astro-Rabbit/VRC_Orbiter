@@ -4,6 +4,7 @@ Shader "HUD/DockStencilObject"
     {
         _Color ("Color", Color) = (0.45, 1.0, 0.55, 1.0)
         _Intensity ("Intensity", Float) = 1.0
+        _StencilBit ("Stencil Bit", Float) = 1
     }
 
     SubShader
@@ -16,7 +17,8 @@ Shader "HUD/DockStencilObject"
 
         Stencil
         {
-            Ref 1
+            Ref [_StencilBit]
+            ReadMask [_StencilBit]
             Comp Equal
             Pass Keep
         }
