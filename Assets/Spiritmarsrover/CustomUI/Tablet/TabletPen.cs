@@ -38,17 +38,40 @@ public class TabletPen : UdonSharpBehaviour
     private VRCPlayerApi _localPlayer;
     private int _zoneCount = 0;
 
+
+    public bool IsGripping;
+    private string _gripAxis;
+    public GameObject Pickup;
+
+    // NEW VARIABLES FOR THE CONSTRAINT
+    private TabletPenPickup _heldPickup;
+    private Vector3 _heldPosOffset;
+    private Quaternion _heldRotOffset;
+    private bool _wasGripping;
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
         _triggerAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryIndexTrigger" : "Oculus_CrossPlatform_PrimaryIndexTrigger";
+        _gripAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryHandTrigger" : "Oculus_CrossPlatform_PrimaryHandTrigger";
+
         if (ButtonAudioSource == null) ButtonAudioSource = GetComponent<AudioSource>();
     }
 
     void Update()
     {
+        
+
+
+
         if (_localPlayer == null) return;
         if (!_localPlayer.IsUserInVR() && !isRightHand) return;
+
+        IsGripping = Input.GetAxisRaw(_gripAxis) > 0.95f;
+        bool gripJustPressed = IsGripping && !_wasGripping;
+        //HandlePickupConstraint();
+        HandlePickupConstraint(IsGripping, gripJustPressed);
+        _wasGripping = IsGripping;
+
 
         bool isVR = _localPlayer.IsUserInVR();
         bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
@@ -313,5 +336,113 @@ public class TabletPen : UdonSharpBehaviour
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
         ButtonAudioSource.PlayOneShot(SwitchUpClip[Random.Range(0, SwitchUpClip.Length)]);
 
+    }
+
+    //private void HandlePickupConstraint()
+    //{
+    //    if (IsGripping)
+    //    {
+    //        Debug.Log("[TabletPen] Gripping");
+    //        // If we aren't holding anything, try to grab
+    //        if (_heldPickup == null && Pickup != null)
+    //        {
+    //            Debug.Log("[TabletPen] Found Object");
+    //            TabletPenPickup pickupScript = Pickup.GetComponent<TabletPenPickup>();
+
+    //            // Only grab if the pen is hovering over the pickup and no one else is holding it
+    //            if (pickupScript != null && pickupScript.hoveringPen == this && !pickupScript.isBeingHeld)
+    //            {
+    //                Debug.Log("[TabletPen] PickingUp");
+    //                _heldPickup = pickupScript;
+    //                _heldPickup.OnGrab();
+
+    //                // CALCULATE OFFSET (The "Parent-Constraint" setup)
+    //                // InverseTransformPoint converts the Pickup's world position into "Pen-local" space
+    //                _heldPosOffset = transform.InverseTransformPoint(_heldPickup.transform.position);
+
+    //                // Inverse(PenRotation) * PickupRotation = Local Rotation relative to Pen
+    //                _heldRotOffset = Quaternion.Inverse(transform.rotation) * _heldPickup.transform.rotation;
+
+    //                TriggerHaptic(0.05f, 0.3f);
+    //            }
+    //        }
+
+    //        // APPLY CONSTRAINT (The "Parent-Constraint" update)
+    //        if (_heldPickup != null)
+    //        {
+    //            // Move Pickup to Pen's current position + the recorded offset (rotated by pen's current rot)
+    //            _heldPickup.transform.position = transform.TransformPoint(_heldPosOffset);
+
+    //            // Rotate Pickup to Pen's current rotation + the recorded rotation offset
+    //            _heldPickup.transform.rotation = transform.rotation * _heldRotOffset;
+    //        }
+    //    }
+    //    else
+    //    {
+    //        // Release the pickup
+    //        if (_heldPickup != null)
+    //        {
+    //            _heldPickup.OnRelease();
+    //            _heldPickup = null;
+    //        }
+    //    }
+    //}
+    // ... inside TabletPen class variables ...
+    public TabletPenPickup _hoveredPickup; // The handle the pen is currently touching
+   // public TabletPenPickup _heldPickup;    // The handle the pen is actually gripping
+
+    // Add this method anywhere in TabletPen.cs
+    //public void SetHoveredPickup(TabletPenPickup pickup)
+    //{
+    //    // If we are already holding something, don't change the hover target
+    //    if (_heldPickup != null) return;
+    //    _hoveredPickup = pickup;
+    //}
+
+    // Update your HandlePickupConstraint method to look like this:
+    private void HandlePickupConstraint(bool isGripping, bool gripJustPressed)
+    {
+        if (isGripping)
+        {
+            // ATTEMPT TO GRAB: 
+            // This ONLY runs on the frame the button is pressed AND if the pen is inside a handle
+            if (_heldPickup == null && gripJustPressed && _hoveredPickup != null)
+            {
+                if (!_hoveredPickup.isBeingHeld)
+                {
+                    _heldPickup = _hoveredPickup;
+                    _heldPickup.OnGrab();
+
+                    _heldPosOffset = transform.InverseTransformPoint(_heldPickup.transform.position);
+                    _heldRotOffset = Quaternion.Inverse(transform.rotation) * _heldPickup.transform.rotation;
+
+                    TriggerHaptic(0.05f, 0.3f);
+                    Debug.Log("[TabletPen] Successful Grab inside trigger");
+                }
+            }
+
+            // MAINTAIN GRAB:
+            // This runs every frame while gripping, but only if we successfully grabbed something
+            if (_heldPickup != null)
+            {
+                _heldPickup.transform.position = transform.TransformPoint(_heldPosOffset);
+                _heldPickup.transform.rotation = transform.rotation * _heldRotOffset;
+            }
+        }
+        else
+        {
+            // RELEASE: Runs when the grip button is let go
+            if (_heldPickup != null)
+            {
+                _heldPickup.OnRelease();
+                _heldPickup = null;
+            }
+        }
+    }
+    public void SetHoveredPickup(TabletPenPickup pickup)
+    {
+        // Don't change hover targets while we are actively holding something
+        if (_heldPickup != null) return;
+        _hoveredPickup = pickup;
     }
 }
