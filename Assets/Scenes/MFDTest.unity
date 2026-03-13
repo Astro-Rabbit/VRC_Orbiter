@@ -38746,7 +38746,7 @@ MonoBehaviour:
   iRad: 0.5
   raanRad: 2
   argpRad: 0.2
-  valid: 0
+  valid: 1
 --- !u!4 &554354636
 Transform:
   m_ObjectHideFlags: 0
@@ -112188,13 +112188,22 @@ MonoBehaviour:
   tgt: {fileID: 65900890}
   tfr: {fileID: 589287637}
   fitter: {fileID: 2042547069}
-  transferPropagator: {fileID: 1249211014}
+  propagator: {fileID: 1249211014}
   tgtPx: 0
   tgtPy: 0
   tfrPx: 0
   tfrPy: 0
   tgtArgpDiff: 0
   tfrArgpDiff: 0
+  meets: 0
+  meetX1: 0
+  meetY1: 0
+  meetActualX1: 0
+  meetActualY1: 0
+  meetX2: 0
+  meetY2: 0
+  meetActualX2: 0
+  meetActualY2: 0
   stepSize: -5
   burnTime: 0
   burnDv: 0

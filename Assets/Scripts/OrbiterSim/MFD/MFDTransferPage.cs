@@ -21,7 +21,7 @@ public class MFDTransferPage : MFDPage
     public TransferConicFitter fitter;
 
     // for calculating position and velocity at burn time
-    public ConicPropagator transferPropagator;
+    public ConicPropagator propagator;
 
     [Header("Display Data")]
     public double tgtPx;
@@ -30,6 +30,15 @@ public class MFDTransferPage : MFDPage
     public double tfrPy;
     public double tgtArgpDiff;
     public double tfrArgpDiff;
+    public bool meets = false;
+    public double meetX1;
+    public double meetY1;
+    public double meetActualX1;
+    public double meetActualY1;
+    public double meetX2;
+    public double meetY2;
+    public double meetActualX2;
+    public double meetActualY2;
 
     [Header("State")]
     [UdonSynced] public int stepSize = DEFAULT_STEP_SIZE;
@@ -53,25 +62,30 @@ public class MFDTransferPage : MFDPage
 
     void Update()
     {
+        bool conicsUpdated = false;
+        bool transferUpdated = false;
+
         if (srcLastEpochT0 != src.conic.epochT0 || tgtLastEpochT0 != tgt.conic.epochT0 || burnChanged) {
             srcLastEpochT0 = src.conic.epochT0;
             tgtLastEpochT0 = tgt.conic.epochT0;
 
             src.GetAligned(tgt, out tgtPx, out tgtPy);
             tgtArgpDiff = Math.Atan2(tgtPy, tgtPx);
+
+            conicsUpdated = true;
         }
 
         calcBurnTime = Math.Max(burnTime, clock.simTime);
         if (burnChanged || (calcBurnTime != burnTime && burnDv > 0)) {
             burnChanged = false;
 
-            transferPropagator.conic = src.conic;
-            transferPropagator.Evaluate(calcBurnTime);
+            propagator.conic = src.conic;
+            propagator.Evaluate(calcBurnTime);
 
             // prograde direction unit vector
-            double dx = transferPropagator.rel_vx;
-            double dy = transferPropagator.rel_vy;
-            double dz = transferPropagator.rel_vz;
+            double dx = propagator.rel_vx;
+            double dy = propagator.rel_vy;
+            double dz = propagator.rel_vz;
 
             double mag = Math.Sqrt(dx*dx + dy*dy + dz*dz);
             if (mag == 0) {
@@ -85,19 +99,72 @@ public class MFDTransferPage : MFDPage
                 dz /= mag;
             }
 
-            fitter.rx = transferPropagator.rel_rx;
-            fitter.ry = transferPropagator.rel_ry;
-            fitter.rz = transferPropagator.rel_rz;
-            fitter.vx = transferPropagator.rel_vx + dx*burnDv;
-            fitter.vy = transferPropagator.rel_vy + dy*burnDv;
-            fitter.vz = transferPropagator.rel_vz + dz*burnDv;
+            fitter.rx = propagator.rel_rx;
+            fitter.ry = propagator.rel_ry;
+            fitter.rz = propagator.rel_rz;
+            fitter.vx = propagator.rel_vx + dx*burnDv;
+            fitter.vy = propagator.rel_vy + dy*burnDv;
+            fitter.vz = propagator.rel_vz + dz*burnDv;
 
             fitter.Fit(src.conic.primaryBodyId, calcBurnTime);
             tfr.UpdateInfo();
 
             src.GetAligned(tfr, out tfrPx, out tfrPy);
             tfrArgpDiff = Math.Atan2(tfrPy, tfrPx);
+
+            transferUpdated = true;
         }
+
+        if ((transferUpdated || conicsUpdated) && tfr.e < 1 && tgt.e < 1) {
+            CalculateIntersections();
+        }
+    }
+
+    public void CalculateIntersections()
+    {
+        double p1 = tfr.pe * (1 + tfr.e);
+        double p2 = tgt.pe * (1 + tgt.e);
+
+        double pdiff = p1 - p2;
+        double b1 = tfr.e * p2;
+        double b2 = tgt.e * p1;
+
+        double argpDiff = tgtArgpDiff - tfrArgpDiff;
+        double xDiff = b2*Math.Cos(argpDiff) - b1;
+        double yDiff = b2*Math.Sin(argpDiff);
+
+        double mag = Math.Sqrt(xDiff*xDiff + yDiff*yDiff);
+        double phi = Math.Atan2(xDiff, yDiff);
+
+        double ratio = pdiff / mag;
+        if (ratio > 1 || ratio < -1) {
+            meets = false;
+            return;
+        }
+        meets = true;
+
+        double thetaDiff = Math.Asin(ratio);
+        double theta1 = phi + thetaDiff;
+        double theta2 = phi + Math.PI - thetaDiff;
+
+        double r1 = p1 / (1 + tfr.e*Math.Cos(theta1));
+        double r2 = p1 / (1 + tfr.e*Math.Cos(theta2));
+
+        meetX1 = r1 * Math.Cos(theta1 + tfrArgpDiff);
+        meetY1 = r1 * Math.Sin(theta1 + tfrArgpDiff);
+        meetX2 = r2 * Math.Cos(theta2 + tfrArgpDiff);
+        meetY2 = r2 * Math.Sin(theta2 + tfrArgpDiff);
+
+        double meetTime1 = tfr.GetTime(theta1);
+        double meetTime2 = tfr.GetTime(theta2);
+
+        double _;
+
+        propagator.conic = tgt.conic;
+        propagator.Evaluate(meetTime1);
+        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out meetActualX1, out meetActualY1, out _);
+        propagator.Evaluate(meetTime2);
+        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out meetActualX2, out meetActualY2, out _);
     }
 
     public override void OnButton(MFD display, ButtonSide side, int num)
@@ -122,10 +189,10 @@ public class MFDTransferPage : MFDPage
             double baseSpeed;
             switch (num) {
                 case 0:
-                SetBurnTime(burnTime - stepRatio*src.t);
+                SetBurnTime(calcBurnTime - stepRatio*src.t);
                 break;
                 case 1:
-                SetBurnTime(burnTime + stepRatio*src.t);
+                SetBurnTime(calcBurnTime + stepRatio*src.t);
                 break;
                 case 2:
                 ResetState();
@@ -223,6 +290,13 @@ public class MFDTransferPage : MFDPage
         Vector2 tgtPePos = scale * (float)tgt.pe * new Vector2((float)tgtPy, -(float)tgtPx);
         display.DrawConic(tgtPePos, (float)tgt.pe * scale, (float)tgtArgpDiff, (float)tgt.e, Color.yellow);
 
+        if (meets) {
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY1, -(float)meetX1), Color.blue);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY2, -(float)meetX2), Color.red);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY1, -(float)meetActualX1), Color.blue * 0.5f);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY2, -(float)meetActualX2), Color.red * 0.2f);
+        }
+
         display.ClearText();
 
         display.DrawText(" T- ", 0, 2, Color.white);
@@ -233,8 +307,8 @@ public class MFDTransferPage : MFDPage
 
         display.DrawText("STP-", MFD.TEXT_ROWS - 1, 2, Color.white);
         display.DrawText("STP+", MFD.TEXT_ROWS - 1, 12, Color.white);
-        display.DrawText("CALC", MFD.TEXT_ROWS - 1, 32, Color.white);
-        display.DrawText("PLAN", MFD.TEXT_ROWS - 1, 42, Color.white);
+        //display.DrawText("CALC", MFD.TEXT_ROWS - 1, 32, Color.white);
+        //display.DrawText("PLAN", MFD.TEXT_ROWS - 1, 42, Color.white);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }

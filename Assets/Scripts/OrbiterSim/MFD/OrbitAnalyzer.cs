@@ -67,6 +67,12 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         m22 =  ci;
     }
 
+    public void EclipticToPerifocal(double ix, double iy, double iz, out double ox, out double oy, out double oz)
+    {
+        ox = m00*ix + m10*iy + m20*iz;
+        oy = m01*ix + m11*iy + m21*iz;
+        oz = m02*ix + m12*iy + m22*iz;
+    }
 
     // Perform the minimum rotation to align the given orbit with this orbit
     // and output the direction of the rotated periapsis in the perifocal frame
@@ -102,5 +108,37 @@ public class OrbitAnalyzer : UdonSharpBehaviour
             px = 1;
             py = 0;
         }
+    }
+
+    public double GetTime(double theta)
+    {
+        double progress = ((GetMeanAnomaly(theta) - conic.M0Rad)/(2*Math.PI) + 1) % 1;
+        return t * progress + conic.epochT0;
+    }
+
+    public double GetMeanAnomaly(double theta)
+    {
+        /*
+        double mag = Math.Sqrt(x*x + y*y);
+        double s = 0.5 * y;
+        double c = 0.5*x + 0.5*mag;
+        */
+        double s = Math.Sin(0.5*theta);
+        double c = Math.Cos(0.5*theta);
+
+        double a = Math.Sqrt(1.0 - e) * s;
+        double b = Math.Sqrt(1.0 + e) * c;
+
+        double E = 2.0 * Math.Atan2(a, b);
+
+        return Wrap2Pi(E - e*Math.Sin(E));
+    }
+
+    private static double Wrap2Pi(double a)
+    {
+        double twoPi = 2.0 * Math.PI;
+        a %= twoPi;
+        if (a < 0.0) a += twoPi;
+        return a;
     }
 }
