@@ -39,6 +39,12 @@ public class SimClock : UdonSharpBehaviour
     [Tooltip("Optional visual smoothing for non-owners (seconds of correction per second). 0 disables.")]
     public float slewRate = 0f;
 
+
+    [Header("Render-time cache (read-only)")]
+    public double cachedRenderTimeNet;
+    public double cachedRenderBackTime;
+    public int cachedRenderFrame = -1;
+
     // --- Synced epoch mapping (late joiners get this automatically) ---
     [UdonSynced] private double _epochServerTime; // server seconds at epoch
     [UdonSynced] private double _epochSimTime;    // sim seconds at epoch
@@ -119,6 +125,18 @@ public class SimClock : UdonSharpBehaviour
         }
     }
 
+    public void UpdateRemoteRenderTimeCache(double backTimeSeconds)
+    {
+        cachedRenderBackTime = backTimeSeconds;
+        cachedRenderTimeNet = Networking.GetServerTimeInSeconds() - backTimeSeconds;
+        cachedRenderFrame = Time.frameCount;
+    }
+
+    public double GetCachedRemoteRenderTime()
+    {
+        return cachedRenderTimeNet;
+    }
+
     /// <summary>
     /// Deterministic mission time (seconds). Use this for ephemeris + conics.
     /// Returns derived time directly from the epoch mapping (no slew).
@@ -144,6 +162,16 @@ public class SimClock : UdonSharpBehaviour
     public double NowVisual()
     {
         return simTime;
+    }
+
+    public double NowNetwork()
+    {
+        return Networking.GetServerTimeInSeconds();
+    }
+
+    public double GetRemoteRenderTime(double backTimeSeconds)
+    {
+        return Networking.GetServerTimeInSeconds() - backTimeSeconds;
     }
 
     /// <summary>
@@ -231,6 +259,20 @@ public class SimClock : UdonSharpBehaviour
         }
     }
 
+    public double ServerTimeForSimTime(double simT)
+    {
+        if (!useNetworkTime)
+            return Networking.GetServerTimeInSeconds();
+
+        if (_revision < 0)
+            return Networking.GetServerTimeInSeconds();
+
+        // Avoid divide-by-zero / nonsense when paused at warp 0.
+        if (System.Math.Abs(_timeScale) < 1e-9)
+            return _epochServerTime;
+
+        return _epochServerTime + (simT - _epochSimTime) / _timeScale;
+    }
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
         if (!useNetworkTime) return;

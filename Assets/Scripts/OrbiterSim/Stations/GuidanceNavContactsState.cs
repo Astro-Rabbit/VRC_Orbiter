@@ -44,6 +44,13 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
     [Tooltip("Selected craft docking port. -1 means none.")]
     public int selectedCraftDockPortIndex = 0;
 
+
+    [Header("Selected station root relative (computed)")]
+    public bool selValid = false;
+    public double sel_drx_E, sel_dry_E, sel_drz_E;
+    public double sel_drx_B, sel_dry_B, sel_drz_B;  // same as drx_B0 if slot0==selected
+    public double sel_dvx_E, sel_dvy_E, sel_dvz_E;  // same as dv*_E0
+
     // --------------------------------------------------------------------
     // Docking targeting outputs (computed; targeting only, no latch logic)
     // Frames:
@@ -62,6 +69,8 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
 
     public double targetPort_px_B0, targetPort_py_B0, targetPort_pz_B0;
     public Quaternion qTargetPortInB0 = Quaternion.identity;
+    // Target port orientation in inertial (E): port frame -> E
+    public Quaternion qTargetPort_E0 = Quaternion.identity;
 
     public double craftPort_px_B0, craftPort_py_B0, craftPort_pz_B0;
     public Quaternion qCraftPort_B0 = Quaternion.identity;
@@ -76,7 +85,7 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
 
     public double targetPort_px_B1, targetPort_py_B1, targetPort_pz_B1;
     public Quaternion qTargetPortInB1 = Quaternion.identity;
-
+    public Quaternion qTargetPort_E1 = Quaternion.identity;
     public double craftPort_px_B1, craftPort_py_B1, craftPort_pz_B1;
     public Quaternion qCraftPort_B1 = Quaternion.identity;
 
@@ -145,5 +154,9 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
         qCraftPort_B1 = Quaternion.identity;
         dockErr_px_B1 = dockErr_py_B1 = dockErr_pz_B1 = 0.0;
         qDockErr1 = Quaternion.identity;
+
+        qTargetPort_E0 = Quaternion.identity;
+        qTargetPort_E1 = Quaternion.identity; // if you add it
+
     }
 }
