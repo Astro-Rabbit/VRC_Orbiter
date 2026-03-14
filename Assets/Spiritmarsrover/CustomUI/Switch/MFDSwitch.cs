@@ -51,7 +51,7 @@ public class MFDSwitch : UdonSharpBehaviour
         Vector3 currentTipWorld = pen.transform.position + (pen.transform.up * -pen.rayDistance);
         Vector3 currentLocalTip = transform.InverseTransformPoint(currentTipWorld);
 
-        float deltaY = currentLocalTip.y - _startLocalTipPos.y;
+        float deltaY = currentLocalTip.z - _startLocalTipPos.z;
         ProcessDelta(deltaY / dragThreshold);
     }
 
