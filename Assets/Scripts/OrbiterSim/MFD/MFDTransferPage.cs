@@ -36,14 +36,20 @@ public class MFDTransferPage : MFDPage
     public double srcX;
     public double srcY;
     public bool meets = false;
+    public double meetTime1;
     public double meetX1;
     public double meetY1;
     public double meetActualX1;
     public double meetActualY1;
+    public double meetDist1;
+    public double meetOop1;
+    public double meetTime2;
     public double meetX2;
     public double meetY2;
     public double meetActualX2;
     public double meetActualY2;
+    public double meetDist2;
+    public double meetOop2;
 
     [Header("State")]
     [UdonSynced] public int stepSize = DEFAULT_STEP_SIZE;
@@ -166,16 +172,28 @@ public class MFDTransferPage : MFDPage
         meetX2 = r2 * Math.Cos(theta2 + tfrArgpDiff);
         meetY2 = r2 * Math.Sin(theta2 + tfrArgpDiff);
 
-        double meetTime1 = tfr.GetTime(theta1);
-        double meetTime2 = tfr.GetTime(theta2);
+        meetTime1 = tfr.GetTime(theta1);
+        meetTime2 = tfr.GetTime(theta2);
 
         double x, y, z;
+
         propagator.conic = tgt.conic;
         propagator.Evaluate(meetTime1);
+        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
+        x -= meetX1;
+        y -= meetY1;
+        meetDist1 = Math.Sqrt(x*x + y*y + z*z);
+
         tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
         meetActualX1 = x*tgtPx - y*tgtPy;
         meetActualY1 = y*tgtPx + x*tgtPy;
+
         propagator.Evaluate(meetTime2);
+        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
+        x -= meetX2;
+        y -= meetY2;
+        meetDist2 = Math.Sqrt(x*x + y*y + z*z);
+
         tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
         meetActualX2 = x*tgtPx - y*tgtPy;
         meetActualY2 = y*tgtPx + x*tgtPy;
@@ -290,9 +308,8 @@ public class MFDTransferPage : MFDPage
 
     public override void DrawDisplay(MFD display)
     {
-        const float orbitSize = 0.5f;
-
         display.ClearGraphics();
+        const float orbitSize = 0.4f;
         float scale = orbitSize / (float)src.a;
 
         Vector2 tfrPePos = scale * (float)tfr.pe * new Vector2((float)tfrPy, -(float)tfrPx);
@@ -314,6 +331,21 @@ public class MFDTransferPage : MFDPage
         }
 
         display.ClearText();
+
+        double now = clock.simTime;
+        display.DrawText(MFD.FormatPercent("STP", stepRatio), 2, 19, Color.green);
+        display.DrawText(MFD.FormatNumber("BT", calcBurnTime - now), 3, 19, Color.green);
+        display.DrawText(MFD.FormatNumber("BDV", burnDv), 4, 19, Color.green);
+
+        if (meets) {
+            display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 4, Color.red);
+            display.DrawText(MFD.FormatNumber("DST", burnDv), 3, 4, Color.red);
+            //display.DrawText(MFD.FormatNumber("OOP", burnDv), 4, 4, Color.red);
+
+            display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 34, Color.blue);
+            display.DrawText(MFD.FormatNumber("DST", burnDv), 3, 34, Color.blue);
+            //display.DrawText(MFD.FormatNumber("OOP", burnDv), 4, 34, Color.blue);
+        }
 
         display.DrawText(" T- ", 0, 2, Color.white);
         display.DrawText(" T+ ", 0, 12, Color.white);

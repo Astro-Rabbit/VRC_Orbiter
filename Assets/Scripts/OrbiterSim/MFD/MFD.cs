@@ -226,7 +226,7 @@ public class MFD : UdonSharpBehaviour
 
         int i;
         for (i = 0; i < 4; i++) {
-            if (num < 10.0) {
+            if (Math.Abs(num) < 10.0) {
                 break;
             }
 
@@ -244,5 +244,10 @@ public class MFD : UdonSharpBehaviour
     public static string FormatAngle(string title, double angle)
     {
         return title.PadRight(4) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(5) + "°";
+    }
+
+    public static string FormatPercent(string title, double ratio)
+    {
+        return title.PadRight(4) + (ratio*100).ToString("0.0").PadLeft(5) + "%";
     }
 }
