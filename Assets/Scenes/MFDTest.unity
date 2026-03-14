@@ -18013,9 +18013,9 @@ MonoBehaviour:
   _udonSharpBackingUdonBehaviour: {fileID: 365708405}
   bodies: {fileID: 1559119461}
   clock: {fileID: 857553313}
-  conicPropagator: {fileID: 607253493}
-  srcConic: {fileID: 1424807233}
-  tgtConic: {fileID: 554354635}
+  craft: {fileID: 265503658}
+  src: {fileID: 103881736}
+  tgt: {fileID: 65900890}
 --- !u!1 &372226847
 GameObject:
   m_ObjectHideFlags: 0
@@ -112201,14 +112201,20 @@ MonoBehaviour:
   srcX: 0
   srcY: 0
   meets: 0
+  meetTime1: 0
   meetX1: 0
   meetY1: 0
   meetActualX1: 0
   meetActualY1: 0
+  meetDist1: 0
+  meetOop1: 0
+  meetTime2: 0
   meetX2: 0
   meetY2: 0
   meetActualX2: 0
   meetActualY2: 0
+  meetDist2: 0
+  meetOop2: 0
   stepSize: -5
   burnTime: 0
   burnDv: 0

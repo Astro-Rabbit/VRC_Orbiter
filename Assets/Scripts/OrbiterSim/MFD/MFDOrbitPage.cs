@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using System;
 using UnityEngine;
 using VRC.SDKBase;
@@ -83,9 +83,9 @@ public class MFDOrbitPage : MFDPage
 
         display.ClearGraphics();
         float scale = orbitSize / (float)a;
-        Vector2 pePos = new Vector2(0f, -orbitSize);
         Vector2 center = new Vector2(0f, -orbitSize + (float)periapsis * scale);
-        display.DrawConic(pePos, (float)(periapsis * scale), 0f, (float)eccentricity, Color.green);
+        display.DrawConic(center, scale * (float)bodies.GetRadius(conic.primaryBodyId), 0f, 0f, Color.white * 0.2f);
+        display.DrawConic(center, (float)periapsis * scale, 0f, (float)eccentricity, Color.green);
         display.DrawLine(center, center + scale * new Vector2(posX, posY), Color.green);
 
         // Some nested function support would feel pretty sweet right around now

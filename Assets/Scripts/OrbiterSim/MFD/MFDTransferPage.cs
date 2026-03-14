@@ -312,22 +312,18 @@ public class MFDTransferPage : MFDPage
         const float orbitSize = 0.4f;
         float scale = orbitSize / (float)src.a;
 
-        Vector2 tfrPePos = scale * (float)tfr.pe * new Vector2((float)tfrPy, -(float)tfrPx);
-        display.DrawConic(tfrPePos, (float)tfr.pe * scale, (float)tfrArgpDiff, (float)tfr.e, Color.gray);
-
-        Vector2 pePos = new Vector2(0f, -scale * (float)src.pe);
-        display.DrawConic(pePos, (float)src.pe * scale, 0f, (float)src.e, Color.green);
-
-        Vector2 tgtPePos = scale * (float)tgt.pe * new Vector2((float)tgtPy, -(float)tgtPx);
-        display.DrawConic(tgtPePos, (float)tgt.pe * scale, (float)tgtArgpDiff, (float)tgt.e, Color.yellow);
+        display.DrawConic(Vector2.zero, scale * (float)bodies.GetRadius(src.conic.primaryBodyId), 0f, 0f, Color.white * 0.2f);
+        display.DrawConic(Vector2.zero, (float)tfr.pe * scale, (float)tfrArgpDiff, (float)tfr.e, Color.gray);
+        display.DrawConic(Vector2.zero, (float)src.pe * scale, 0f, (float)src.e, Color.green);
+        display.DrawConic(Vector2.zero, (float)tgt.pe * scale, (float)tgtArgpDiff, (float)tgt.e, Color.yellow);
 
         display.DrawLine(Vector2.zero, scale * new Vector2((float)burnY, -(float)burnX), Color.gray);
         display.DrawLine(Vector2.zero, scale * new Vector2((float)srcY, -(float)srcX), Color.green);
         if (meets) {
-            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY1, -(float)meetX1), Color.blue);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY1, -(float)meetX1), Color.cyan);
             display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY2, -(float)meetX2), Color.red);
-            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY1, -(float)meetActualX1), Color.blue * 0.3f);
-            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY2, -(float)meetActualX2), Color.red * 0.15f);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY1, -(float)meetActualX1), Color.cyan * 0.2f);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY2, -(float)meetActualX2), Color.red * 0.2f);
         }
 
         display.ClearText();
@@ -342,9 +338,9 @@ public class MFDTransferPage : MFDPage
             display.DrawText(MFD.FormatNumber("DST", burnDv), 3, 4, Color.red);
             //display.DrawText(MFD.FormatNumber("OOP", burnDv), 4, 4, Color.red);
 
-            display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 34, Color.blue);
-            display.DrawText(MFD.FormatNumber("DST", burnDv), 3, 34, Color.blue);
-            //display.DrawText(MFD.FormatNumber("OOP", burnDv), 4, 34, Color.blue);
+            display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 34, Color.cyan);
+            display.DrawText(MFD.FormatNumber("DST", burnDv), 3, 34, Color.cyan);
+            //display.DrawText(MFD.FormatNumber("OOP", burnDv), 4, 34, Color.cyan);
         }
 
         display.DrawText(" T- ", 0, 2, Color.white);

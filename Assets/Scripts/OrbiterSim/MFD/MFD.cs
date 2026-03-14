@@ -148,7 +148,7 @@ public class MFD : UdonSharpBehaviour
         }
     }
 
-    public void DrawConic(Vector2 focus, float vertexDist, float angle, float eccentricity, Color color)
+    public void DrawConic(Vector2 center, float vertexDist, float angle, float eccentricity, Color color)
     {
         if (shapeCount >= MAX_SHAPES) {
             return;
@@ -156,7 +156,7 @@ public class MFD : UdonSharpBehaviour
 
         shapeColors[shapeCount] = color;
         shapeData1[shapeCount] = vertexDist;
-        shapeData2[shapeCount] = new Vector4(eccentricity, angle, focus.x, focus.y);
+        shapeData2[shapeCount] = new Vector4(eccentricity, angle, center.x, center.y);
 
         shapeCount++;
     }
@@ -222,11 +222,11 @@ public class MFD : UdonSharpBehaviour
 
     public static string FormatNumber(string title, double num)
     {
-        string[] suffixes = new[] {"", "k", "M", "G"};
+        string[] suffixes = new[] {"", "k", "M", "G", "T"};
 
         int i;
-        for (i = 0; i < 4; i++) {
-            if (Math.Abs(num) < 10.0) {
+        for (i = 0; i < 5; i++) {
+            if (Math.Abs(num) <= 1000) {
                 break;
             }
 
@@ -234,16 +234,28 @@ public class MFD : UdonSharpBehaviour
         }
 
         // FIXME: Is there a better way to fall back?
-        if (i == 4) {
+        if (i == 5) {
             return "";
         }
 
-        return title.PadRight(4) + num.ToString(i == 0 ? "0.0000" : "0.000") + suffixes[i];
+        string format;
+        if (num >= 100) {
+            format = "000.0";
+        } else if (num >= 10) {
+            format = "00.00";
+        } else {
+            format = "0.000";
+        }
+        if (i == 0) {
+            format += "0";
+        }
+
+        return title.PadRight(4) + num.ToString(format) + suffixes[i];
     }
 
     public static string FormatAngle(string title, double angle)
     {
-        return title.PadRight(4) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(5) + "°";
+        return title.PadRight(3) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(6) + "°";
     }
 
     public static string FormatPercent(string title, double ratio)

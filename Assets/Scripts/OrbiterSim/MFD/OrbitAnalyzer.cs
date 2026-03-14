@@ -110,6 +110,13 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         }
     }
 
+    public void Normal(out double x, out double y, out double z)
+    {
+        x = m02;
+        y = m12;
+        z = m22;
+    }
+
     public double GetTime(double theta)
     {
         double progress = ((GetMeanAnomaly(theta) - conic.M0Rad)/(2*Math.PI) + 1) % 1;
