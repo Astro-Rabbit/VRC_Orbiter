@@ -11,6 +11,7 @@ using VRC.Udon.Common.Interfaces;
 public class MFDTransferPage : MFDPage
 {
     [Header("References")]
+    public CraftStateModel craft;
     public BodyCatalog bodies;
     public SimClock clock;
     public OrbitAnalyzer src;
@@ -30,6 +31,10 @@ public class MFDTransferPage : MFDPage
     public double tfrPy;
     public double tgtArgpDiff;
     public double tfrArgpDiff;
+    public double burnX;
+    public double burnY;
+    public double srcX;
+    public double srcY;
     public bool meets = false;
     public double meetX1;
     public double meetY1;
@@ -65,6 +70,10 @@ public class MFDTransferPage : MFDPage
         bool conicsUpdated = false;
         bool transferUpdated = false;
 
+        double x, y, z, _;
+        bodies.GetCraftToBodyVector(src.conic.primaryBodyId, craft, out x, out y, out z);
+        src.EclipticToPerifocal(x, y, z, out srcX, out srcY, out _);
+
         if (srcLastEpochT0 != src.conic.epochT0 || tgtLastEpochT0 != tgt.conic.epochT0 || burnChanged) {
             srcLastEpochT0 = src.conic.epochT0;
             tgtLastEpochT0 = tgt.conic.epochT0;
@@ -81,6 +90,8 @@ public class MFDTransferPage : MFDPage
 
             propagator.conic = src.conic;
             propagator.Evaluate(calcBurnTime);
+
+            src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out burnX, out burnY, out _);
 
             // prograde direction unit vector
             double dx = propagator.rel_vx;
@@ -158,13 +169,16 @@ public class MFDTransferPage : MFDPage
         double meetTime1 = tfr.GetTime(theta1);
         double meetTime2 = tfr.GetTime(theta2);
 
-        double _;
-
+        double x, y, z;
         propagator.conic = tgt.conic;
         propagator.Evaluate(meetTime1);
-        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out meetActualX1, out meetActualY1, out _);
+        tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
+        meetActualX1 = x*tgtPx - y*tgtPy;
+        meetActualY1 = y*tgtPx + x*tgtPy;
         propagator.Evaluate(meetTime2);
-        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out meetActualX2, out meetActualY2, out _);
+        tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
+        meetActualX2 = x*tgtPx - y*tgtPy;
+        meetActualY2 = y*tgtPx + x*tgtPy;
     }
 
     public override void OnButton(MFD display, ButtonSide side, int num)
@@ -290,11 +304,13 @@ public class MFDTransferPage : MFDPage
         Vector2 tgtPePos = scale * (float)tgt.pe * new Vector2((float)tgtPy, -(float)tgtPx);
         display.DrawConic(tgtPePos, (float)tgt.pe * scale, (float)tgtArgpDiff, (float)tgt.e, Color.yellow);
 
+        display.DrawLine(Vector2.zero, scale * new Vector2((float)burnY, -(float)burnX), Color.gray);
+        display.DrawLine(Vector2.zero, scale * new Vector2((float)srcY, -(float)srcX), Color.green);
         if (meets) {
             display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY1, -(float)meetX1), Color.blue);
             display.DrawLine(Vector2.zero, scale * new Vector2((float)meetY2, -(float)meetX2), Color.red);
-            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY1, -(float)meetActualX1), Color.blue * 0.5f);
-            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY2, -(float)meetActualX2), Color.red * 0.2f);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY1, -(float)meetActualX1), Color.blue * 0.3f);
+            display.DrawLine(Vector2.zero, scale * new Vector2((float)meetActualY2, -(float)meetActualX2), Color.red * 0.15f);
         }
 
         display.ClearText();
