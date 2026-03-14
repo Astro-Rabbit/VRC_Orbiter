@@ -241,31 +241,27 @@ public class MFDTransferPage : MFDPage
         }
     }
 
-    [NetworkCallable]
     public void ResetState()
     {
-        if (Networking.IsOwner(gameObject)) {
-            stepSize = DEFAULT_STEP_SIZE;
-            burnTime = clock.simTime;
-            burnDv = 0;
-            RequestSerialization();
-            OnStepSizeChange();
-            burnChanged = true;
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "ResetState");
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        stepSize = DEFAULT_STEP_SIZE;
+        burnTime = clock.simTime;
+        burnDv = 0;
+        RequestSerialization();
+        OnStepSizeChange();
+        burnChanged = true;
     }
 
-    [NetworkCallable]
     public void SetStepSize(int newStepSize)
     {
-        if (Networking.IsOwner(gameObject)) {
-            stepSize = newStepSize;
-            RequestSerialization();
-            OnStepSizeChange();
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetStepSize", newStepSize);
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        stepSize = newStepSize;
+        RequestSerialization();
+        OnStepSizeChange();
     }
 
     private void OnStepSizeChange()
@@ -282,28 +278,24 @@ public class MFDTransferPage : MFDPage
         stepRatio = ratio;
     }
 
-    [NetworkCallable]
     public void SetBurnTime(double newBurnTime)
     {
-        if (Networking.IsOwner(gameObject)) {
-            burnTime = newBurnTime;
-            RequestSerialization();
-            burnChanged = true;
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetBurnTime", newBurnTime);
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        burnTime = newBurnTime;
+        RequestSerialization();
+        burnChanged = true;
     }
 
-    [NetworkCallable]
     public void SetBurnDV(double newBurnDv)
     {
-        if (Networking.IsOwner(gameObject)) {
-            burnDv = newBurnDv;
-            RequestSerialization();
-            burnChanged = true;
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetBurnDv", newBurnDv);
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        burnDv = newBurnDv;
+        RequestSerialization();
+        burnChanged = true;
     }
 
     public override void DrawDisplay(MFD display)

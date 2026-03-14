@@ -93,16 +93,14 @@ public class MFD : UdonSharpBehaviour
         currentPage.OnButton(this, side, num);
     }
 
-    [NetworkCallable]
     public void SetPage(byte pageId)
     {
-        if (Networking.IsOwner(gameObject)) {
-            currentPageId = pageId;
-            RequestSerialization();
-            OnPageIdChange();
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetPage", pageId);
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        currentPageId = pageId;
+        RequestSerialization();
+        OnPageIdChange();
     }
 
     private void OnPageIdChange()
