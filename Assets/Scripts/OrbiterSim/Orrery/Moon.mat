@@ -24,11 +24,11 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: 21a3bf35533752e48a2e6332a01c2b9a, type: 3}
+        m_Texture: {fileID: 2800000, guid: c27b840437571ad49a63ed534ef1fd7e, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NightTex:
-        m_Texture: {fileID: 2800000, guid: 01100a7ce30d0d5449f8b173183161d2, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     m_Ints: []
@@ -36,19 +36,19 @@ Material:
     - _Alpha: 1
     - _Ambient: 0
     - _DiffuseStrength: 1
-    - _FlickerSpeed: 20
-    - _FlickerStrength: 0.2
+    - _FlickerSpeed: 5
+    - _FlickerStrength: 0.1
     - _FresnelPower: 3
-    - _FresnelStrength: 3.68
+    - _FresnelStrength: 1
     - _Intensity: 1
     - _LongitudeOffset: 0
     - _NightIntensity: 1
     - _NightSharpness: 2
     - _NightThreshold: 0.2
-    - _ScanlineDensity: 100
-    - _ScanlineScroll: 0.15
-    - _ScanlineStrength: 0.08
+    - _ScanlineDensity: 1000
+    - _ScanlineScroll: 0.01
+    - _ScanlineStrength: 0.091
     - _StencilRef: 64
     m_Colors:
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 0.8820755, g: 0.98507345, b: 1, a: 1}
   m_BuildTextureStacks: []

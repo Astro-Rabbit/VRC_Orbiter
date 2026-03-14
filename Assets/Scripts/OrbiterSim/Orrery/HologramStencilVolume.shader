@@ -15,7 +15,8 @@ Shader "Orbiter/HologramStencilVolume"
 
         ColorMask 0
         ZWrite Off
-        Cull Back
+        ZTest Always
+        Cull Off
 
         Stencil
         {

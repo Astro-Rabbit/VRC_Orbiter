@@ -28,6 +28,9 @@ Shader "Orbiter/HologramOrbitRibbon"
         _FlickerSpeed ("Flicker Speed", Float) = 7.0
 
         _StencilRef ("Stencil Ref", Float) = 64
+
+        _ClipCenterWorld ("Clip Center World", Vector) = (0,0,0,0)
+        _ClipRadiusWorld ("Clip Radius World", Float) = 1.0
     }
 
     SubShader
@@ -60,15 +63,16 @@ Shader "Orbiter/HologramOrbitRibbon"
 
             struct appdata
             {
-                float4 vertex : POSITION; // centerline position in object space
-                float3 normal : NORMAL;   // tangent in object space
-                float2 uv     : TEXCOORD0; // x=along orbit, y=side sign encoded 0/1
+                float4 vertex : POSITION;
+                float3 normal : NORMAL;
+                float2 uv     : TEXCOORD0;
             };
 
             struct v2f
             {
-                float4 pos : SV_POSITION;
-                float2 uv  : TEXCOORD0;
+                float4 pos      : SV_POSITION;
+                float2 uv       : TEXCOORD0;
+                float3 worldPos : TEXCOORD1;
             };
 
             fixed4 _Color;
@@ -96,6 +100,9 @@ Shader "Orbiter/HologramOrbitRibbon"
             float _FlickerStrength;
             float _FlickerSpeed;
 
+            float4 _ClipCenterWorld;
+            float _ClipRadiusWorld;
+
             float WrappedDistance01(float a, float b)
             {
                 float d = abs(a - b);
@@ -106,20 +113,13 @@ Shader "Orbiter/HologramOrbitRibbon"
             {
                 v2f o;
 
-                // Center point in world
                 float3 worldCenter = mul(unity_ObjectToWorld, v.vertex).xyz;
-
-                // Tangent in world
                 float3 tangentW = normalize(UnityObjectToWorldNormal(v.normal));
-
-                // View direction
                 float3 viewDirW = normalize(_WorldSpaceCameraPos.xyz - worldCenter);
 
-                // Camera-facing side direction
                 float3 sideW = cross(viewDirW, tangentW);
                 float sideLen = length(sideW);
 
-                // Fallback if viewDir and tangent nearly parallel
                 if (sideLen < 1e-5)
                 {
                     float3 upFallback = float3(0,1,0);
@@ -141,17 +141,19 @@ Shader "Orbiter/HologramOrbitRibbon"
 
                 o.pos = mul(UNITY_MATRIX_VP, float4(worldPos, 1.0));
                 o.uv = v.uv;
+                o.worldPos = worldPos;
                 return o;
             }
 
             fixed4 frag(v2f i) : SV_Target
             {
-                // Across-width profile
-                float edge = abs(i.uv.y * 2.0 - 1.0); // 0 center, 1 edges
+                float3 clipDelta = i.worldPos - _ClipCenterWorld.xyz;
+                clip(_ClipRadiusWorld - length(clipDelta));
+
+                float edge = abs(i.uv.y * 2.0 - 1.0);
                 float widthFade = saturate(1.0 - pow(edge, _EdgeSoftness));
                 widthFade *= lerp(1.0, _CenterBoost, 1.0 - edge);
 
-                // Dash
                 float dashMask = 1.0;
                 if (_DashEnable > 0.5)
                 {
@@ -159,21 +161,18 @@ Shader "Orbiter/HologramOrbitRibbon"
                     dashMask = step(u, _DashDuty);
                 }
 
-                // Flow shimmer
                 float flow = 1.0;
                 if (_FlowEnable > 0.5)
                 {
                     flow += _FlowStrength * sin((i.uv.x - _Time.y * _FlowSpeed) * 40.0);
                 }
 
-                // Prograde bright, retro dim
                 float dWrap = WrappedDistance01(i.uv.x, _CraftU);
                 float phase = saturate(dWrap / 0.5);
                 float aroundFade = 0.5 + 0.5 * cos(phase * UNITY_PI);
                 aroundFade = lerp(1.0, aroundFade, _ProgradeFadeStrength);
                 aroundFade = max(aroundFade, _RetroMinBrightness);
 
-                // Subtle holo flicker
                 float flicker = 1.0 + _FlickerStrength *
                     sin(_Time.y * _FlickerSpeed + i.uv.x * 31.7 + i.uv.y * 11.3);
 

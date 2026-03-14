@@ -150,7 +150,7 @@ public class SimManager : UdonSharpBehaviour
     public OrbitRenderer orbitline;
     public SkyBoxDriver skyrender;
     public StationRenderManager stationRender;
-
+    public CraftNetCabinAccel netCabinAccel;
     // -------------------------------------------------------------------------
     // Initialization helpers
     // -------------------------------------------------------------------------
@@ -475,6 +475,19 @@ public class SimManager : UdonSharpBehaviour
         if (netCore != null)
             netCore.PublishCore();
 
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
+        {
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.PublishAccel();
+        }
+
         if (netKin != null)
         {
             netKin.currentOwnerSimT = _simT;
@@ -652,6 +665,19 @@ public class SimManager : UdonSharpBehaviour
 
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
+        {
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.ForcePublishAccel();
+        }
+
         if (netKin != null)
         {
             netKin.currentOwnerSimT = _simT;
@@ -682,6 +708,9 @@ public class SimManager : UdonSharpBehaviour
             netConic.ForcePublishConic();
 
         netCore.SetMode(MODE_RAILS, pid, true);
+
+        if (netCabinAccel != null)
+            netCabinAccel.ForceZeroAccel(T);
 
         if (netAtt != null)
             netAtt.ForcePublishAttitude();

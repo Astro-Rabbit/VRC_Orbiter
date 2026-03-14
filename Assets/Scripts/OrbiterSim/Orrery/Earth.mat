@@ -34,10 +34,11 @@ Material:
     m_Ints: []
     m_Floats:
     - _Alpha: 1
-    - _Ambient: 0
+    - _Ambient: 0.2
+    - _ClipRadiusWorld: 1
     - _DiffuseStrength: 1
-    - _FlickerSpeed: 20
-    - _FlickerStrength: 0.2
+    - _FlickerSpeed: 5
+    - _FlickerStrength: 0.1
     - _FresnelPower: 3
     - _FresnelStrength: 3.68
     - _Intensity: 1
@@ -45,10 +46,11 @@ Material:
     - _NightIntensity: 1
     - _NightSharpness: 2
     - _NightThreshold: 0.2
-    - _ScanlineDensity: 100
-    - _ScanlineScroll: 0.15
-    - _ScanlineStrength: 0.08
+    - _ScanlineDensity: 1000
+    - _ScanlineScroll: 0.01
+    - _ScanlineStrength: 0.091
     - _StencilRef: 64
     m_Colors:
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _ClipCenterWorld: {r: 0, g: 0, b: 0, a: 0}
+    - _Color: {r: 0, g: 0.76249933, b: 1, a: 1}
   m_BuildTextureStacks: []

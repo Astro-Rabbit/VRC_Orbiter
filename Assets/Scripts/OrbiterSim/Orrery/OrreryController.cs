@@ -72,9 +72,23 @@ public class OrreryController : UdonSharpBehaviour
     [Header("Body Materials (optional runtime lighting drive)")]
     public Renderer earthRenderer;
     public Renderer moonRenderer;
-
+    private Renderer[] _craftRenderers;
+    private bool _craftRenderersCached = false;
     private MaterialPropertyBlock _earthMPB;
     private MaterialPropertyBlock _moonMPB;
+
+    [Header("Volume Clipping")]
+    [Tooltip("Renderer holding the stencil volume mesh. Used to derive clip sphere center/radius.")]
+    public Renderer stencilVolumeRenderer;
+
+    [Tooltip("Optional orbit ribbon renderer using the hologram ribbon shader.")]
+    public Renderer orbitRibbonRenderer;
+
+    [Tooltip("If true, derive clip sphere radius from the stencil renderer bounds.")]
+    public bool deriveClipRadiusFromRendererBounds = true;
+
+    [Tooltip("Fallback world-space clip radius if renderer/bounds are not available.")]
+    public float fallbackClipRadiusWorld = 0.30f;
 
     [Tooltip("If true, update body material sun direction every frame.")]
     public bool updateBodyMaterialLighting = true;
@@ -123,6 +137,21 @@ public class OrreryController : UdonSharpBehaviour
 
     [Tooltip("Maximum craft diameter in body/system focus.")]
     public float craftBodyModeMaxDiameter = 0.03f;
+
+    [Header("Craft Handedness Fix")]
+    [Tooltip("If true, craft uses unflipped quaternion rotation plus mirrored local scale to match orrery handedness.")]
+    public bool mirrorCraftInCode = false;
+
+    [Header("Craft Physical Scaling")]
+    [Tooltip("Reference physical craft size used for craft-focus physical scaling.")]
+    public double craftPhysicalReferenceSizeMeters = 50.0;
+
+    [Tooltip("Default displayed craft size in Unity units when craft focus is at baseline zoom.")]
+    public float craftFocusTargetDisplaySizeUnity = 0.40f;
+
+    [Header("Craft Focus Manual Zoom Limits")]
+    public float craftFocusManualZoomMinDecades = -2.0f;
+    public float craftFocusManualZoomMaxDecades = 1.0f;
 
     // ---------------------------------------------------------------------
     // Focus
@@ -197,6 +226,20 @@ public class OrreryController : UdonSharpBehaviour
     public float scaleFollowSpeed = 6.0f;
     public float rotationFollowSpeed = 6.0f;
 
+    [Header("Focus Transition")]
+    [Tooltip("If true, focus changes ease into place, then lock exactly.")]
+    public bool smoothFocusTransitions = true;
+
+    [Tooltip("Distance in solver meters below which focus transition snaps and locks.")]
+    public double focusSettleDistanceMeters = 1000.0;
+
+    [Tooltip("Relative settle threshold based on current focus target magnitude.")]
+    public double focusSettleRelative = 1e-6;
+
+    private bool _focusTransitionActive = false;
+    private byte _prevFocusModeForTransition = 255;
+
+
     // ---------------------------------------------------------------------
     // Presentation mapping (reused from old orrery)
     // ---------------------------------------------------------------------
@@ -210,6 +253,10 @@ public class OrreryController : UdonSharpBehaviour
 
     [Tooltip("Optional final local-space offset of the entire hologram scene.")]
     public Vector3 localOffset = Vector3.zero;
+
+    [Header("Ticking")]
+    [Tooltip("If true, orrery updates from its own LateUpdate. If false, another system must call TickOrrery().")]
+    public bool useInternalLateUpdate = false;
 
     // ---------------------------------------------------------------------
     // Internal smoothed state
@@ -238,7 +285,19 @@ public class OrreryController : UdonSharpBehaviour
 
     void LateUpdate()
     {
+        if (!useInternalLateUpdate) return;
         TickOrrery();
+    }
+
+
+    private void CacheCraftRenderers()
+    {
+        if (_craftRenderersCached) return;
+
+        if (craftTf != null)
+            _craftRenderers = craftTf.GetComponentsInChildren<Renderer>(true);
+
+        _craftRenderersCached = true;
     }
 
     // ---------------------------------------------------------------------
@@ -277,12 +336,15 @@ public class OrreryController : UdonSharpBehaviour
         _frameQ_E_smoothed = frameQ;
         _sceneScaleSmoothed = (scaleTarget > 0.0f) ? scaleTarget : 1.0f;
         _initialized = true;
+        _prevFocusModeForTransition = focusMode;
+        _focusTransitionActive = false;
+
     }
 
     // ---------------------------------------------------------------------
     // Main tick
     // ---------------------------------------------------------------------
-    private void TickOrrery()
+    public void TickOrrery()
     {
         if (bodies == null) return;
         if (nav == null && craft == null) return;
@@ -309,19 +371,62 @@ public class OrreryController : UdonSharpBehaviour
         if (dt < 0.0f) dt = 0.0f;
         if (dt > 0.2f) dt = 0.2f;
 
-        float aPos = 1.0f - Mathf.Exp(-focusFollowSpeed * dt);
         float aRot = 1.0f - Mathf.Exp(-rotationFollowSpeed * dt);
         float aScl = 1.0f - Mathf.Exp(-scaleFollowSpeed * dt);
 
-        _focusX_smoothed = LerpD(_focusX_smoothed, fxTarget, aPos);
-        _focusY_smoothed = LerpD(_focusY_smoothed, fyTarget, aPos);
-        _focusZ_smoothed = LerpD(_focusZ_smoothed, fzTarget, aPos);
+        // -------------------------------------------------------------
+        // Focus transition logic:
+        // - smooth only when focus changes
+        // - once settled, snap and lock exactly
+        // -------------------------------------------------------------
+        bool focusChanged = FocusTargetChanged(focusMode);
+
+        if (focusChanged)
+        {
+            _focusTransitionActive = smoothFocusTransitions;
+            _prevFocusModeForTransition = focusMode;
+
+            if (!smoothFocusTransitions)
+            {
+                _focusX_smoothed = fxTarget;
+                _focusY_smoothed = fyTarget;
+                _focusZ_smoothed = fzTarget;
+            }
+        }
+
+        if (_focusTransitionActive)
+        {
+            float aPos = 1.0f - Mathf.Exp(-focusFollowSpeed * dt);
+
+            _focusX_smoothed = LerpD(_focusX_smoothed, fxTarget, aPos);
+            _focusY_smoothed = LerpD(_focusY_smoothed, fyTarget, aPos);
+            _focusZ_smoothed = LerpD(_focusZ_smoothed, fzTarget, aPos);
+
+            double err = FocusErrorMeters(fxTarget, fyTarget, fzTarget);
+            double settle = ComputeFocusSettleThreshold(fxTarget, fyTarget, fzTarget);
+
+            if (err <= settle)
+            {
+                _focusX_smoothed = fxTarget;
+                _focusY_smoothed = fyTarget;
+                _focusZ_smoothed = fzTarget;
+                _focusTransitionActive = false;
+            }
+        }
+        else
+        {
+            // Locked mode: no lag
+            _focusX_smoothed = fxTarget;
+            _focusY_smoothed = fyTarget;
+            _focusZ_smoothed = fzTarget;
+        }
 
         _frameQ_E_smoothed = Quaternion.Slerp(_frameQ_E_smoothed, frameQTarget, aRot);
         _sceneScaleSmoothed = Mathf.Lerp(_sceneScaleSmoothed, scaleTarget, aScl);
 
         ApplyBodiesAndCraft();
-        UpdateBodyMaterials();        
+        UpdateBodyMaterials();   
+        UpdateClipVolumeParams();             
     }
 
     // ---------------------------------------------------------------------
@@ -472,7 +577,8 @@ public class OrreryController : UdonSharpBehaviour
                 break;
         }
 
-        float manualMul = Mathf.Pow(10.0f, manualZoomDecades);
+        float zoomDecades = GetManualZoomDecadesForCurrentFocus();
+        float manualMul = Mathf.Pow(10.0f, zoomDecades);
         return baseScale * manualMul;
     }
 
@@ -584,23 +690,23 @@ public class OrreryController : UdonSharpBehaviour
     /// Bodies are allowed to fly off as you zoom in.
     /// This computes the default craft zoom only; manual zoom then acts on top.
     /// </summary>
+    /// <summary>
+    /// Craft-focus scale:
+    /// physically anchored to the craft size.
+    /// Manual zoom acts on top of this baseline through ComputeSceneScale().
+    /// </summary>
     private float ComputeCraftFocusScale()
     {
-        double representedRange = craftFocusDefaultRangeMeters;
+        double refSize = craftPhysicalReferenceSizeMeters;
+        if (refSize <= 1e-6)
+            refSize = 1.0;
 
-        if (craftFocusUseAltitudeForDefault && nav != null && nav.valid)
-        {
-            double altitude = nav.rMag - nav.radiusPrimary;
-            if (altitude < 0.0) altitude = 0.0;
+        float targetSize = craftFocusTargetDisplaySizeUnity;
+        if (targetSize < 0.001f)
+            targetSize = 0.001f;
 
-            representedRange = altitude * craftFocusAltitudeRangeMultiplier;
-        }
-
-        if (representedRange < craftFocusMinDefaultRangeMeters) representedRange = craftFocusMinDefaultRangeMeters;
-        if (representedRange > craftFocusMaxDefaultRangeMeters) representedRange = craftFocusMaxDefaultRangeMeters;
-
-        float workRadius = hologramRadiusUnity * autoScaleFill;
-        return (float)(workRadius / representedRange);
+        // Unity meters per real meter
+        return targetSize / (float)refSize;
     }
 
     private byte ResolveFocusedBodyScaleBodyId()
@@ -677,9 +783,21 @@ public class OrreryController : UdonSharpBehaviour
 
                 Quaternion qCraftE = GetCraftQ_BE();
                 Quaternion qCraftRel = qE_toFrame * qCraftE;
-                craftTf.localRotation = MapRotationSolverToUnity(qCraftRel);
 
-                craftTf.localScale = Vector3.one * ComputeCraftDisplayDiameterUnity();
+                if (mirrorCraftInCode && flipHandedness)
+                {
+                    // Use the pure rotation map only.
+                    // The handedness flip is applied through localScale.
+                    Quaternion qCraftDisplay = _Qmap * qCraftRel * _Qinv;
+                    craftTf.localRotation = qCraftDisplay;
+                    craftTf.localScale = GetCraftDisplayScale();
+                }
+                else
+                {
+                    // Old behavior
+                    craftTf.localRotation = MapRotationSolverToUnity(qCraftRel);
+                    craftTf.localScale = Vector3.one * ComputeCraftDisplayDiameterUnity();
+                }
             }
         }
     }
@@ -714,24 +832,36 @@ public class OrreryController : UdonSharpBehaviour
 
     private float ComputeCraftDisplayDiameterUnity()
     {
+        // -------------------------------------------------------------
+        // Craft focus: physical scaling from craft size
+        // -------------------------------------------------------------
         if (focusMode == FOCUS_CRAFT)
-            return craftDisplayDiameterWhenFocused;
+        {
+            float d = (float)(craftPhysicalReferenceSizeMeters * _sceneScaleSmoothed);
 
+            // Keep sane lower bound, but do not clamp high unless desired.
+            if (d < 0.001f) d = 0.001f;
+            return d;
+        }
+
+        // -------------------------------------------------------------
+        // Body/system focus: shrinking contextual marker
+        // -------------------------------------------------------------
         float workRadius = hologramRadiusUnity * autoScaleFill;
         double representedRangeMeters = workRadius / Mathf.Max(_sceneScaleSmoothed, 1e-12f);
 
-        float d = craftBodyModeReferenceDiameter;
+        float dBody = craftBodyModeReferenceDiameter;
 
         if (craftBodyModeReferenceRangeMeters > 0.0 && representedRangeMeters > 0.0)
         {
             double ratio = craftBodyModeReferenceRangeMeters / representedRangeMeters;
-            d *= Mathf.Pow((float)ratio, craftBodyModeShrinkExponent);
+            dBody *= Mathf.Pow((float)ratio, craftBodyModeShrinkExponent);
         }
 
-        if (d < craftBodyModeMinDiameter) d = craftBodyModeMinDiameter;
-        if (d > craftBodyModeMaxDiameter) d = craftBodyModeMaxDiameter;
+        if (dBody < craftBodyModeMinDiameter) dBody = craftBodyModeMinDiameter;
+        if (dBody > craftBodyModeMaxDiameter) dBody = craftBodyModeMaxDiameter;
 
-        return d;
+        return dBody;
     }
 
     private Vector3 ComputeDisplayPosition(double objX, double objY, double objZ, Quaternion qE_toFrame)
@@ -780,6 +910,14 @@ public class OrreryController : UdonSharpBehaviour
             return craftAtt.qBE;
 
         return Quaternion.identity;
+    }
+
+    private float GetManualZoomDecadesForCurrentFocus()
+    {
+        if (focusMode == FOCUS_CRAFT)
+            return Mathf.Clamp(manualZoomDecades, craftFocusManualZoomMinDecades, craftFocusManualZoomMaxDecades);
+
+        return manualZoomDecades;
     }
 
     private void GetBodyPosED(byte bodyId, out double x, out double y, out double z)
@@ -885,20 +1023,17 @@ public class OrreryController : UdonSharpBehaviour
         {
             if (_earthMPB == null) _earthMPB = new MaterialPropertyBlock();
 
-            Vector3 earthPos = earthRenderer.transform.position;
-            Vector3 sunDir = new Vector3(
-                (float)(sx - (double)earthPos.x),
-                (float)(sy - (double)earthPos.y),
-                (float)(sz - (double)earthPos.z)
+            double ex, ey, ez;
+            bodies.GetBodyPos(bodies.earthId, out ex, out ey, out ez);
+
+            Vector3 sunDirWorld = MapWorldDirectionEToOrreryWorld(
+                sx - ex,
+                sy - ey,
+                sz - ez
             );
 
-            if (sunDir.sqrMagnitude > 1e-12f)
-                sunDir.Normalize();
-            else
-                sunDir = Vector3.forward;
-
             earthRenderer.GetPropertyBlock(_earthMPB);
-            _earthMPB.SetVector("_SunDirWorld", new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
+            _earthMPB.SetVector("_SunDirWorld", new Vector4(sunDirWorld.x, sunDirWorld.y, sunDirWorld.z, 0f));
             earthRenderer.SetPropertyBlock(_earthMPB);
         }
 
@@ -906,24 +1041,34 @@ public class OrreryController : UdonSharpBehaviour
         {
             if (_moonMPB == null) _moonMPB = new MaterialPropertyBlock();
 
-            Vector3 moonPos = moonRenderer.transform.position;
-            Vector3 sunDir = new Vector3(
-                (float)(sx - (double)moonPos.x),
-                (float)(sy - (double)moonPos.y),
-                (float)(sz - (double)moonPos.z)
+            double mx, my, mz;
+            bodies.GetBodyPos(bodies.moonId, out mx, out my, out mz);
+
+            Vector3 sunDirWorld = MapWorldDirectionEToOrreryWorld(
+                sx - mx,
+                sy - my,
+                sz - mz
             );
 
-            if (sunDir.sqrMagnitude > 1e-12f)
-                sunDir.Normalize();
-            else
-                sunDir = Vector3.forward;
-
             moonRenderer.GetPropertyBlock(_moonMPB);
-            _moonMPB.SetVector("_SunDirWorld", new Vector4(sunDir.x, sunDir.y, sunDir.z, 0f));
+            _moonMPB.SetVector("_SunDirWorld", new Vector4(sunDirWorld.x, sunDirWorld.y, sunDirWorld.z, 0f));
             moonRenderer.SetPropertyBlock(_moonMPB);
         }
     }
+    private Vector3 GetCraftDisplayScale()
+    {
+        float s = ComputeCraftDisplayDiameterUnity();
+        Vector3 scale = new Vector3(s, s, s);
 
+        if (mirrorCraftInCode && flipHandedness)
+        {
+            if (flipAxis == 0) scale.x = -scale.x;
+            else if (flipAxis == 1) scale.y = -scale.y;
+            else scale.z = -scale.z;
+        }
+
+        return scale;
+    }
     // ---------------------------------------------------------------------
     // Utilities
     // ---------------------------------------------------------------------
@@ -970,6 +1115,105 @@ public class OrreryController : UdonSharpBehaviour
     public float GetCurrentSceneScale()
     {
         return _sceneScaleSmoothed;
+    }
+
+    /// <summary>
+    /// Map a solver inertial direction (E) into current orrery LOCAL direction.
+    /// No translation, no scaling.
+    /// </summary>
+    public Vector3 MapWorldDirectionEToOrreryLocal(double dirX, double dirY, double dirZ)
+    {
+        Quaternion qE_toFrame = Quaternion.Inverse(_frameQ_E_smoothed);
+        Vector3 dFrame = qE_toFrame * new Vector3((float)dirX, (float)dirY, (float)dirZ);
+        Vector3 presented = MapDirectionSolverToUnity(dFrame);
+        return presented.normalized;
+    }
+
+    /// <summary>
+    /// Map a solver inertial direction (E) into Unity WORLD direction.
+    /// </summary>
+    public Vector3 MapWorldDirectionEToOrreryWorld(double dirX, double dirY, double dirZ)
+    {
+        Vector3 localDir = MapWorldDirectionEToOrreryLocal(dirX, dirY, dirZ);
+        return transform.TransformDirection(localDir).normalized;
+    }
+
+    private bool FocusTargetChanged(byte currentFocusMode)
+    {
+        return currentFocusMode != _prevFocusModeForTransition;
+    }
+
+    private double ComputeFocusSettleThreshold(double tx, double ty, double tz)
+    {
+        double mag = System.Math.Sqrt(tx * tx + ty * ty + tz * tz);
+        double rel = mag * focusSettleRelative;
+        return System.Math.Max(focusSettleDistanceMeters, rel);
+    }
+
+    private void UpdateClipVolumeParams()
+    {
+        Vector3 centerWorld;
+        float radiusWorld;
+        GetClipSphereWorld(out centerWorld, out radiusWorld);
+
+        ApplyClipParamsToRenderer(earthRenderer, centerWorld, radiusWorld);
+        ApplyClipParamsToRenderer(moonRenderer, centerWorld, radiusWorld);
+        ApplyClipParamsToRenderer(orbitRibbonRenderer, centerWorld, radiusWorld);
+
+        if (craftTf != null)
+        {
+            CacheCraftRenderers();
+
+            if (_craftRenderers != null)
+            {
+                int n = _craftRenderers.Length;
+                for (int i = 0; i < n; i++)
+                {
+                    ApplyClipParamsToRenderer(_craftRenderers[i], centerWorld, radiusWorld);
+                }
+            }
+        }
+    }
+
+    private void GetClipSphereWorld(out Vector3 centerWorld, out float radiusWorld)
+    {
+        centerWorld = transform.position;
+        radiusWorld = Mathf.Max(0.001f, fallbackClipRadiusWorld);
+
+        if (stencilVolumeRenderer != null)
+        {
+            Bounds b = stencilVolumeRenderer.bounds;
+            centerWorld = b.center;
+
+            if (deriveClipRadiusFromRendererBounds)
+            {
+                radiusWorld = 0.5f * Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z));
+                radiusWorld = Mathf.Max(radiusWorld, 0.001f);
+            }
+        }
+    }
+
+    private void ApplyClipParamsToRenderer(Renderer r, Vector3 centerWorld, float radiusWorld)
+    {
+        if (r == null) return;
+
+        MaterialPropertyBlock mpb = new MaterialPropertyBlock();
+        r.GetPropertyBlock(mpb);
+        mpb.SetVector("_ClipCenterWorld", new Vector4(centerWorld.x, centerWorld.y, centerWorld.z, 0f));
+        mpb.SetFloat("_ClipRadiusWorld", radiusWorld);
+        r.SetPropertyBlock(mpb);
+    }
+    private double FocusErrorMeters(double tx, double ty, double tz)
+    {
+        double dx = tx - _focusX_smoothed;
+        double dy = ty - _focusY_smoothed;
+        double dz = tz - _focusZ_smoothed;
+        return System.Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    public void GetCurrentClipSphereWorld(out Vector3 centerWorld, out float radiusWorld)
+    {
+        GetClipSphereWorld(out centerWorld, out radiusWorld);
     }
 
 #if UNITY_EDITOR

@@ -1,0 +1,46 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Radial
+  m_Shader: {fileID: 4800000, guid: 92a39875d0a4b054089c813131c2e04c, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs: []
+    m_Ints: []
+    m_Floats:
+    - _Alpha: 0.85
+    - _CenterFill: 0.6
+    - _ClipRadiusWorld: 1
+    - _FlickerSpeed: 7
+    - _FlickerStrength: 0.03
+    - _FresnelPower: 2.5
+    - _FresnelStrength: 1.2
+    - _Intensity: 2
+    - _PulseEnable: 0
+    - _PulseSpeed: 2
+    - _PulseStrength: 0.15
+    - _ScanlineDensity: 55
+    - _ScanlineScroll: 0.2
+    - _ScanlineStrength: 0.06
+    - _StencilRef: 64
+    m_Colors:
+    - _ClipCenterWorld: {r: 0, g: 0, b: 0, a: 0}
+    - _Color: {r: 0.34901965, g: 1, b: 0.9395436, a: 1}
+  m_BuildTextureStacks: []

@@ -73,6 +73,10 @@ public class GC_Core : UdonSharpBehaviour
     public double rtn_rTol = 1e-6;
     public double rtn_hTol = 1e-9;
 
+    [Header("Optional displays")]
+    public OrreryController orrery;
+    public OrreryCraftOrbitRibbon orreryCraftOrbitRibbon;    
+    public OrreryCraftDirectionMarkers orreryCraftDirectionMarkers;
     // Executor schedule (frozen once when a node is selected)
     private double _exec_tExec = 0.0;
     private double _exec_tBurnStart = 0.0;
@@ -181,6 +185,26 @@ public class GC_Core : UdonSharpBehaviour
         ArbitrateAndWriteIntent();
 
         UpdateActiveProgramIndicator();
+
+        if (orrery != null)
+            orrery.TickOrrery();
+
+        if (orreryCraftOrbitRibbon != null)
+            orreryCraftOrbitRibbon.TickRibbon();
+
+        if (orreryCraftDirectionMarkers != null)
+        {
+            orreryCraftDirectionMarkers.TickMarkers();
+
+            if (orrery != null)
+            {
+                Vector3 clipCenterWorld;
+                float clipRadiusWorld;
+                orrery.GetCurrentClipSphereWorld(out clipCenterWorld, out clipRadiusWorld);
+                orreryCraftDirectionMarkers.ApplyClipVolumeParams(clipCenterWorld, clipRadiusWorld);
+            }
+        }
+
     }
 
     // =====================================================================

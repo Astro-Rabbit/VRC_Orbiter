@@ -36,6 +36,7 @@ public class CraftNetAttitude : UdonSharpBehaviour
     private double[] _tBuf;
     private Quaternion[] _qBuf;
     private Vector3[] _wBuf;
+    
     private int _bufCount = 0;
     private int _bufHead = 0; // next write index
 
@@ -220,7 +221,39 @@ public class CraftNetAttitude : UdonSharpBehaviour
         return q * dq;
     }
 
+    public Vector3 SampleRenderOmegaB(double tRender)
+    {
+        Vector3 latest = new Vector3(_wX, _wY, _wZ);
 
+        if (_tBuf == null || _bufCount <= 0) return latest;
+
+        int n = snapBufferSize;
+        int oldest = (_bufHead - _bufCount + n) % n;
+
+        double tPrev = _tBuf[oldest];
+        Vector3 wPrev = _wBuf[oldest];
+
+        if (tRender <= tPrev) return wPrev;
+
+        for (int k = 1; k < _bufCount; k++)
+        {
+            int idx = (oldest + k) % n;
+            double tCur = _tBuf[idx];
+
+            if (tRender <= tCur)
+            {
+                double dt = tCur - tPrev;
+                float u = (dt > 1e-6) ? (float)((tRender - tPrev) / dt) : 1f;
+                return Vector3.Lerp(wPrev, _wBuf[idx], u);
+            }
+
+            tPrev = tCur;
+            wPrev = _wBuf[idx];
+        }
+
+        int newest = (_bufHead - 1 + n) % n;
+        return _wBuf[newest];
+    }
 
 
     public override void OnDeserialization()

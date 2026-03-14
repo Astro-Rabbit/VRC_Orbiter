@@ -137,18 +137,18 @@ public class EarthRotationModelSimple : UdonSharpBehaviour
         double yZ = zx * xY - zy * xX;
 
         // Enforce prograde handedness: y should roughly align with velocity direction
-        double vmag = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-        if (vmag > 1e-9)
-        {
-            double vnx = vx / vmag, vny = vy / vmag, vnz = vz / vmag;
-            double align = yX * vnx + yY * vny + yZ * vnz;
-            if (align < 0.0)
-            {
-                // Flip z and y to keep x pointing to Earth but fix spin direction
-                zx = -zx; zy = -zy; zz = -zz;
-                yX = -yX; yY = -yY; yZ = -yZ;
-            }
-        }
+        // double vmag = Math.Sqrt(vx * vx + vy * vy + vz * vz);
+        // if (vmag > 1e-9)
+        // {
+        //     double vnx = vx / vmag, vny = vy / vmag, vnz = vz / vmag;
+        //     double align = yX * vnx + yY * vny + yZ * vnz;
+        //     if (align < 0.0)
+        //     {
+        //         // Flip z and y to keep x pointing to Earth but fix spin direction
+        //         zx = -zx; zy = -zy; zz = -zz;
+        //         yX = -yX; yY = -yY; yZ = -yZ;
+        //     }
+        // }
 
         // Spin vector (rad/s) about z axis (right-hand rule)
         ox = moonOmegaRadSec * zx;
