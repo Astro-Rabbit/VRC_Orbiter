@@ -533,6 +533,9 @@ MonoBehaviour:
     PrefabModifications: []
     SerializationNodes: []
   _udonSharpBackingUdonBehaviour: {fileID: 4530668682938014789}
+  tgtAnalyzer: {fileID: 6195667392185332091}
+  contacts: {fileID: 0}
+  contactsState: {fileID: 0}
 --- !u!114 &4530668682938014789
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -552,7 +555,7 @@ MonoBehaviour:
   SynchronizePosition: 0
   AllowCollisionOwnershipTransfer: 0
   Reliable: 0
-  _syncMethod: 2
+  _syncMethod: 3
   serializedProgramAsset: {fileID: 11400000, guid: f81042dde72f91840acb4e7aed061527,
     type: 2}
   programSource: {fileID: 11400000, guid: f694eb665f8102c4cb3aff88af5cdfa1, type: 2}
@@ -622,6 +625,7 @@ MonoBehaviour:
   tfr: {fileID: 4041105747659021878}
   fitter: {fileID: 6900009514466072649}
   propagator: {fileID: 7336448340245304807}
+  hasTarget: 0
   tgtPx: 0
   tgtPy: 0
   tfrPx: 0

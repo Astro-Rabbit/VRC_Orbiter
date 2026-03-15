@@ -90,4 +90,10 @@ public class MFDTargetPage : MFDPage
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }
+
+    public override void OnDeserialization()
+    {
+        OnTargetIndexChanged();
+        OnPortIndexChanged();
+    }
 }
