@@ -355,6 +355,9 @@ public class ActuationController : UdonSharpBehaviour
             }
 
             effectsSync.SetMainVfx(t01, yawDeg, pitchDeg, onMask);
+
+            effectsSync.SetCommandReadout(_tauReq_B, _forceCmd_B);
+
         }
     }
 

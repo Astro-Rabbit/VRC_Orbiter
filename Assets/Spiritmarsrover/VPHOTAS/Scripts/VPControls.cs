@@ -33,6 +33,8 @@ public class VPControls : UdonSharpBehaviour
     public bool invertTransX = false;
     public bool invertTransY = false;
     public bool invertTransZ = false;
+    [Header("Manual Translation Force Mapping")]
+    public Vector3 maxTranslateForce_B = new Vector3(1000f, 1000f, 1000f);
 
     // Optional: if you want translation to automatically imply an RCS mode
     // 0=TRANSLATE, 1=ROTATE, 2=BLENDED (your default), adjust to your project constants
@@ -56,6 +58,9 @@ public class VPControls : UdonSharpBehaviour
     public GameObject JoystickCol;
     public string JoyString = "Joystick";
 
+    [Header("Joystick Mode Selector")]
+    public float joystickModeKnobValue = 90f; // expected values: 0 or 90
+
     [Header("Throttle Assets")]
     public GameObject ThrottleCol;
     public GameObject ThrottleVis;
@@ -65,6 +70,7 @@ public class VPControls : UdonSharpBehaviour
     public GameObject ThrottleGripVis;
     public float ThrottleDisplacment = 0.14f;
     public string ThrotString = "Throttle";
+    public bool transIsPureTranslation = true;
 
     [Header("Translation Controller Assets")]
     public GameObject TransCol;          // The collider for the translation handle
@@ -108,6 +114,22 @@ public class VPControls : UdonSharpBehaviour
     public GameObject translateOutputXZ;
     public GameObject translateOutputY;
 
+    [Header("Haptics")]
+    public float hapticAmp = 0.2f;
+    public float hapticDur = 0.04f;
+    public float hapticFreq = 1.0f;
+    public int hapticSegments = 30;
+
+    // Tracking indices to detect crossings
+    private int lastIdxX, lastIdxY, lastIdxZ;
+    private int lastIdxThrot;
+    private int lastIdxTX, lastIdxTY, lastIdxTZ;
+
+    public GameObject ThrottleRotation;
+    private void Start()
+    {
+        ApplyJoystickModeFromKnob();
+    }
     private void Update()
     {
         float dt = Time.deltaTime;
@@ -193,7 +215,7 @@ public class VPControls : UdonSharpBehaviour
                     manualDraft.rateCmd_B = new Vector3(
                         inputZ * p,  // pitch about +X
                         inputY * y,  // yaw about +Y
-                        inputX * r   // roll about +Z
+                        -inputX * r   // roll about +Z
                     );
                     manualDraft.tauCmd_B = Vector3.zero;
                 }
@@ -202,7 +224,7 @@ public class VPControls : UdonSharpBehaviour
                     manualDraft.tauCmd_B = new Vector3(
                         inputZ * maxTauNm,
                         inputY * maxTauNm,
-                        inputX * maxTauNm
+                        -inputX * maxTauNm
                     );
                     manualDraft.rateCmd_B = Vector3.zero;
                 }
@@ -214,9 +236,16 @@ public class VPControls : UdonSharpBehaviour
 
             // Translation command in BODY frame: X=right, Y=up, Z=forward
             // Clamp + deadzone
-            Vector3 tCmd = new Vector3(tx, ty, tz);
-            if (!transActive) tCmd = Vector3.zero;
-            manualDraft.translateCmd_B = tCmd;
+            Vector3 tCmd01 = new Vector3(tx, ty, tz);
+            if (!transActive) tCmd01 = Vector3.zero;
+
+            Vector3 tCmdN = new Vector3(
+                tCmd01.x * maxTranslateForce_B.x,
+                tCmd01.y * maxTranslateForce_B.y,
+                tCmd01.z * maxTranslateForce_B.z
+            );
+
+            manualDraft.translateCmd_B = tCmdN;
 
             // Optional: set preferred RCS mode when translating
             if (forceRcsModeOnTranslate && transActive)
@@ -242,6 +271,9 @@ public class VPControls : UdonSharpBehaviour
             if (CheckDist(hand.position, JoystickCol)) { JoystickGrabbing = true; objName = JoyString; busy = true; }
             else if (CheckDist(hand.position, ThrottleCol)) { ThrottleGrabbing = true; objName = ThrotString; busy = true; }
             else if (CheckDist(hand.position, TransCol)) { TransGrabbing = true; objName = TransString; busy = true; }
+
+            
+
         }
         // Grab End
         if (!grabbed && grabbedOld && busy)
@@ -283,6 +315,11 @@ public class VPControls : UdonSharpBehaviour
             TranslatePointInitial.transform.rotation = TranslatePoint.transform.rotation;
             InitialRotation.transform.rotation = RotationControl.transform.rotation;
             xPrev = inputX; yPrev = inputY; zPrev = inputZ;
+
+            // Inside UpdateJoystickInput grab start:
+            lastIdxX = Mathf.FloorToInt((inputX + 1f) * 0.5f * hapticSegments);
+            lastIdxY = Mathf.FloorToInt((inputY + 1f) * 0.5f * hapticSegments);
+            lastIdxZ = Mathf.FloorToInt((inputZ + 1f) * 0.5f * hapticSegments);
         }
 
         if (!JoystickGrabbing && JoystickGrabbingOld)
@@ -303,6 +340,11 @@ public class VPControls : UdonSharpBehaviour
             inputX = FilterAxis(inputX, dt, ref xPrev, ref xPrevD);
             inputY = FilterAxis(inputY, dt, ref yPrev, ref yPrevD);
             inputZ = FilterAxis(inputZ, dt, ref zPrev, ref zPrevD);
+
+            // Inside the if (JoystickisGrabbed) block, after inputX, Y, Z are filtered:
+            CheckHaptic(JoyString, inputX, ref lastIdxX, true);
+            CheckHaptic(JoyString, inputY, ref lastIdxY, true);
+            CheckHaptic(JoyString, inputZ, ref lastIdxZ, true);
         }
         else
         {
@@ -317,6 +359,9 @@ public class VPControls : UdonSharpBehaviour
             ThrottlePositoinInit.transform.position = ThrottlePositionTransfer.transform.position;
             ThrottleValueInit = ThrottleValue;
             ThrottlePrev = ThrottleValue;
+
+            // Inside UpdateThrottleInput grab start:
+            lastIdxThrot = Mathf.FloorToInt(ThrottleValue * hapticSegments);
         }
 
         if (ThrottleGrabbing)
@@ -325,9 +370,14 @@ public class VPControls : UdonSharpBehaviour
             ThrottleValue = Mathf.Clamp01(ThrottleValueInit + totalDisplacment);
             ThrottleValue = FilterAxis(ThrottleValue, dt, ref ThrottlePrev, ref ThrottlePrevD);
 
+            // Inside the if (ThrottleGrabbing) block, after ThrottleValue is filtered:
+            CheckHaptic(ThrotString, ThrottleValue, ref lastIdxThrot, false);
+
             ThrottleVis.transform.localPosition = new Vector3(0f, ThrottleValue * 0.5f - 0.5f, 0f);
-            ThrottleVis.transform.localScale = new Vector3(ThrottleValue, 1, 1);
-            ThrottleGripVis.transform.localPosition = new Vector3(0, 0, ThrottleValue * ThrottleDisplacment);
+            ThrottleVis.transform.localScale = new Vector3(ThrottleValue, ThrottleVis.transform.localScale.y, ThrottleVis.transform.localScale.z);
+            ThrottleGripVis.transform.localPosition = new Vector3(ThrottleGripVis.transform.localPosition.x, ThrottleGripVis.transform.localPosition.y, ThrottleValue * ThrottleDisplacment);
+
+            ThrottleRotation.transform.localRotation = Quaternion.Euler(new Vector3(0f, 90f, -49.619f - 50.381f * ThrottleValue));
         }
     }
 
@@ -341,50 +391,66 @@ public class VPControls : UdonSharpBehaviour
         {
             VRCPlayerApi.TrackingData hand = GetActiveHandData(TransString);
 
-            // Store hand's position/rotation RELATIVE to the controller's transform
             TransHandLocalInitPos = TransCol.transform.InverseTransformPoint(hand.position);
             TransHandLocalInitRot = Quaternion.Inverse(TransCol.transform.rotation) * hand.rotation;
 
             txPrev = 0; tyPrev = 0; tzPrev = 0;
             txPrevD = 0; tyPrevD = 0; tzPrevD = 0;
+
+            lastIdxTX = hapticSegments / 2;
+            lastIdxTY = hapticSegments / 2;
+            lastIdxTZ = hapticSegments / 2;
         }
 
         if (TransGrabbing)
         {
             VRCPlayerApi.TrackingData hand = GetActiveHandData(TransString);
-
-            // 1. Get current hand pose in Local Space of the controller
             Vector3 currentLocalPos = TransCol.transform.InverseTransformPoint(hand.position);
-            Quaternion currentLocalRot = Quaternion.Inverse(TransCol.transform.rotation) * hand.rotation;
 
-            // 2. POSITION (Z-axis / Push-Pull)
-            // This is now craft-rotation independent because it's purely local delta
-            float rawZ = Mathf.Clamp((currentLocalPos.z - TransHandLocalInitPos.z) / TransSensitivity, -1f, 1f);
+            float rawX, rawY, rawZ;
 
-            // 3. ROTATION (Pitch/Yaw for X/Y translation)
-            // Calculate rotation delta relative to the moment you grabbed the handle
-            Quaternion relRot = currentLocalRot * Quaternion.Inverse(TransHandLocalInitRot);
+            // Common Z-axis calculation (Always position based)
+            rawZ = Mathf.Clamp((currentLocalPos.z - TransHandLocalInitPos.z) / TransSensitivity, -1f, 1f);
 
-            // Pitch (Up/Down)
-            Vector3 localUp = relRot * Vector3.up;
-            float pitchAngle = Mathf.Atan2(localUp.z, localUp.y) * Mathf.Rad2Deg;
-            float rawY = Mathf.Clamp(pitchAngle / maxTiltAngle, -1.0f, 1.0f);
+            if (transIsPureTranslation)
+            {
+                // NEW PURE TRANSLATION LOGIC
+                // Calculate X and Y based on hand displacement instead of rotation
+                rawX = -Mathf.Clamp((currentLocalPos.x - TransHandLocalInitPos.x) / TransSensitivity, -1f, 1f);
+                rawY = Mathf.Clamp((currentLocalPos.y - TransHandLocalInitPos.y) / TransSensitivity, -1f, 1f);
+            }
+            else
+            {
+                // ORIGINAL ROTATION-BASED LOGIC
+                Quaternion currentLocalRot = Quaternion.Inverse(TransCol.transform.rotation) * hand.rotation;
+                Quaternion relRot = currentLocalRot * Quaternion.Inverse(TransHandLocalInitRot);
 
-            // Yaw (Left/Right)
-            Vector3 localForward = relRot * Vector3.forward;
-            float yawAngle = Mathf.Atan2(localForward.x, localForward.z) * Mathf.Rad2Deg;
-            float rawX = Mathf.Clamp(yawAngle / maxTwistAngle, -1.0f, 1.0f);
+                // Pitch (Up/Down)
+                Vector3 localUp = relRot * Vector3.up;
+                float pitchAngle = Mathf.Atan2(localUp.z, localUp.y) * Mathf.Rad2Deg;
+                rawY = Mathf.Clamp(pitchAngle / maxTiltAngle, -1.0f, 1.0f);
 
-            // 4. FILTERING
+                // Yaw (Left/Right)
+                Vector3 localForward = relRot * Vector3.forward;
+                float yawAngle = Mathf.Atan2(localForward.x, localForward.z) * Mathf.Rad2Deg;
+                rawX = Mathf.Clamp(yawAngle / maxTwistAngle, -1.0f, 1.0f);
+            }
+
+            // 4. FILTERING (Same as before)
             transX = FilterAxis(rawX, dt, ref txPrev, ref txPrevD);
             transY = FilterAxis(rawY, dt, ref tyPrev, ref tyPrevD);
             transZ = FilterAxis(rawZ, dt, ref tzPrev, ref tzPrevD);
 
-            // 5. VISUAL FEEDBACK
+            CheckHaptic(TransString, transX, ref lastIdxTX, true);
+            CheckHaptic(TransString, transY, ref lastIdxTY, true);
+            CheckHaptic(TransString, transZ, ref lastIdxTZ, true);
+
+            // 5. VISUAL FEEDBACK (Same as before)
+            // Even though we use position for input, the handle will still tilt 
+            // visually based on the input values, satisfying your visual requirement.
             if (TransGripVis != null)
             {
-                TransGripVis.transform.localRotation = Quaternion.Euler(transY * maxTiltAngle, transX * maxTwistAngle, 0);
-                // Visual feedback uses the calculated transZ for displacement
+                TransGripVis.transform.localRotation = Quaternion.Euler(transY * maxTiltAngle, transX * maxTwistAngle, 0f);
                 TransGripVis.transform.localPosition = Vector3.forward * (transZ * TransSensitivity);
             }
         }
@@ -472,4 +538,37 @@ public class VPControls : UdonSharpBehaviour
         prev = result;
         return result;
     }
+    private void CheckHaptic(string objName, float value, ref int lastIdx, bool isBiDirectional)
+    {
+        // Map -1 to 1 range to 0 to 1 if bi-directional (Joystick/Translation)
+        float normalized = isBiDirectional ? (value + 1f) * 0.5f : value;
+        int currentIdx = Mathf.Clamp(Mathf.FloorToInt(normalized * hapticSegments), 0, hapticSegments);
+
+        if (currentIdx != lastIdx)
+        {
+            lastIdx = currentIdx;
+            VRC_Pickup.PickupHand hand = (LeftObject == objName) ? VRC_Pickup.PickupHand.Left : VRC_Pickup.PickupHand.Right;
+            Networking.LocalPlayer.PlayHapticEventInHand(hand, hapticDur, hapticAmp, hapticFreq);
+        }
+    }
+
+    public void ApplyJoystickModeFromKnob()
+    {
+        // 0 = torque, 90 = rate
+        manualUseRateControl = (joystickModeKnobValue >= 45f);
+    }
+
+    public void SetJoystickModeRate()
+    {
+        joystickModeKnobValue = 90f;
+        manualUseRateControl = true;
+    }
+
+    public void SetJoystickModeTorque()
+    {
+        joystickModeKnobValue = 0f;
+        manualUseRateControl = false;
+    }
+
+
 }

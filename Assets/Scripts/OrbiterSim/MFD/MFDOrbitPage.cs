@@ -109,9 +109,9 @@ public class MFDOrbitPage : MFDPage
 
         display.ClearGraphics();
         float scale = orbitSize / (float)a;
-        float focusY = (float)periapsis * scale - orbitSize;
-        Vector2 center = new Vector2(0f, focusY);
-        display.DrawConic(center, (float)(periapsis * scale), 0f, (float)eccentricity, Color.green);
+        Vector2 pePos = new Vector2(0f, -orbitSize);
+        Vector2 center = new Vector2(0f, -orbitSize + (float)periapsis * scale);
+        display.DrawConic(pePos, (float)(periapsis * scale), 0f, (float)eccentricity, Color.green);
         display.DrawLine(center, center + scale * new Vector2(posX, posY), Color.green);
 
         // Some nested function support would feel pretty sweet right around now

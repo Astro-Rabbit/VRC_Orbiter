@@ -199,10 +199,14 @@ public class StationRenderManager : UdonSharpBehaviour
         GameObject root = stationRenderRoots[stationIndex];
         if (root == null) return;
 
-        Vector3 drB = new Vector3((float)contacts.drx_B0, (float)contacts.dry_B0, (float)contacts.drz_B0);
-        Quaternion qTB = contacts.qTargetInB0 * globalModelFix;
+        Vector3 drB;
+        if (contacts.renderFullValid0)
+            drB = new Vector3((float)contacts.render_drx_B0, (float)contacts.render_dry_B0, (float)contacts.render_drz_B0);
+        else
+            drB = new Vector3((float)contacts.drx_B0, (float)contacts.dry_B0, (float)contacts.drz_B0);
 
-        ApplyPoseSmoothed(root.transform, drB, qTB);
+        Quaternion qTB = contacts.qTargetInB0 * globalModelFix;
+        ApplyPose(root.transform, drB, qTB);
     }
 
     private void ApplyPoseFromSlot1(int stationIndex)
@@ -210,10 +214,14 @@ public class StationRenderManager : UdonSharpBehaviour
         GameObject root = stationRenderRoots[stationIndex];
         if (root == null) return;
 
-        Vector3 drB = new Vector3((float)contacts.drx_B1, (float)contacts.dry_B1, (float)contacts.drz_B1);
-        Quaternion qTB = contacts.qTargetInB1 * globalModelFix;
+        Vector3 drB;
+        if (contacts.renderFullValid1)
+            drB = new Vector3((float)contacts.render_drx_B1, (float)contacts.render_dry_B1, (float)contacts.render_drz_B1);
+        else
+            drB = new Vector3((float)contacts.drx_B1, (float)contacts.dry_B1, (float)contacts.drz_B1);
 
-        ApplyPoseSmoothed(root.transform, drB, qTB);
+        Quaternion qTB = contacts.qTargetInB1 * globalModelFix;
+        ApplyPose(root.transform, drB, qTB);
     }
 
     private void ApplyPoseSmoothed(Transform stationRoot, Vector3 targetDrB, Quaternion targetQTargetInB)

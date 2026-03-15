@@ -9,6 +9,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     public CraftStateModel craft;
     public CraftAttitudeState craftAtt;
     public StationStateModel[] stations;
+    public SimManager simManager;
 
     [Header("Docking ports (craft)")]
     public CraftDockingPorts craftDockPorts;
@@ -25,6 +26,11 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     [Tooltip("If true, slot1 will always pick nearest-other even if far (ignores fullDetailRangeMeters).")]
     public bool allowSlot1BeyondRange = false;
 
+    [Header("Render smoothing (remote integrated only)")]
+    public bool smoothRenderRelativePosition = true;
+    public float renderSmoothTimeSeconds = 0.02f;
+    public float renderSnapDistanceMeters = 500f;
+
     [Header("Debug")]
     public bool logMissing = false;
 
@@ -40,9 +46,18 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     private double _crxRender, _cryRender, _crzRender;
     private double _cvxRender, _cvyRender, _cvzRender;
 
+    // slot 0 smoothing state (selected)
+    private int _smoothStationIndex0 = -1;
+    private bool _smoothInit0 = false;
+    private Vector3 _smoothDrE0 = Vector3.zero;
+
+    // slot 1 smoothing state (nearest-other)
+    private int _smoothStationIndex1 = -1;
+    private bool _smoothInit1 = false;
+    private Vector3 _smoothDrE1 = Vector3.zero;
+
     public void Evaluate()
     {
-
         if (craft == null || craftAtt == null || contacts == null || stations == null)
         {
             if (logMissing) Debug.Log("[GuidanceNavContactsComputer] Missing references.");
@@ -58,34 +73,31 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         _cvyRender = craft.vy;
         _cvzRender = craft.vz;
         _simRenderT = 0.0;
-        // Remote render presentation sample
+
+        bool isSimOwner = (simManager != null) ? simManager.IsSimOwner() : (netCore != null && Networking.IsOwner(netCore.gameObject));
+        bool allowRenderSmoothing = false;
+
         if (clock != null && netCore != null)
         {
-            if (!Networking.IsOwner(netCore.gameObject))
+            if (!isSimOwner)
             {
-                double backTime = 0.0;
-                if (netAtt != null) backTime = (double)netAtt.interpBackTimeSeconds;
-
                 double tRender = clock.GetCachedRemoteRenderTime();
                 byte presentedMode = netCore.GetPresentedMode(tRender);
 
                 if (netAtt != null)
                     _qCraftForRender = netAtt.SampleRenderQuaternion(tRender);
 
-                if (presentedMode == CraftNetState.MODE_INTEGRATED && netKin != null)
+                if (presentedMode == CraftNetState.MODE_INTEGRATED && netKin != null && netKin.rawValid)
                 {
-                    // Contacts remain based on RAW coherent craft translation, not smoothed presentation.
-                    // StationRenderManager does the visual smoothing later in body-relative space.
-                    if (netKin.rawValid)
-                    {
-                        _simRenderT = netKin.rawSimT;
-                        _crxRender = netKin.rawRx;
-                        _cryRender = netKin.rawRy;
-                        _crzRender = netKin.rawRz;
-                        _cvxRender = netKin.rawVx;
-                        _cvyRender = netKin.rawVy;
-                        _cvzRender = netKin.rawVz;
-                    }
+                    _simRenderT = netKin.rawSimT;
+                    _crxRender = netKin.rawRx;
+                    _cryRender = netKin.rawRy;
+                    _crzRender = netKin.rawRz;
+                    _cvxRender = netKin.rawVx;
+                    _cvyRender = netKin.rawVy;
+                    _cvzRender = netKin.rawVz;
+
+                    allowRenderSmoothing = smoothRenderRelativePosition;
                 }
             }
         }
@@ -94,7 +106,6 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         contacts.EnsureSize(n);
         contacts.ClearFull();
 
-        // Craft inertial render position
         double crx = _crxRender;
         double cry = _cryRender;
         double crz = _crzRender;
@@ -125,17 +136,20 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
 
             double r2 = drx * drx + dry * dry + drz * drz;
             contacts.range2_m2[i] = r2;
-
             contacts.range_m[i] = computeRange ? Math.Sqrt(r2) : 0.0;
         }
 
         int sel = contacts.selectedStationIndex;
         if (sel >= 0 && sel < n && contacts.valid[sel])
-            FillFullSlot0(sel);
+            FillFullSlot0(sel, allowRenderSmoothing);
+        else
+            ResetSmooth0();
 
         int idx1 = FindNearestOther(sel);
         if (idx1 >= 0)
-            FillFullSlot1(idx1);
+            FillFullSlot1(idx1, allowRenderSmoothing);
+        else
+            ResetSmooth1();
     }
 
     private int FindNearestOther(int selectedIndex)
@@ -164,14 +178,13 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         return bestIdx;
     }
 
-    private void FillFullSlot0(int stationIndex)
+    private void FillFullSlot0(int stationIndex, bool allowRenderSmoothing)
     {
         StationStateModel st = stations[stationIndex];
 
         contacts.fullStationIndex0 = stationIndex;
         contacts.fullValid0 = true;
 
-        // dv_E using render craft velocity
         contacts.dvx_E0 = st.vx - _cvxRender;
         contacts.dvy_E0 = st.vy - _cvyRender;
         contacts.dvz_E0 = st.vz - _cvzRender;
@@ -179,12 +192,14 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         double drxE = contacts.drx_E[stationIndex];
         double dryE = contacts.dry_E[stationIndex];
         double drzE = contacts.drz_E[stationIndex];
-        RotateEToBody(_qCraftForRender, drxE, dryE, drzE, out contacts.drx_B0, out contacts.dry_B0, out contacts.drz_B0);
+
+        RotateEToBody(_qCraftForRender, drxE, dryE, drzE,
+            out contacts.drx_B0, out contacts.dry_B0, out contacts.drz_B0);
 
         contacts.selValid = true;
-        contacts.sel_drx_E = contacts.drx_E[stationIndex];
-        contacts.sel_dry_E = contacts.dry_E[stationIndex];
-        contacts.sel_drz_E = contacts.drz_E[stationIndex];
+        contacts.sel_drx_E = drxE;
+        contacts.sel_dry_E = dryE;
+        contacts.sel_drz_E = drzE;
         contacts.sel_drx_B = contacts.drx_B0;
         contacts.sel_dry_B = contacts.dry_B0;
         contacts.sel_drz_B = contacts.drz_B0;
@@ -196,10 +211,12 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         Quaternion qT = st.q_B2E;
         contacts.qTargetInB0 = Quaternion.Inverse(qC) * qT;
 
+        UpdateRenderSlot0(stationIndex, drxE, dryE, drzE, allowRenderSmoothing);
+
         ComputeDockingForSlot0(st);
     }
 
-    private void FillFullSlot1(int stationIndex)
+    private void FillFullSlot1(int stationIndex, bool allowRenderSmoothing)
     {
         StationStateModel st = stations[stationIndex];
 
@@ -213,14 +230,128 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         double drxE = contacts.drx_E[stationIndex];
         double dryE = contacts.dry_E[stationIndex];
         double drzE = contacts.drz_E[stationIndex];
-        RotateEToBody(_qCraftForRender, drxE, dryE, drzE, out contacts.drx_B1, out contacts.dry_B1, out contacts.drz_B1);
+
+        RotateEToBody(_qCraftForRender, drxE, dryE, drzE,
+            out contacts.drx_B1, out contacts.dry_B1, out contacts.drz_B1);
 
         Quaternion qC = _qCraftForRender;
         Quaternion qT = st.q_B2E;
         contacts.qTargetInB1 = Quaternion.Inverse(qC) * qT;
 
+        UpdateRenderSlot1(stationIndex, drxE, dryE, drzE, allowRenderSmoothing);
+
         if (contacts.computeDockForSlot1)
             ComputeDockingForSlot1(st);
+    }
+
+    private void UpdateRenderSlot0(int stationIndex, double drxE, double dryE, double drzE, bool allowRenderSmoothing)
+    {
+        contacts.renderFullValid0 = true;
+
+        Vector3 targetDrE = new Vector3((float)drxE, (float)dryE, (float)drzE);
+        Vector3 renderDrE = GetSmoothedRenderDrE0(stationIndex, targetDrE, allowRenderSmoothing);
+
+        RotateEToBody(_qCraftForRender, renderDrE.x, renderDrE.y, renderDrE.z,
+            out contacts.render_drx_B0, out contacts.render_dry_B0, out contacts.render_drz_B0);
+    }
+
+    private void UpdateRenderSlot1(int stationIndex, double drxE, double dryE, double drzE, bool allowRenderSmoothing)
+    {
+        contacts.renderFullValid1 = true;
+
+        Vector3 targetDrE = new Vector3((float)drxE, (float)dryE, (float)drzE);
+        Vector3 renderDrE = GetSmoothedRenderDrE1(stationIndex, targetDrE, allowRenderSmoothing);
+
+        RotateEToBody(_qCraftForRender, renderDrE.x, renderDrE.y, renderDrE.z,
+            out contacts.render_drx_B1, out contacts.render_dry_B1, out contacts.render_drz_B1);
+    }
+
+    private Vector3 GetSmoothedRenderDrE0(int stationIndex, Vector3 targetDrE, bool allowRenderSmoothing)
+    {
+        if (_smoothStationIndex0 != stationIndex)
+        {
+            _smoothStationIndex0 = stationIndex;
+            _smoothInit0 = false;
+        }
+
+        if (!_smoothInit0 || !allowRenderSmoothing)
+        {
+            _smoothDrE0 = targetDrE;
+            _smoothInit0 = true;
+            return _smoothDrE0;
+        }
+
+        float dt = Time.deltaTime;
+        if (dt < 0f) dt = 0f;
+        if (dt > 0.25f) dt = 0.25f;
+
+        Vector3 err = targetDrE - _smoothDrE0;
+        float errMag = err.magnitude;
+
+        if (renderSnapDistanceMeters > 0f && errMag > renderSnapDistanceMeters)
+        {
+            _smoothDrE0 = targetDrE;
+            return _smoothDrE0;
+        }
+
+        float tau = renderSmoothTimeSeconds;
+        if (tau < 0.0001f) tau = 0.0001f;
+
+        float alpha = 1f - Mathf.Exp(-dt / tau);
+        _smoothDrE0 = Vector3.Lerp(_smoothDrE0, targetDrE, alpha);
+        return _smoothDrE0;
+    }
+
+    private Vector3 GetSmoothedRenderDrE1(int stationIndex, Vector3 targetDrE, bool allowRenderSmoothing)
+    {
+        if (_smoothStationIndex1 != stationIndex)
+        {
+            _smoothStationIndex1 = stationIndex;
+            _smoothInit1 = false;
+        }
+
+        if (!_smoothInit1 || !allowRenderSmoothing)
+        {
+            _smoothDrE1 = targetDrE;
+            _smoothInit1 = true;
+            return _smoothDrE1;
+        }
+
+        float dt = Time.deltaTime;
+        if (dt < 0f) dt = 0f;
+        if (dt > 0.25f) dt = 0.25f;
+
+        Vector3 err = targetDrE - _smoothDrE1;
+        float errMag = err.magnitude;
+
+        if (renderSnapDistanceMeters > 0f && errMag > renderSnapDistanceMeters)
+        {
+            _smoothDrE1 = targetDrE;
+            return _smoothDrE1;
+        }
+
+        float tau = renderSmoothTimeSeconds;
+        if (tau < 0.0001f) tau = 0.0001f;
+
+        float alpha = 1f - Mathf.Exp(-dt / tau);
+        _smoothDrE1 = Vector3.Lerp(_smoothDrE1, targetDrE, alpha);
+        return _smoothDrE1;
+    }
+
+    private void ResetSmooth0()
+    {
+        _smoothStationIndex0 = -1;
+        _smoothInit0 = false;
+        contacts.renderFullValid0 = false;
+        contacts.render_drx_B0 = contacts.render_dry_B0 = contacts.render_drz_B0 = 0.0;
+    }
+
+    private void ResetSmooth1()
+    {
+        _smoothStationIndex1 = -1;
+        _smoothInit1 = false;
+        contacts.renderFullValid1 = false;
+        contacts.render_drx_B1 = contacts.render_dry_B1 = contacts.render_drz_B1 = 0.0;
     }
 
     private void ComputeDockingForSlot0(StationStateModel st)
@@ -322,7 +453,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     }
 
     private static void RotateEToBody(Quaternion qBE, double vxE, double vyE, double vzE,
-                                     out double vxB, out double vyB, out double vzB)
+        out double vxB, out double vyB, out double vzB)
     {
         Quaternion qEB = Quaternion.Inverse(qBE);
         Vector3 vB = qEB * new Vector3((float)vxE, (float)vyE, (float)vzE);

@@ -67,7 +67,6 @@ public class DockingRuntimeState : UdonSharpBehaviour
 
     [Header("Port mating convention")]
     [Tooltip("Rotation applied in station PORT frame to get desired craft PORT frame. Default: flip +Z (180° about +Y).")]
-    public Quaternion qMate = Quaternion.identity;
 
     [Header("Persisted relative pose (station body frame)")]
     public Vector3 relPos_SB = Vector3.zero;                 // craft CG rel station origin, expressed in station body axes
@@ -80,14 +79,15 @@ public class DockingRuntimeState : UdonSharpBehaviour
     [Header("Debug")]
     public bool debugLatched = false;
 
-    private void Awake()
+    public Quaternion GetQMate()
     {
-        // Set default mate convention once (safe even if overwritten later)
-        // 180° about +Y: keeps +Y, flips +Z and +X. Common "ports face each other" convention when +Z is "out".
-        if (qMate == Quaternion.identity)
-            qMate = Quaternion.AngleAxis(180f, Vector3.up);
+        // Port convention:
+        // +Z = outward docking axis
+        // +Y = roll-up reference
+        // To make two outward-facing ports mate face-to-face,
+        // flip forward while preserving up.
+        return Quaternion.AngleAxis(180f, Vector3.up);
     }
-
     public void ResetState()
     {
         phase = DOCK_NONE;
