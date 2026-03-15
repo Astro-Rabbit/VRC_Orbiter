@@ -15,19 +15,10 @@ public enum ButtonSide
     Bottom,
 }
 
-public enum MFDPageID : byte
-{
-    Menu,
-    Orbit,
-    Align,
-    Settings,
-    PenAdjust,
-    Docking
-}
-
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class MFD : UdonSharpBehaviour
 {
-    public MFDPage[] pageList;
+    public MFDCore core;
     public Canvas canvas;
     public TMP_Text text;
     public Material graphicsMaterial;
@@ -87,7 +78,7 @@ public class MFD : UdonSharpBehaviour
         shapeData1 = new float[MAX_SHAPES];
         shapeData2 = new Vector4[MAX_SHAPES];
 
-        currentPage = pageList[currentPageId];
+        currentPage = core.pageList[currentPageId];
         currentPage.AddDisplay(this);
         Redraw();
     }
@@ -102,16 +93,14 @@ public class MFD : UdonSharpBehaviour
         currentPage.OnButton(this, side, num);
     }
 
-    [NetworkCallable]
     public void SetPage(byte pageId)
     {
-        if (Networking.IsOwner(gameObject)) {
-            currentPageId = pageId;
-            RequestSerialization();
-            OnPageIdChange();
-        } else {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, "SetPage", pageId);
+        if (!Networking.IsOwner(gameObject)) {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
         }
+        currentPageId = pageId;
+        RequestSerialization();
+        OnPageIdChange();
     }
 
     private void OnPageIdChange()
@@ -120,7 +109,7 @@ public class MFD : UdonSharpBehaviour
         ClearGraphics();
         ClearText();
 
-        currentPage = pageList[currentPageId];
+        currentPage = core.pageList[currentPageId];
         currentPage.AddDisplay(this);
         Redraw();
     }
@@ -143,11 +132,21 @@ public class MFD : UdonSharpBehaviour
     {
         int len = text.Length;
         for (int i = 0; i < len && i + col < TEXT_COLUMNS; i++) {
-            charGrid[row][i+col] = text[i];
+            charGrid[row][i + col] = text[i];
             charColors[row][i + col] = color;
         }
     }
-    public void DrawConic(Vector2 focus, float vertexDist, float angle, float eccentricity, Color color)
+
+    public void DrawVerticalText(string text, int row, int col, Color color)
+    {
+        int len = text.Length;
+        for (int i = 0; i < len && i + row < TEXT_ROWS; i++) {
+            charGrid[i + row][col] = text[i];
+            charColors[i + row][col] = color;
+        }
+    }
+
+    public void DrawConic(Vector2 center, float vertexDist, float angle, float eccentricity, Color color)
     {
         if (shapeCount >= MAX_SHAPES) {
             return;
@@ -155,7 +154,7 @@ public class MFD : UdonSharpBehaviour
 
         shapeColors[shapeCount] = color;
         shapeData1[shapeCount] = vertexDist;
-        shapeData2[shapeCount] = new Vector4(eccentricity,  angle, focus.x, focus.y);
+        shapeData2[shapeCount] = new Vector4(eccentricity, angle, center.x, center.y);
 
         shapeCount++;
     }
@@ -217,5 +216,48 @@ public class MFD : UdonSharpBehaviour
     public override void OnDeserialization()
     {
         OnPageIdChange();
+    }
+
+    public static string FormatNumber(string title, double num)
+    {
+        string[] suffixes = new[] {"", "k", "M", "G", "T"};
+
+        int i;
+        for (i = 0; i < 5; i++) {
+            if (Math.Abs(num) <= 1000) {
+                break;
+            }
+
+            num /= 1000.0;
+        }
+
+        // FIXME: Is there a better way to fall back?
+        if (i == 5) {
+            return "";
+        }
+
+        string format;
+        if (num >= 100) {
+            format = "000.0";
+        } else if (num >= 10) {
+            format = "00.00";
+        } else {
+            format = "0.000";
+        }
+        if (i == 0) {
+            format += "0";
+        }
+
+        return title.PadRight(4) + num.ToString(format) + suffixes[i];
+    }
+
+    public static string FormatAngle(string title, double angle)
+    {
+        return title.PadRight(3) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(6) + "°";
+    }
+
+    public static string FormatPercent(string title, double ratio)
+    {
+        return title.PadRight(4) + (ratio*100).ToString("0.0").PadLeft(5) + "%";
     }
 }
