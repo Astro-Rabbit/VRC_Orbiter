@@ -15,6 +15,7 @@ public class MFDAlignPage : MFDPage
     public OrbitAnalyzer tgt;
 
     [Header("Display Data")]
+    bool hasTarget = false;
     double ascTime;
     double descTime;
     double inclination;
@@ -33,6 +34,12 @@ public class MFDAlignPage : MFDPage
 
     void Update()
     {
+        if (tgt.conic == null) {
+            hasTarget = false;
+            return;
+        }
+        hasTarget = true;
+
         double _;
         if (src.conic.epochT0 != srcLastEpochT0 || tgt.conic.epochT0 != tgtLastEpochT0) {
             srcLastEpochT0 = src.conic.epochT0;
@@ -82,6 +89,17 @@ public class MFDAlignPage : MFDPage
 
     public override void DrawDisplay(MFD display)
     {
+        if (!hasTarget) {
+            display.ClearGraphics();
+            display.ClearText();
+
+            string msg = "NO TARGET SELECTED";
+            display.DrawText(msg, 10, 24 - msg.Length/2, Color.green);
+
+            display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
+            return;
+        }
+
         const float orbitSize = 0.7f;
 
         display.ClearGraphics();
@@ -91,7 +109,6 @@ public class MFDAlignPage : MFDPage
         display.DrawConic(Vector2.zero, orbitSize, 0f, 0f, Color.green);
 
         display.ClearText();
-        display.DrawText(MFD.FormatAngle("Inc", inclination), 2, 4, Color.green);
         display.DrawText(MFD.FormatNumber("ANT", ascTime), 2, 19, Color.green);
         display.DrawText(MFD.FormatNumber("DNT", descTime), 2, 34, Color.green);
 

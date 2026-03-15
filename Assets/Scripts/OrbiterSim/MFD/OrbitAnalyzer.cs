@@ -23,13 +23,17 @@ public class OrbitAnalyzer : UdonSharpBehaviour
 
     void Update()
     {
-        if (conic.epochT0 != lastEpochT0) {
+        if (conic != null && conic.epochT0 != lastEpochT0) {
             UpdateInfo();
         }
     }
 
     public void UpdateInfo()
     {
+        if (conic == null) {
+            return;
+        }
+
         lastEpochT0 = conic.epochT0;
 
         a = conic.aMeters;

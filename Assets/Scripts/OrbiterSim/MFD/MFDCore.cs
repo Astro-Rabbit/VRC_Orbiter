@@ -8,6 +8,7 @@ public enum MFDPageID : byte
 {
 Menu,
 Orbit,
+Target,
 Align,
 Transfer,
 }
@@ -15,8 +16,4 @@ Transfer,
 public class MFDCore : UdonSharpBehaviour
 {
     public MFDPage[] pageList;
-    void Start()
-    {
-        
-    }
 }
