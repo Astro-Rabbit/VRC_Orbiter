@@ -14,6 +14,9 @@ using UnityEngine;
 /// </summary>
 public class OrreryCraftDirectionMarkers : UdonSharpBehaviour
 {
+    [Header("Display Enable")]
+    public bool displayEnabled = true;
+
     [Header("References")]
     public OrreryController orrery;
     public GuidanceNavCoreState nav;
@@ -63,7 +66,11 @@ public class OrreryCraftDirectionMarkers : UdonSharpBehaviour
             SetAllMarkersActive(false);
             return;
         }
-
+        if (!displayEnabled)
+        {
+            SetAllMarkersActive(false);
+            return;
+        }
         bool show = true;
 
         if (hideOutsideCraftFocus && orrery.focusMode != OrreryController.FOCUS_CRAFT)

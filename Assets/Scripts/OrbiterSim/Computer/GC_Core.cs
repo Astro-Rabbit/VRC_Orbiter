@@ -1322,6 +1322,95 @@ public class GC_Core : UdonSharpBehaviour
         return true;
     }
 
+    public void ResetForScenario(double nowT)
+    {
+        _lastT = double.NaN;
+
+        _exec_tExec = 0.0;
+        _exec_tBurnStart = 0.0;
+        _exec_tBurnEnd = 0.0;
+
+        _manualWritesAtt = false;
+        _manualWritesThr = false;
+        _modeWritesAtt = false;
+        _modeWritesThr = false;
+        _execWritesAtt = false;
+        _execWritesThr = false;
+
+        _manualWritesXlat = false;
+        _modeWritesXlat = false;
+        _execWritesXlat = false;
+
+        _manAttCmd = 0;
+        _manTau_B = Vector3.zero;
+        _manRate_B = Vector3.zero;
+        _manQ_BE = Quaternion.identity;
+        _manPointDir_E = Vector3.forward;
+        _manAxis = 2;
+        _manBlend = true;
+        _manMainT = 0f;
+        _manHoverT = 0f;
+        _manActMode = CraftCommandState.ATT_ACT_AUTO;
+        _manAllowWheels = true;
+        _manAllowRCS = true;
+        _manAllowGimbal = true;
+        _manTranslate_B = Vector3.zero;
+        _manRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        _modeAttCmd = 0;
+        _modeTau_B = Vector3.zero;
+        _modeRate_B = Vector3.zero;
+        _modeQ_BE = Quaternion.identity;
+        _modePointDir_E = Vector3.forward;
+        _modeAxis = 2;
+        _modeBlend = true;
+        _modeMainT = 0f;
+        _modeHoverT = 0f;
+        _modeActMode = CraftCommandState.ATT_ACT_AUTO;
+        _modeAllowWheels = true;
+        _modeAllowRCS = true;
+        _modeAllowGimbal = true;
+        _modeTranslate_B = Vector3.zero;
+        _modeRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        _execAttCmd = 0;
+        _execTau_B = Vector3.zero;
+        _execRate_B = Vector3.zero;
+        _execQ_BE = Quaternion.identity;
+        _execPointDir_E = Vector3.forward;
+        _execAxis = 2;
+        _execBlend = true;
+        _execMainT = 0f;
+        _execHoverT = 0f;
+        _execActMode = CraftCommandState.ATT_ACT_AUTO;
+        _execAllowWheels = true;
+        _execAllowRCS = true;
+        _execAllowGimbal = true;
+        _execTranslate_B = Vector3.zero;
+        _execRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        if (intent != null)
+            intent.ClearToSafeDefaults(craftDefaults);
+
+        if (runtime != null)
+            runtime.ResetState(nowT);
+
+        if (plan != null)
+            plan.ClearAll();
+
+        if (modeParams != null)
+        {
+            modeParams.bodyAxisToPoint = defaultBodyAxisToPoint;
+            modeParams.rtnDir = GC_ModeParams.RTN_T_PLUS;
+            modeParams.qTarget_BE = Quaternion.identity;
+            modeParams.pointDirTarget_E = Vector3.forward;
+            modeParams.rateTarget_B = Vector3.zero;
+            modeParams.tauDirect_B = Vector3.zero;
+            modeParams.blendDirectTorqueWithPD = true;
+        }
+    }
+
+
     private void UpdateActiveProgramIndicator()
     {
         // Executor has priority for "what are we doing"
@@ -1383,7 +1472,14 @@ public class GC_Core : UdonSharpBehaviour
             case GC_RuntimeState.MODE_RELVEL_RETROGRADE:
                 runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_RETRO; // if you added it
                 return;
+                
+            case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
+                runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_POINT_PORT;
+                return;
 
+            case GC_RuntimeState.MODE_DOCK_ALIGN_PORTS:
+                runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_ALIGN_PORTS;
+                return;
 
             default:
                 runtime.activeProgramId = GC_RuntimeState.PROG_NONE;

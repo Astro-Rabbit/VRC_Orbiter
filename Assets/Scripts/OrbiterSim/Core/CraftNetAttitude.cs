@@ -277,4 +277,50 @@ public class CraftNetAttitude : UdonSharpBehaviour
 
         _appliedRev = _rev;
     }
+
+    public void ResetPresentationState()
+    {
+        _accum = 0f;
+        _appliedRev = -1;
+
+        if (_tBuf != null)
+        {
+            int n = _tBuf.Length;
+            for (int i = 0; i < n; i++)
+            {
+                _tBuf[i] = 0.0;
+                _qBuf[i] = Quaternion.identity;
+                _wBuf[i] = Vector3.zero;
+            }
+        }
+
+        _bufCount = 0;
+        _bufHead = 0;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _accum = 0f;
+
+        if (att != null)
+        {
+            Quaternion q = att.qBE;
+            _qX = q.x; _qY = q.y; _qZ = q.z; _qW = q.w;
+
+            _wX = (float)att.wx;
+            _wY = (float)att.wy;
+            _wZ = (float)att.wz;
+        }
+        else
+        {
+            _qX = 0f; _qY = 0f; _qZ = 0f; _qW = 1f;
+            _wX = 0f; _wY = 0f; _wZ = 0f;
+        }
+
+        _epochT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
+
+        ResetPresentationState();
+    }
+
+
 }

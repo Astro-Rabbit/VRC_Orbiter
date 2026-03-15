@@ -5,6 +5,10 @@ using UnityEngine;
 [RequireComponent(typeof(MeshRenderer))]
 public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
 {
+
+    [Header("Display Enable")]
+    public bool displayEnabled = true;
+
     [Header("References")]
     public OrreryController orrery;
     public GuidanceNavCoreState nav;
@@ -120,6 +124,14 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
     {
         if (orrery == null || nav == null || bodies == null || meshFilter == null)
             return;
+
+        if (!displayEnabled)
+        {
+            ClearMesh();
+            _hasPrevOrbit = false;
+            _hasPrevView = false;
+            return;
+        }
 
         if (!nav.valid || nav.muPrimary <= 0.0 || nav.p <= 0.0)
         {
