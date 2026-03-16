@@ -37,7 +37,7 @@ public class TabletPen : UdonSharpBehaviour
     private string _triggerAxis;
     private VRCPlayerApi _localPlayer;
     private int _zoneCount = 0;
-
+    private Object _lastHapticTarget;
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -76,6 +76,33 @@ public class TabletPen : UdonSharpBehaviour
         }
 
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
+
+
+        // --- Haptic Hover Logic Start ---
+        Object currentHitComp = null;
+        if (currentlyHitting)
+        {
+            // Check for interactive components
+            MFDKnob knob = hit.collider.GetComponent<MFDKnob>();
+            MFDButton mfdBtn = hit.collider.GetComponent<MFDButton>();
+            MFDSwitch mfdSwitch = hit.collider.GetComponent<MFDSwitch>();
+            TabletScreen screen = hit.collider.GetComponent<TabletScreen>();
+
+            // Priority list: if any are found, that is our target
+            if (knob != null) currentHitComp = knob;
+            else if (mfdBtn != null) currentHitComp = mfdBtn;
+            else if (mfdSwitch != null) currentHitComp = mfdSwitch;
+            else if (screen != null) currentHitComp = screen.GetButtonAtPoint(hit.point);
+        }
+
+        // If we are looking at a new interactive object, pulse and save it
+        if (currentHitComp != _lastHapticTarget)
+        {
+            if (currentHitComp != null) TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+            _lastHapticTarget = currentHitComp; // Will be null if looking at nothing/wall
+        }
+        // --- Haptic Hover Logic End ---
+
 
         if (currentlyHitting)
         {
