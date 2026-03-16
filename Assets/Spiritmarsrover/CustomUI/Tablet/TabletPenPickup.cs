@@ -1,63 +1,91 @@
 ﻿using UdonSharp;
 using UnityEngine;
+using VRC.SDKBase;
+using VRC.Udon;
 
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class TabletPenPickup : UdonSharpBehaviour
 {
-    [HideInInspector] public bool isBeingHeld;
-    [HideInInspector] public TabletPen hoveringPen;
+    [Header("Base Pickup Settings")]
+    public bool isBeingHeld;
 
-    public void OnGrab()
+    [HideInInspector] public TabletPen currentPen;
+
+    protected Vector3 heldPosOffset;
+    protected Quaternion heldRotOffset;
+
+    /// <summary>
+    /// TabletPen calls this to check if it's allowed to grab this object.
+    /// DualHandPickup overrides this to allow two hands.
+    /// </summary>
+    public virtual bool CanBeGrabbed()
+    {
+        return !isBeingHeld;
+    }
+
+    /// <summary>
+    /// Called by TabletPen when the grip is pressed.
+    /// </summary>
+    public virtual void OnGrab(TabletPen pen)
     {
         isBeingHeld = true;
+        currentPen = pen;
+
+        // Calculate the "Parent Constraint" style offsets
+        heldPosOffset = pen.transform.InverseTransformPoint(transform.position);
+        heldRotOffset = Quaternion.Inverse(pen.transform.rotation) * transform.rotation;
     }
 
-    public void OnRelease()
+    /// <summary>
+    /// Called by TabletPen when the grip is released.
+    /// </summary>
+    public virtual void OnRelease(TabletPen pen)
     {
         isBeingHeld = false;
+        currentPen = null;
     }
 
-    //public void OnTriggerEnter(Collider other)
-    //{
-    //    // Check if the thing entering the trigger is a TabletPen
-    //    TabletPen pen = other.GetComponent<TabletPen>();
-    //    if (pen != null)
-    //    {
-    //        hoveringPen = pen;
-    //        // Tell the pen that it is hovering over THIS handle
-    //        pen.SetHoveredPickup(this);
-    //        Debug.Log("[TabletPenPickup] Pen entered handle trigger");
-    //    }
-    //}
-
-    //public void OnTriggerExit(Collider other)
-    //{
-    //    if (hoveringPen != null && other.gameObject == hoveringPen.gameObject)
-    //    {
-    //        // Tell the pen it is no longer hovering over us
-    //        hoveringPen.SetHoveredPickup(null);
-    //        hoveringPen = null;
-    //        Debug.Log("[TabletPenPickup] Pen exited handle trigger");
-    //    }
-    //}
-
-    public void OnTriggerEnter(Collider other)
+    /// <summary>
+    /// Standard single-hand movement logic. 
+    /// Overridden in DualHandPickup for multi-hand logic.
+    /// </summary>
+    public virtual void LateUpdate()
     {
-        TabletPen pen = other.GetComponent<TabletPen>();
-        if (pen != null)
+        if (isBeingHeld && currentPen != null)
         {
-            hoveringPen = pen;
-            pen.SetHoveredPickup(this); // Tell the pen "I am here"
-            Debug.Log("[TabletPenPickup] Pen inside handle");
+            transform.position = currentPen.transform.TransformPoint(heldPosOffset);
+            transform.rotation = currentPen.transform.rotation * heldRotOffset;
         }
     }
 
-    public void OnTriggerExit(Collider other)
+    // --- TRIGGER SYSTEM ---
+    // This tells the pen "I am a pickup you can interact with" 
+    // when the pen's collider enters this object's trigger.
+
+    private void OnTriggerEnter(Collider other)
     {
-        if (hoveringPen != null && other.gameObject == hoveringPen.gameObject)
+        if (other == null) return;
+
+        // Check if the thing entering our trigger is a TabletPen
+        TabletPen pen = other.GetComponent<TabletPen>();
+        if (pen != null)
         {
-            hoveringPen.SetHoveredPickup(null); // Tell the pen "I am gone"
-            hoveringPen = null;
+            pen.SetHoveredPickup(this);
+        }
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        if (other == null) return;
+
+        TabletPen pen = other.GetComponent<TabletPen>();
+        if (pen != null)
+        {
+            // Only clear the hover if we are the one currently being hovered
+            if (pen._hoveredPickup == this)
+            {
+                pen.SetHoveredPickup(null);
+            }
         }
     }
 }

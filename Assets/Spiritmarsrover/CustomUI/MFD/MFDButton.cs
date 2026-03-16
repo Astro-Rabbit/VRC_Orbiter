@@ -92,7 +92,7 @@ public class MFDButton : UdonSharpBehaviour
         }
 
         pen.PlayButtonDownClip();
-        pen.TriggerHaptic(0.05f, 0.2f, 1.0f);
+        pen.TriggerHapticEvent();
         if (EventScript == null || boolVariableName == "")
         {
             return;

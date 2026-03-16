@@ -11,6 +11,12 @@
     },
     "dev.onevr.vrworldtoolkit": {
       "version": "3.3.2"
+    },
+    "net.ureishi.qvpen": {
+      "version": "3.3.14"
+    },
+    "idv.jlchntoz.vvmw": {
+      "version": "1.5.3"
     }
   },
   "locked": {
@@ -31,6 +37,25 @@
     "dev.onevr.vrworldtoolkit": {
       "version": "3.3.2",
       "dependencies": {}
+    },
+    "net.ureishi.qvpen": {
+      "version": "3.3.14",
+      "dependencies": {
+        "com.vrchat.worlds": "^3.5.0"
+      }
+    },
+    "idv.jlchntoz.vvmw": {
+      "version": "1.5.3",
+      "dependencies": {
+        "com.vrchat.worlds": "3.x.x >=3.9.0",
+        "idv.jlchntoz.vrcw-foundation": "0.0.x >=0.0.51"
+      }
+    },
+    "idv.jlchntoz.vrcw-foundation": {
+      "version": "0.0.52",
+      "dependencies": {
+        "com.vrchat.worlds": "3.x.x >=3.9.0"
+      }
     }
   }
 }

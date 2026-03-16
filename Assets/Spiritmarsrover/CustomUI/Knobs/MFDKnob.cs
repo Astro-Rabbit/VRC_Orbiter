@@ -139,7 +139,7 @@ public class MFDKnob : UdonSharpBehaviour
         if (Mathf.Approximately(newValue, _currentValue)) return;
 
         if (isDiscrete && _activePen != null) _activePen.PlayKnobClip();
-        _activePen.TriggerHaptic(0.05f, 0.2f, 1.0f);
+        _activePen.TriggerHapticEvent();
 
         _currentValue = newValue;
         UpdateVisuals();

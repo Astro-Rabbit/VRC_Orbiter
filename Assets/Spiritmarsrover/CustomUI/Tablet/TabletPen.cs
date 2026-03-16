@@ -23,6 +23,10 @@ public class TabletPen : UdonSharpBehaviour
     public int penID;
     public bool isRightHand;
 
+    
+    public float HapticDuration = 0.05f;
+    public float HapticAmplitude = 0.2f;
+    public float HapticFreq = 1.0f;
     // Focus Lock (For Knobs/MFD)
     private bool _isLocked;
     private MFDButton _focusedMFDBtn;
@@ -44,10 +48,14 @@ public class TabletPen : UdonSharpBehaviour
     public GameObject Pickup;
 
     // NEW VARIABLES FOR THE CONSTRAINT
-    private TabletPenPickup _heldPickup;
+    public TabletPenPickup _heldPickup;
     private Vector3 _heldPosOffset;
     private Quaternion _heldRotOffset;
     private bool _wasGripping;
+
+    private Object _lastHapticTarget; // Tracks Colliders or TabletButtons
+
+
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -99,6 +107,32 @@ public class TabletPen : UdonSharpBehaviour
         }
 
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
+
+        // --- Haptic Hover Logic Start ---
+        Object currentHitComp = null;
+        if (currentlyHitting)
+        {
+            // Check for interactive components
+            MFDKnob knob = hit.collider.GetComponent<MFDKnob>();
+            MFDButton mfdBtn = hit.collider.GetComponent<MFDButton>();
+            MFDSwitch mfdSwitch = hit.collider.GetComponent<MFDSwitch>();
+            TabletScreen screen = hit.collider.GetComponent<TabletScreen>();
+
+            // Priority list: if any are found, that is our target
+            if (knob != null) currentHitComp = knob;
+            else if (mfdBtn != null) currentHitComp = mfdBtn;
+            else if (mfdSwitch != null) currentHitComp = mfdSwitch;
+            else if (screen != null) currentHitComp = screen.GetButtonAtPoint(hit.point);
+        }
+
+        // If we are looking at a new interactive object, pulse and save it
+        if (currentHitComp != _lastHapticTarget)
+        {
+            if (currentHitComp != null) TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+            _lastHapticTarget = currentHitComp; // Will be null if looking at nothing/wall
+        }
+        // --- Haptic Hover Logic End ---
+
 
         if (currentlyHitting)
         {
@@ -275,13 +309,15 @@ public class TabletPen : UdonSharpBehaviour
     }
 
     // Trigger and Audio methods remain the same...
-    public void OnTriggerEnter(Collider other) {
+    public void OnTriggerEnter(Collider other)
+    {
         if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
         {
             _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
         }
     }
-    public void OnTriggerExit(Collider other) {
+    public void OnTriggerExit(Collider other)
+    {
         if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
         {
             _zoneCount--; if (_zoneCount <= 0)
@@ -389,7 +425,7 @@ public class TabletPen : UdonSharpBehaviour
     //}
     // ... inside TabletPen class variables ...
     public TabletPenPickup _hoveredPickup; // The handle the pen is currently touching
-   // public TabletPenPickup _heldPickup;    // The handle the pen is actually gripping
+                                           // public TabletPenPickup _heldPickup;    // The handle the pen is actually gripping
 
     // Add this method anywhere in TabletPen.cs
     //public void SetHoveredPickup(TabletPenPickup pickup)
@@ -404,37 +440,32 @@ public class TabletPen : UdonSharpBehaviour
     {
         if (isGripping)
         {
-            // ATTEMPT TO GRAB: 
-            // This ONLY runs on the frame the button is pressed AND if the pen is inside a handle
+            // 1. ATTEMPT TO GRAB
             if (_heldPickup == null && gripJustPressed && _hoveredPickup != null)
             {
-                if (!_hoveredPickup.isBeingHeld)
+                // Ask the pickup if it's available (Base returns !isBeingHeld, Dual returns true if < 2 pens)
+                if (_hoveredPickup.CanBeGrabbed())
                 {
                     _heldPickup = _hoveredPickup;
-                    _heldPickup.OnGrab();
 
-                    _heldPosOffset = transform.InverseTransformPoint(_heldPickup.transform.position);
-                    _heldRotOffset = Quaternion.Inverse(transform.rotation) * _heldPickup.transform.rotation;
+                    // We pass 'this' so the pickup knows which pen is holding it
+                    _heldPickup.OnGrab(this);
 
                     TriggerHaptic(0.05f, 0.3f);
-                    Debug.Log("[TabletPen] Successful Grab inside trigger");
+                    Debug.Log("[TabletPen] Successful Grab");
                 }
             }
 
-            // MAINTAIN GRAB:
-            // This runs every frame while gripping, but only if we successfully grabbed something
-            if (_heldPickup != null)
-            {
-                _heldPickup.transform.position = transform.TransformPoint(_heldPosOffset);
-                _heldPickup.transform.rotation = transform.rotation * _heldRotOffset;
-            }
+            // 2. MOVEMENT
+            // We REMOVED the transform.position/rotation logic from here.
+            // The Pickup script handles its own LateUpdate now.
         }
         else
         {
-            // RELEASE: Runs when the grip button is let go
+            // 3. RELEASE
             if (_heldPickup != null)
             {
-                _heldPickup.OnRelease();
+                _heldPickup.OnRelease(this);
                 _heldPickup = null;
             }
         }
@@ -444,5 +475,10 @@ public class TabletPen : UdonSharpBehaviour
         // Don't change hover targets while we are actively holding something
         if (_heldPickup != null) return;
         _hoveredPickup = pickup;
+    }
+
+    public void TriggerHapticEvent()
+    {
+        TriggerHaptic(HapticDuration, HapticAmplitude, HapticFreq);
     }
 }
