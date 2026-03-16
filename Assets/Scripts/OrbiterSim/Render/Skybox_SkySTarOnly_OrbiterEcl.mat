@@ -55,8 +55,8 @@ Material:
     m_Floats:
     - _MWbright: 0.06
     - _MoonAmbient: 0.002
-    - _MoonFlipU: 1
-    - _MoonFlipV: 1
+    - _MoonFlipU: 0
+    - _MoonFlipV: 0
     - _MoonGamma: 1
     - _MoonLonOffsetDeg: 270
     - _MoonNormalStrength: 1
@@ -69,7 +69,7 @@ Material:
     - _SpikeSharpness: 80
     - _SpikeStrength: 2.52
     - _SpikeWidth: 0.0012
-    - _SunAngRad: 0.004643044
+    - _SunAngRad: 0.004643051
     - _SunEdgeSoft: 0.000002
     - _SunGlow: 0.06
     - _SunGlowPow: 3
@@ -79,11 +79,11 @@ Material:
     - _scaleFactor: 0
     - _sigma: 90
     m_Colors:
-    - _CraftBodyToEq: {r: -0.0037913136, g: -0.0032598267, b: 0.65194905, a: -0.75824636}
+    - _CraftBodyToEq: {r: 0, g: 0, b: 0, a: 1}
     - _MoonAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
-    - _MoonBodyToEcl: {r: 0.98973554, g: 0.13537236, b: 0.022425331, a: -0.039936677}
+    - _MoonBodyToEcl: {r: 0.03995371, g: -0.022393357, b: 0.13457672, a: 0.9898441}
     - _MoonColor: {r: 1, g: 1, b: 1, a: 0}
-    - _MoonPosEcl: {r: -4441767, g: -673405.8, b: -6695.691, a: 0}
+    - _MoonPosEcl: {r: -4491997, g: -16280.36, b: 37.19967, a: 0}
     - _SunColor: {r: 1, g: 1, b: 1, a: 1}
-    - _SunDirEcl: {r: 0.96998537, g: 0.24316326, b: 0.00014457312, a: 0}
+    - _SunDirEcl: {r: 0.97001565, g: 0.24304238, b: 0.00014430002, a: 0}
   m_BuildTextureStacks: []

@@ -65,6 +65,11 @@ public class CraftDockingPorts : UdonSharpBehaviour
             return;
         }
 
+        if (log)
+        {
+            Debug.Log("[CraftDockingPorts] craftCG rot = " + craftCG.rotation);
+        }
+
         int n = portTransforms.Length;
         EnsureSize(n);
 
@@ -81,15 +86,31 @@ public class CraftDockingPorts : UdonSharpBehaviour
                 continue;
             }
 
-            // Position relative to CG expressed in craft body axes
             Vector3 pB = craftCG.InverseTransformPoint(p.position);
+            Quaternion qB = qCB * p.rotation;
+
             dock_px_B[i] = (double)pB.x;
             dock_py_B[i] = (double)pB.y;
             dock_pz_B[i] = (double)pB.z;
+            dock_q_B[i] = qB;
 
-            // Orientation of port frame expressed in craft body axes
-            dock_q_B[i] = qCB * p.rotation;
+
+            if (log)
+            {
+                Vector3 fwdB = qB * Vector3.forward;
+                Vector3 upB  = qB * Vector3.up;
+
+                Debug.Log(
+                    "[CraftDockingPorts] port " + i +
+                    " worldRot=" + p.rotation +
+                    " localPosB=" + pB +
+                    " fwdB=" + fwdB +
+                    " upB=" + upB
+                );
+            }
+
         }
+
 
         if (log) Debug.Log($"[CraftDockingPorts] Cached {n} ports.");
     }

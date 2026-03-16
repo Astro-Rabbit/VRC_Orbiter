@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -28,7 +28,8 @@ public class CraftNetKinematics : UdonSharpBehaviour
     public SimClock clock;
     public CraftStateModel craft;
     public CraftNetState core;
-
+    [Header("Authority")]
+    public SimManager simManager;
     // -------------------------------------------------------------------------
     // Owner publish policy
     // -------------------------------------------------------------------------
@@ -132,9 +133,14 @@ public class CraftNetKinematics : UdonSharpBehaviour
     // Init
     // -------------------------------------------------------------------------
 
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
+
     void Start()
     {
-        if (Networking.IsOwner(gameObject))
+        if (HasSimAuthority())
         {
             SnapPresentedToCraft();
         }
@@ -143,7 +149,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
     void Update()
     {
         if (!debugNetKin) return;
-        if (Networking.IsOwner(gameObject)) return;
+        if (HasSimAuthority()) return;
 
         _debugAccum += Time.deltaTime;
         if (_debugAccum < debugLogPeriod) return;
@@ -171,6 +177,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
 
     public void PublishKinematics()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (clock == null || craft == null || core == null) return;
         if (core.GetMode() != CraftNetState.MODE_INTEGRATED) return;
@@ -186,6 +193,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
 
     public void ForcePublishKinematics()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (clock == null || craft == null || core == null) return;
         if (core.GetMode() != CraftNetState.MODE_INTEGRATED) return;
@@ -227,7 +235,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
     /// </summary>
     public void ApplyRemoteRawToCraft()
     {
-        if (Networking.IsOwner(gameObject)) return;
+        if (HasSimAuthority()) return;
         if (clock == null || craft == null || core == null) return;
         if (core.GetMode() != CraftNetState.MODE_INTEGRATED) return;
 
@@ -276,7 +284,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
     /// </summary>
     public void UpdatePresentedState()
     {
-        if (Networking.IsOwner(gameObject))
+        if (HasSimAuthority())
         {
             SnapPresentedToCraft();
             return;
@@ -388,6 +396,79 @@ public class CraftNetKinematics : UdonSharpBehaviour
         dbgPresentedVelOffset = System.Math.Sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
     }
 
+
+    public void ResetPresentationState()
+    {
+        _accum = 0f;
+        _debugAccum = 0f;
+        _appliedRev = -1;
+
+        rawValid = false;
+        rawRevision = -1;
+        rawReceiveTime = 0.0;
+        rawSendTime = 0.0;
+        rawEpochT = 0.0;
+        rawSimT = 0.0;
+        rawRx = rawRy = rawRz = 0.0;
+        rawVx = rawVy = rawVz = 0.0;
+
+        presentedValid = false;
+        presentedRx = presentedRy = presentedRz = 0.0;
+        presentedVx = presentedVy = presentedVz = 0.0;
+
+        targetRx = targetRy = targetRz = 0.0;
+        targetVx = targetVy = targetVz = 0.0;
+        targetDtEx = 0.0;
+
+        dbgLastReceiveDelta = 0.0;
+        dbgAvgReceiveDelta = 0.0;
+        dbgSimLagSeconds = 0.0;
+        dbgPresentedOffsetMeters = 0.0;
+        dbgPresentedVelOffset = 0.0;
+        dbgAppliedRawDtEx = 0.0;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _accum = 0f;
+        _debugAccum = 0f;
+
+        if (craft != null)
+        {
+            _rx = craft.rx;
+            _ry = craft.ry;
+            _rz = craft.rz;
+
+            _vx = craft.vx;
+            _vy = craft.vy;
+            _vz = craft.vz;
+        }
+        else
+        {
+            _rx = _ry = _rz = 0.0;
+            _vx = _vy = _vz = 0.0;
+        }
+
+        _simEpochT = currentOwnerSimT;
+        _epochT = (clock != null) ? clock.ServerTimeForSimTime(currentOwnerSimT) : Networking.GetServerTimeInSeconds();
+
+        rawValid = false;
+        rawRevision = -1;
+        rawReceiveTime = 0.0;
+        rawSendTime = 0.0;
+        rawEpochT = _epochT;
+        rawSimT = _simEpochT;
+        rawRx = _rx;
+        rawRy = _ry;
+        rawRz = _rz;
+        rawVx = _vx;
+        rawVy = _vy;
+        rawVz = _vz;
+
+        presentedValid = false;
+        targetDtEx = 0.0;
+    }
+
     // -------------------------------------------------------------------------
     // Networking callbacks
     // -------------------------------------------------------------------------
@@ -400,7 +481,7 @@ public class CraftNetKinematics : UdonSharpBehaviour
 
     public override void OnDeserialization(VRC.Udon.Common.DeserializationResult result)
     {
-        if (Networking.IsOwner(gameObject))
+        if (HasSimAuthority())
         {
             _appliedRev = _rev;
             return;

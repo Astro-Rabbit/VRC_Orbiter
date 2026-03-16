@@ -67,7 +67,7 @@ public class CraftInitializer_DockedToStation : UdonSharpBehaviour
 
         if (craftPorts != null)
             craftPorts.CacheNow();        
-
+        stationDockPorts.CacheNow();
         StationStateModel st = stationState != null ? stationState :
                                (stationProp != null ? stationProp.station : null);
 
@@ -116,13 +116,80 @@ public class CraftInitializer_DockedToStation : UdonSharpBehaviour
         );
         Quaternion qC_B = craftPorts.dock_q_B[craftPortIndex];
 
+
+        if (log && stationDockPorts != null && stationDockPorts.portTransforms != null &&
+            stationPortIndex >= 0 && stationPortIndex < stationDockPorts.portTransforms.Length)
+        {
+            Transform livePort = stationDockPorts.portTransforms[stationPortIndex];
+
+            Quaternion qPort_E_fromCache = st.q_B2E * qS_SB;
+
+            Vector3 cacheFwd = qPort_E_fromCache * Vector3.forward;
+            Vector3 cacheUp  = qPort_E_fromCache * Vector3.up;
+
+            Vector3 liveFwd = livePort.forward;
+            Vector3 liveUp  = livePort.up;
+
+            Debug.Log(
+                "[DockInit] Station port compare " +
+                " dotFwd=" + Vector3.Dot(cacheFwd.normalized, liveFwd.normalized) +
+                " dotUp=" + Vector3.Dot(cacheUp.normalized, liveUp.normalized) +
+                " cacheFwd=" + cacheFwd +
+                " liveFwd=" + liveFwd +
+                " cacheUp=" + cacheUp +
+                " liveUp=" + liveUp
+            );
+        }
+
+        if (log && craftPorts != null && craftPorts.portTransforms != null &&
+            craftPortIndex >= 0 && craftPortIndex < craftPorts.portTransforms.Length)
+        {
+            Transform liveCraftPort = craftPorts.portTransforms[craftPortIndex];
+
+            Quaternion qCraftPort_E_fromCache = craftAtt.qBE * qC_B;
+
+            Vector3 cacheFwd = qCraftPort_E_fromCache * Vector3.forward;
+            Vector3 cacheUp  = qCraftPort_E_fromCache * Vector3.up;
+
+            Vector3 liveFwd = liveCraftPort.forward;
+            Vector3 liveUp  = liveCraftPort.up;
+
+            Debug.Log(
+                "[DockInit] Craft port compare " +
+                " dotFwd=" + Vector3.Dot(cacheFwd.normalized, liveFwd.normalized) +
+                " dotUp=" + Vector3.Dot(cacheUp.normalized, liveUp.normalized) +
+                " cacheFwd=" + cacheFwd +
+                " liveFwd=" + liveFwd +
+                " cacheUp=" + cacheUp +
+                " liveUp=" + liveUp
+            );
+        }
+
         // 4) Compute hard-docked relative pose in station BODY frame
-        Quaternion qCraftToStation = qS_SB * dock.qMate * Quaternion.Inverse(qC_B);
+        Quaternion qCraftToStation = qS_SB * dock.GetQMate() * Quaternion.Inverse(qC_B);
         Vector3 relPos_SB = pS_SB - (qCraftToStation * pC_B);
 
         // 5) Compose craft inertial pose from station inertial pose
         Quaternion qS_E = st.q_B2E;                    // station BODY -> E
         Quaternion qC_E = qS_E * qCraftToStation;
+
+
+        Quaternion qStationPort_E = st.q_B2E * qS_SB;
+        Quaternion qCraftPort_E   = qC_E * qC_B;
+
+        Vector3 sFwd = qStationPort_E * Vector3.forward;
+        Vector3 sUp  = qStationPort_E * Vector3.up;
+
+        Vector3 cFwd = qCraftPort_E * Vector3.forward;
+        Vector3 cUp  = qCraftPort_E * Vector3.up;
+
+        Debug.Log(
+            "[DockInit] solved port relation " +
+            " dotFwd=" + Vector3.Dot(sFwd.normalized, cFwd.normalized) +
+            " dotUp=" + Vector3.Dot(sUp.normalized, cUp.normalized) +
+            " qMate=" + dock.GetQMate()
+        );
+
 
         Vector3 rS_E = new Vector3((float)st.rx, (float)st.ry, (float)st.rz);
         Vector3 vS_E = new Vector3((float)st.vx, (float)st.vy, (float)st.vz);

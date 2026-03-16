@@ -122,6 +122,20 @@ Shader "HUD/CollimatedDock"
         _DockRelMarkerRadius ("Dock Rel Marker Radius", Float) = 0.022
         _DockRelMarkerThickness ("Dock Rel Marker Thickness", Float) = 0.003
         
+        // Dock alignment mode / reveal selection
+        _DockReticleMode ("Dock Reticle Mode (0=Std,1=AlignT)", Float) = 0
+        _DockAlignStencilMode ("Dock Align Stencil Mode (0=None,1=SeatA,2=SeatB)", Float) = 0
+
+        // Tunable docking T reticle
+        _DockTReticleScale ("Dock T Reticle Scale", Float) = 1.0
+        _DockTReticleThickness ("Dock T Reticle Thickness", Float) = 0.004
+        _DockTReticleHalfWidth ("Dock T Reticle Half Width", Float) = 0.055
+        _DockTReticleStemLen ("Dock T Reticle Stem Length", Float) = 0.050
+        _DockTReticleEndcapWidth ("Dock T Endcap Width", Float) = 0.010
+        _DockTReticleEndcapHeight ("Dock T Endcap Height", Float) = 0.010
+        _DockTReticleYOffset ("Dock T Reticle Y Offset", Float) = 0.000
+
+
     }
 
     SubShader
@@ -135,12 +149,7 @@ Shader "HUD/CollimatedDock"
             Blend SrcAlpha OneMinusSrcAlpha
             ColorMask RGBA
 
-            Stencil
-            {
-                Ref 1
-                Comp Always
-                Pass Replace
-            }
+
 
             CGPROGRAM
             #pragma vertex vert
@@ -186,6 +195,154 @@ Shader "HUD/CollimatedDock"
             }
             ENDCG
         }
+
+        // --------------------------------------------------
+        // PASS: gate stencil reveal mask
+        // Writes gate stencil class for 3D gate objects.
+        // --------------------------------------------------
+        Pass
+        {
+            ColorMask 0
+            ZWrite Off
+
+            Stencil
+            {
+                Ref 1
+                Comp Always
+                Pass Replace
+                WriteMask 1                
+            }
+
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment fragStencilGate
+            #include "UnityCG.cginc"
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float3 normal : NORMAL;
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+            };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.pos = UnityObjectToClipPos(v.vertex);
+                return o;
+            }
+
+            fixed4 fragStencilGate(v2f i) : SV_Target
+            {
+                return 0;
+            }
+            ENDCG
+        }
+
+        // --------------------------------------------------
+        // PASS: dock alignment stencil A
+        // Active only when _DockAlignStencilMode ~= 1
+        // --------------------------------------------------
+        Pass
+        {
+            ColorMask 0
+            ZWrite Off
+
+            Stencil
+            {
+                Ref 2
+                Comp Always
+                Pass Replace
+                WriteMask 2                
+            }
+
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment fragStencilAlignA
+            #include "UnityCG.cginc"
+
+            float _DockAlignStencilMode;
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float3 normal : NORMAL;
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+            };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.pos = UnityObjectToClipPos(v.vertex);
+                return o;
+            }
+
+            fixed4 fragStencilAlignA(v2f i) : SV_Target
+            {
+                clip(0.5 - abs(_DockAlignStencilMode - 1.0));
+                return 0;
+            }
+            ENDCG
+        }
+
+        // --------------------------------------------------
+        // PASS: dock alignment stencil B
+        // Active only when _DockAlignStencilMode ~= 2
+        // --------------------------------------------------
+        Pass
+        {
+            ColorMask 0
+            ZWrite Off
+            
+            Stencil
+            {
+                Ref 4
+                Comp Always
+                Pass Replace
+                WriteMask 4
+            }
+
+            CGPROGRAM
+            #pragma vertex vert
+            #pragma fragment fragStencilAlignB
+            #include "UnityCG.cginc"
+
+            float _DockAlignStencilMode;
+
+            struct appdata
+            {
+                float4 vertex : POSITION;
+                float3 normal : NORMAL;
+            };
+
+            struct v2f
+            {
+                float4 pos : SV_POSITION;
+            };
+
+            v2f vert(appdata v)
+            {
+                v2f o;
+                o.pos = UnityObjectToClipPos(v.vertex);
+                return o;
+            }
+
+            fixed4 fragStencilAlignB(v2f i) : SV_Target
+            {
+                clip(0.5 - abs(_DockAlignStencilMode - 2.0));
+                return 0;
+            }
+            ENDCG
+        }
+
 
         Pass
         {
@@ -264,6 +421,17 @@ Shader "HUD/CollimatedDock"
             float _DockRelSpeedMps;
             float _DockRelMarkerRadius;
             float _DockRelMarkerThickness;
+
+            float _DockReticleMode;
+            float _DockAlignStencilMode;
+
+            float _DockTReticleScale;
+            float _DockTReticleThickness;
+            float _DockTReticleHalfWidth;
+            float _DockTReticleStemLen;
+            float _DockTReticleEndcapWidth;
+            float _DockTReticleEndcapHeight;
+            float _DockTReticleYOffset;
 
             struct appdata
             {
@@ -421,6 +589,153 @@ Shader "HUD/CollimatedDock"
                 if (idx == 24) return _FontAspect_Y;
                 if (idx == 25) return _FontAspect_Z;
                 return _FontAspect_A;
+            }
+
+
+
+            float aa_ring(float2 p, float radius, float thickness, float softness)
+            {
+                float d = abs(length(p) - radius);
+                return aa_band(d, thickness, softness);
+            }
+
+            float aa_xshape(float2 p, float halfWidth, float thickness, float softness)
+            {
+                float2 d1u = normalize(float2(1.0, 1.0));
+                float2 d2u = normalize(float2(1.0, -1.0));
+
+                float d1 = abs(dot(p, float2(-d1u.y, d1u.x)));
+                float d2 = abs(dot(p, float2(-d2u.y, d2u.x)));
+
+                float l1 = abs(dot(p, d1u));
+                float l2 = abs(dot(p, d2u));
+
+                float a1 = aa_band(d1, thickness, softness) * (1.0 - smoothstep(halfWidth, halfWidth + 0.01, l1));
+                float a2 = aa_band(d2, thickness, softness) * (1.0 - smoothstep(halfWidth, halfWidth + 0.01, l2));
+                return max(a1, a2);
+            }
+
+            float aa_segment_local(float2 p, float2 axisAlong, float2 axisAcross, float halfLen, float halfThick, float softness)
+            {
+                float along = dot(p, axisAlong);
+                float across = dot(p, axisAcross);
+
+                float core = aa_band(abs(across), halfThick, softness);
+                float lenGate = step(abs(along), halfLen);
+                return core * lenGate;
+            }
+
+            float MarkerTargetRelVel(float2 uvh, float2 center, float radius, float thickness, float softness, bool retro)
+            {
+                float2 dp = uvh - center;
+
+                float ring = aa_ring(dp, radius, thickness, softness);
+
+                float crossH = aa_segment_local(dp, float2(1.0, 0.0), float2(0.0, 1.0), radius * 0.65, thickness * 0.85, softness);
+                float crossV = aa_segment_local(dp, float2(0.0, 1.0), float2(1.0, 0.0), radius * 0.65, thickness * 0.85, softness);
+
+                float a = max(ring, max(crossH, crossV));
+
+                if (retro)
+                {
+                    float x = aa_xshape(dp, radius * 0.70, thickness * 0.75, softness);
+                    a = max(a, x);
+                }
+
+                return a;
+            }
+
+
+
+            float aa_box_filled(float2 p, float2 halfExt, float softness)
+            {
+                float2 d = abs(p) - halfExt;
+                float outside = length(max(d, 0.0));
+                float inside = min(max(d.x, d.y), 0.0);
+                float sd = outside + inside;
+
+                float fw = fwidth(sd);
+                return 1.0 - smoothstep(0.0, softness * fw, sd);
+            }
+
+            float DrawStandardBoresight(float2 uvh, float lineWidth, float softness)
+            {
+                float barThickness = lineWidth;
+                float barLength = 0.05;
+                float centerGap = 0.02;
+
+                float hLine = aa_band(abs(uvh.y), barThickness, softness);
+                float leftBar  = step(centerGap, -uvh.x) * step(-uvh.x, barLength);
+                float rightBar = step(centerGap,  uvh.x) * step( uvh.x, barLength);
+                float bars = hLine * (leftBar + rightBar);
+
+                float2 p = uvh;
+                float2 dL = normalize(float2(-1.0,  1.0));
+                float2 dR = normalize(float2( 1.0,  1.0));
+
+                float lDist = abs(dot(p, float2(-dL.y, dL.x)));
+                float rDist = abs(dot(p, float2(-dR.y, dR.x)));
+
+                float lLine = aa_band(lDist, lineWidth, softness);
+                float rLine = aa_band(rDist, lineWidth, softness);
+
+                float below = step(p.y, 0.0);
+                float chevronLen = 0.03;
+                float lLen = step(abs(dot(p, dL)), chevronLen);
+                float rLen = step(abs(dot(p, dR)), chevronLen);
+
+                float chevron = max(lLine * lLen, rLine * rLen) * below;
+
+                return bars + chevron;
+            }
+
+            float DrawDockTReticle(float2 uvh)
+            {
+                float s = max(_DockTReticleScale, 1e-4);
+                float halfWidth = _DockTReticleHalfWidth * s;
+                float stemLen = _DockTReticleStemLen * s;
+                float thick = _DockTReticleThickness;
+                float endcapW = _DockTReticleEndcapWidth * s;
+                float endcapH = _DockTReticleEndcapHeight * s;
+                float yOff = _DockTReticleYOffset * s;
+
+                float2 p = uvh - float2(0.0, yOff);
+
+                // top horizontal bar
+                float topBar = aa_segment_local(
+                    p,
+                    float2(1.0, 0.0),
+                    float2(0.0, 1.0),
+                    halfWidth,
+                    thick,
+                    _Softness
+                );
+
+                // center vertical stem, extending downward from top bar
+                float2 stemCenter = float2(0.0, -0.5 * stemLen);
+                float stem = aa_segment_local(
+                    p - stemCenter,
+                    float2(0.0, 1.0),
+                    float2(1.0, 0.0),
+                    0.5 * stemLen,
+                    thick,
+                    _Softness
+                );
+
+                // thick end caps on left/right ends of the top bar
+                float leftCap = aa_box_filled(
+                    p - float2(-halfWidth, 0.0),
+                    float2(0.5 * endcapW, 0.5 * endcapH),
+                    _Softness
+                );
+
+                float rightCap = aa_box_filled(
+                    p - float2(halfWidth, 0.0),
+                    float2(0.5 * endcapW, 0.5 * endcapH),
+                    _Softness
+                );
+
+                return max(max(topBar, stem), max(leftCap, rightCap));
             }
 
             float DrawUpperGlyph(float2 uvh, float2 center, float glyphHeight, int upperIndex)
@@ -655,57 +970,6 @@ Shader "HUD/CollimatedDock"
                 return a;
             }
 
-            float aa_ring(float2 p, float radius, float thickness, float softness)
-            {
-                float d = abs(length(p) - radius);
-                return aa_band(d, thickness, softness);
-            }
-
-            float aa_xshape(float2 p, float halfWidth, float thickness, float softness)
-            {
-                float2 d1u = normalize(float2(1.0, 1.0));
-                float2 d2u = normalize(float2(1.0, -1.0));
-
-                float d1 = abs(dot(p, float2(-d1u.y, d1u.x)));
-                float d2 = abs(dot(p, float2(-d2u.y, d2u.x)));
-
-                float l1 = abs(dot(p, d1u));
-                float l2 = abs(dot(p, d2u));
-
-                float a1 = aa_band(d1, thickness, softness) * (1.0 - smoothstep(halfWidth, halfWidth + 0.01, l1));
-                float a2 = aa_band(d2, thickness, softness) * (1.0 - smoothstep(halfWidth, halfWidth + 0.01, l2));
-                return max(a1, a2);
-            }
-
-            float aa_segment_local(float2 p, float2 axisAlong, float2 axisAcross, float halfLen, float halfThick, float softness)
-            {
-                float along = dot(p, axisAlong);
-                float across = dot(p, axisAcross);
-
-                float core = aa_band(abs(across), halfThick, softness);
-                float lenGate = step(abs(along), halfLen);
-                return core * lenGate;
-            }
-
-            float MarkerTargetRelVel(float2 uvh, float2 center, float radius, float thickness, float softness, bool retro)
-            {
-                float2 dp = uvh - center;
-
-                float ring = aa_ring(dp, radius, thickness, softness);
-
-                float crossH = aa_segment_local(dp, float2(1.0, 0.0), float2(0.0, 1.0), radius * 0.65, thickness * 0.85, softness);
-                float crossV = aa_segment_local(dp, float2(0.0, 1.0), float2(1.0, 0.0), radius * 0.65, thickness * 0.85, softness);
-
-                float a = max(ring, max(crossH, crossV));
-
-                if (retro)
-                {
-                    float x = aa_xshape(dp, radius * 0.70, thickness * 0.75, softness);
-                    a = max(a, x);
-                }
-
-                return a;
-            }
 
             fixed4 fragHud(v2f i) : SV_Target
             {
@@ -715,33 +979,12 @@ Shader "HUD/CollimatedDock"
                 float edge = max(abs(uvh.x), abs(uvh.y));
                 float window = 1.0 - smoothstep(1.0, 1.05, edge);
 
-                float barThickness = _LineWidth;
-                float barLength = 0.05;
-                float centerGap = 0.02;
+                float hud = 0.0;
 
-                float hLine = aa_band(abs(uvh.y), barThickness, _Softness);
-                float leftBar  = step(centerGap, -uvh.x) * step(-uvh.x, barLength);
-                float rightBar = step(centerGap,  uvh.x) * step( uvh.x, barLength);
-                float bars = hLine * (leftBar + rightBar);
-
-                float2 p = uvh;
-                float2 dL = normalize(float2(-1.0,  1.0));
-                float2 dR = normalize(float2( 1.0,  1.0));
-
-                float lDist = abs(dot(p, float2(-dL.y, dL.x)));
-                float rDist = abs(dot(p, float2(-dR.y, dR.x)));
-
-                float lLine = aa_band(lDist, _LineWidth, _Softness);
-                float rLine = aa_band(rDist, _LineWidth, _Softness);
-
-                float below = step(p.y, 0.0);
-                float chevronLen = 0.03;
-                float lLen = step(abs(dot(p, dL)), chevronLen);
-                float rLen = step(abs(dot(p, dR)), chevronLen);
-
-                float chevron = max(lLine * lLen, rLine * rLen) * below;
-
-                float hud = bars + chevron;
+                if (_DockReticleMode > 0.5)
+                    hud += DrawDockTReticle(uvh);
+                else
+                    hud += DrawStandardBoresight(uvh, _LineWidth, _Softness);
 
                 if (_DockValid > 0.5)
                 {

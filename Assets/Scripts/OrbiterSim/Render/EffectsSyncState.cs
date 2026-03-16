@@ -24,6 +24,14 @@ public class EffectsSyncState : UdonSharpBehaviour
     [UdonSynced] public short mainPitch_cdeg;   // centi-deg
     [UdonSynced] public uint mainOnMask;        // bit i => engine i on
 
+    [UdonSynced] public short cmdTauX_dNm;
+    [UdonSynced] public short cmdTauY_dNm;
+    [UdonSynced] public short cmdTauZ_dNm;
+
+    [UdonSynced] public short cmdTransX_dN;
+    [UdonSynced] public short cmdTransY_dN;
+    [UdonSynced] public short cmdTransZ_dN;
+
     private float _lastSendTime = -999f;
 
     public bool CanWrite()
@@ -84,6 +92,51 @@ public class EffectsSyncState : UdonSharpBehaviour
 
         TrySend();
     }
+
+
+    public void SetCommandReadout(Vector3 tauCmd_B, Vector3 transCmd_B)
+    {
+        if (!CanWrite()) return;
+
+        short tx = (short)Mathf.Clamp(Mathf.RoundToInt(tauCmd_B.x * 10f), short.MinValue, short.MaxValue);
+        short ty = (short)Mathf.Clamp(Mathf.RoundToInt(tauCmd_B.y * 10f), short.MinValue, short.MaxValue);
+        short tz = (short)Mathf.Clamp(Mathf.RoundToInt(tauCmd_B.z * 10f), short.MinValue, short.MaxValue);
+
+        short fx = (short)Mathf.Clamp(Mathf.RoundToInt(transCmd_B.x * 10f), short.MinValue, short.MaxValue);
+        short fy = (short)Mathf.Clamp(Mathf.RoundToInt(transCmd_B.y * 10f), short.MinValue, short.MaxValue);
+        short fz = (short)Mathf.Clamp(Mathf.RoundToInt(transCmd_B.z * 10f), short.MinValue, short.MaxValue);
+
+        bool changed =
+            tx != cmdTauX_dNm ||
+            ty != cmdTauY_dNm ||
+            tz != cmdTauZ_dNm ||
+            fx != cmdTransX_dN ||
+            fy != cmdTransY_dN ||
+            fz != cmdTransZ_dN;
+
+        if (!changed) return;
+
+        cmdTauX_dNm = tx;
+        cmdTauY_dNm = ty;
+        cmdTauZ_dNm = tz;
+
+        cmdTransX_dN = fx;
+        cmdTransY_dN = fy;
+        cmdTransZ_dN = fz;
+
+        seq++;
+        TrySend();
+    }
+
+    public override void OnOwnershipTransferred(VRCPlayerApi player)
+    {
+        if (!CanWrite()) return;
+
+        // New owner republishes current state immediately.
+        _lastSendTime = -999f;
+        RequestSerialization();
+    }
+
 
     private void TrySend()
     {

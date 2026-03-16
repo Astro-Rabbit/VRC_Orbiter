@@ -28,7 +28,7 @@ public class DockingComputer : UdonSharpBehaviour
 {
     [Header("Refs")]
     public DockingRuntimeState dock;
-
+    public SimManager simManager;
     [Tooltip("Friend docking controller attached to the craft (or active craft proxy).")]
     public DockingController dockCtrl;
 
@@ -42,6 +42,7 @@ public class DockingComputer : UdonSharpBehaviour
 
     [Header("Policy")]
     public bool autoAdvance = true;
+    public bool flipPortForward = false;
 
     [Header("Outputs (read by SimManager/GC)")]
     [Tooltip("Set true for one frame when capture occurs; SimManager should switch craft to MODE_DOCKED.")]
@@ -74,6 +75,13 @@ public class DockingComputer : UdonSharpBehaviour
 
     private double _recaptureBlockedUntil = -1.0;
 
+
+    private bool HasSimAuthority()
+    {
+        if (simManager != null) return simManager.IsSimOwner();
+        return Networking.IsOwner(gameObject);
+    }
+
     // --------------------
     // Public entry points
     // --------------------
@@ -84,6 +92,7 @@ public class DockingComputer : UdonSharpBehaviour
     /// </summary>
     public void EvaluateLatchAndStart(double tNow)
     {
+        if (!HasSimAuthority()) return;        
         requestEnterDocked = false;
         suggestKillControls = false;
 
@@ -175,12 +184,15 @@ public class DockingComputer : UdonSharpBehaviour
         if (log) Debug.Log($"[Docking] CAPTURE -> SOFT  station={stIdx} sPort={sPort} cPort={cPort} ctrlState={dockCtrl.state}");
     }
 
+
+
     /// <summary>
     /// Call this in FixedUpdate (owner integrated stepping).
     /// While dock.active, this writes craft state/attitude deterministically.
     /// </summary>
     public void EvaluateDocked(float dt, double tNow)
     {
+        if (!HasSimAuthority()) return;        
         requestEnterDocked = false;
         suggestKillControls = false;
 
@@ -332,7 +344,12 @@ public class DockingComputer : UdonSharpBehaviour
 
         // Desired craft BODY -> station BODY at hard dock:
         // qCraftToStation_target = qS_SB * qMate * inv(qC_B)
-        dock.target_qCraftToStation = qS_SB * dock.qMate * Quaternion.Inverse(qC_B);
+
+        Quaternion qMate = flipPortForward
+            ? Quaternion.AngleAxis(180f, Vector3.up)
+            : Quaternion.identity;        
+            
+        dock.target_qCraftToStation = qS_SB * dock.GetQMate() * Quaternion.Inverse(qC_B);
 
         // Desired craft CG position in station body:
         // relPos_SB_target = pS_SB - (qCraftToStation_target * pC_B)
@@ -420,7 +437,7 @@ public class DockingComputer : UdonSharpBehaviour
     /// </summary>
     public void EvaluateDockedRemote(double tNow)
     {
-        if (Networking.IsOwner(gameObject)) return; // owner uses EvaluateDocked()
+        if (HasSimAuthority()) return;
         if (netCore == null || craft == null || craftAtt == null || stations == null) return;
 
         int stIdx = netCore.dockStationIndex;
@@ -503,7 +520,7 @@ public class DockingComputer : UdonSharpBehaviour
         );
 
         if (dock == null || netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!HasSimAuthority()) return;
         if (!dock.active || dock.phase != DockingRuntimeState.DOCK_HARD) return;
 
         requestUndock = true;
@@ -514,7 +531,7 @@ public class DockingComputer : UdonSharpBehaviour
     {
         if (dock == null || craft == null || craftAtt == null || stations == null) return;
         if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!HasSimAuthority()) return;
         if (!dock.active || dock.phase != DockingRuntimeState.DOCK_HARD) return;
 
         int stIdx = dock.dockedStationIndex;

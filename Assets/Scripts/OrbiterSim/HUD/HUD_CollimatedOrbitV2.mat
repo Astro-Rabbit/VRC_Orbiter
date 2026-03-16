@@ -30,18 +30,27 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _DockClosureMps: 5.575304e-16
+    - _DockAlignStencilMode: 0
+    - _DockClosureMps: 0
     - _DockGate0HalfHeight_HUD: 0.056699794
     - _DockGate0HalfWidth_HUD: 0.118336335
     - _DockGate0Valid: 1
     - _DockMarkerHalfSize: 0.03
-    - _DockRangeMeters: 0.000011895786
+    - _DockRangeMeters: 0
     - _DockRelMarkerRadius: 0.022
     - _DockRelMarkerThickness: 0.0005
     - _DockRelSpeedMps: 0
     - _DockRelVelValid: 0
+    - _DockReticleMode: 0
+    - _DockTReticleEndcapHeight: 0.02
+    - _DockTReticleEndcapWidth: 0.005
+    - _DockTReticleHalfWidth: 0.055
+    - _DockTReticleScale: 0.5
+    - _DockTReticleStemLen: 0.07
+    - _DockTReticleThickness: 0.001
+    - _DockTReticleYOffset: 0.003
     - _DockTextHeight: 0.02
-    - _DockValid: 1
+    - _DockValid: 0
     - _FontAspect_0: 0.6468254
     - _FontAspect_1: 0.25833333
     - _FontAspect_2: 0.66260165
@@ -88,13 +97,13 @@ Material:
     - _FontSdfSoftness: 0.1
     - _FontSignHeightScale: 0.25
     - _FontSignWidthScale: 0.55
-    - _GlassAlpha: 0.15
+    - _GlassAlpha: 0.02
     - _GlassFresnel: 1.5
-    - _HudHalfFovX: 0.75
-    - _HudHalfFovY: 0.75
-    - _HudIntensity: 1
+    - _HudHalfFovX: 0.65
+    - _HudHalfFovY: 0.65
+    - _HudIntensity: 2
     - _HudMode: 3
-    - _LineWidth: 0.002
+    - _LineWidth: 0.0005
     - _MarkerRadius: 0.035
     - _MarkerThickness: 0.0015
     - _PitchLadderLimitDeg: 45
@@ -168,7 +177,7 @@ Material:
     - _FontUV_X: {r: 0.38867188, g: 0.5234375, b: 0.47705078, a: 0.640625}
     - _FontUV_Y: {r: 0.88623047, g: 0.1381836, b: 0.97265625, a: 0.2553711}
     - _FontUV_Z: {r: 0.80859375, g: 0.2602539, b: 0.8754883, a: 0.3774414}
-    - _GlassTint: {r: 0.28368637, g: 0.43947586, b: 0.4811321, a: 1}
+    - _GlassTint: {r: 0, g: 0, b: 0, a: 1}
     - _HudColor: {r: 0.0047169924, g: 1, b: 0.18244614, a: 1}
     - _NormalDir_B: {r: 0.6199224, g: -0.78466314, b: 0.00018735211, a: 0}
     - _ProgradeDir_B: {r: -0.00097211404, g: -0.0005292321, b: 0.99999946, a: 0}
