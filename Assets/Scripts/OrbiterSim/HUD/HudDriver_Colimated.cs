@@ -3,16 +3,21 @@ using UnityEngine;
 
 public class HudDriver_Colimated : UdonSharpBehaviour
 {
-    [Header("Renderer / Materials")]
+    [Header("Primary HUD Renderer / Materials")]
     public Renderer hudRenderer;
     public Material orbitHudMat;
     public Material dockHudMat;
+
+    [Header("Secondary HUD Renderer / Materials")]
+    public Renderer hudRenderer2;
+    public Material orbitHudMat2;
+    public Material dockHudMat2;
 
     [Header("References")]
     public GuidanceNavCoreState nav;
     public GuidanceNavContactsState contacts;
 
-    [Header("HUD config")]
+    [Header("Primary HUD config")]
     [Tooltip("0=OFF, 1=GROUND, 2=ORBIT, 3=DOCK")]
     public byte hudMode = 2;
 
@@ -21,6 +26,16 @@ public class HudDriver_Colimated : UdonSharpBehaviour
 
     [Tooltip("Angular half-height of HUD in body-frame radians.")]
     public float hudHalfFovY = 0.18f;
+
+    [Header("Secondary HUD config")]
+    [Tooltip("0=OFF, 1=GROUND, 2=ORBIT, 3=DOCK")]
+    public byte hudMode2 = 2;
+
+    [Tooltip("Angular half-width of secondary HUD in body-frame radians.")]
+    public float hudHalfFovX2 = 0.25f;
+
+    [Tooltip("Angular half-height of secondary HUD in body-frame radians.")]
+    public float hudHalfFovY2 = 0.18f;
 
     [Header("Debug / fallback")]
     public bool useFallbackIfInvalid = true;
@@ -57,16 +72,25 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     public float[] dockGateDistancesMeters = new float[] { 30f, 24f, 18f, 12f, 6f, 3f };
     public float dockGateForwardOffset = 0.0f;
 
-
-    [Header("Panel Control Inputs")]
-    [Tooltip("Raw knob value for HUD mode selection.")]
+    [Header("Primary Panel Control Inputs")]
+    [Tooltip("Raw knob value for primary HUD mode selection.")]
     public float hudModeKnobValue = 180f;
 
-    [Tooltip("Raw knob value for HUD intensity control.")]
+    [Tooltip("Raw knob value for primary HUD intensity control.")]
     public float hudIntensityKnobValue = 100f;
 
-    [Tooltip("Raw knob value for glass tint/dim control.")]
+    [Tooltip("Raw knob value for primary glass tint/dim control.")]
     public float glassTintKnobValue = 0f;
+
+    [Header("Secondary Panel Control Inputs")]
+    [Tooltip("Raw knob value for secondary HUD mode selection.")]
+    public float hudModeKnobValue2 = 180f;
+
+    [Tooltip("Raw knob value for secondary HUD intensity control.")]
+    public float hudIntensityKnobValue2 = 100f;
+
+    [Tooltip("Raw knob value for secondary glass tint/dim control.")]
+    public float glassTintKnobValue2 = 0f;
 
     [Header("HUD panel tuning")]
     [Tooltip("Intensity multiplier at knob minimum.")]
@@ -87,12 +111,15 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     [Tooltip("Glass tint color at tint knob maximum.")]
     public Color maxGlassTint = new Color(0.15f, 0.35f, 0.18f, 1.0f);
 
-
-    // Active material cache
+    // Primary active material cache
     private Material _activeMat;
     private Material _lastAssignedMat;
 
-    // Static material cache
+    // Secondary active material cache
+    private Material _activeMat2;
+    private Material _lastAssignedMat2;
+
+    // Static material cache (primary)
     private Material _lastStaticMat;
     private HudFontData _lastFontData;
     private float _lastFontSdfEdge;
@@ -100,10 +127,24 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     private float _lastFontSignWidthScale;
     private float _lastFontSignHeightScale;
 
+    // Static material cache (secondary)
+    private Material _lastStaticMat2;
+    private HudFontData _lastFontData2;
+    private float _lastFontSdfEdge2;
+    private float _lastFontSdfSoftness2;
+    private float _lastFontSignWidthScale2;
+    private float _lastFontSignHeightScale2;
+
     private float _appliedHudIntensity = 1.0f;
     private float _appliedGlassAlpha = 0.08f;
     private Color _appliedGlassTint = new Color(0.15f, 0.35f, 0.18f, 1.0f);
+
+    private float _appliedHudIntensity2 = 1.0f;
+    private float _appliedGlassAlpha2 = 0.08f;
+    private Color _appliedGlassTint2 = new Color(0.15f, 0.35f, 0.18f, 1.0f);
+
     private string _lastTargetName;
+    private string _lastTargetName2;
 
     private void Start()
     {
@@ -111,38 +152,79 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         ApplyHudIntensityFromKnob();
         ApplyGlassTintFromKnob();
 
+        ApplyHudMode2FromKnob();
+        ApplyHudIntensity2FromKnob();
+        ApplyGlassTint2FromKnob();
+
         UpdateActiveMaterial(true);
+        UpdateActiveMaterial2(true);
+
         PushStaticMaterialState(true);
+        PushStaticMaterialState2(true);
     }
 
     private void OnEnable()
     {
         UpdateActiveMaterial(true);
+        UpdateActiveMaterial2(true);
+
         PushStaticMaterialState(true);
+        PushStaticMaterialState2(true);
     }
 
     private void Update()
     {
         UpdateActiveMaterial(false);
-        if (_activeMat == null) return;
+        UpdateActiveMaterial2(false);
 
-        PushStaticMaterialState(false);
-
-        // Always push basic HUD controls
-        _activeMat.SetFloat("_HudMode", (float)hudMode);
-        _activeMat.SetFloat("_HudHalfFovX", hudHalfFovX);
-        _activeMat.SetFloat("_HudHalfFovY", hudHalfFovY);
-        _activeMat.SetFloat("_HudIntensity", _appliedHudIntensity);
-        _activeMat.SetFloat("_GlassAlpha", _appliedGlassAlpha);
-        _activeMat.SetColor("_GlassTint", _appliedGlassTint);
-        if (hudMode == 2)
+        if (_activeMat != null)
         {
-            WriteOrbitMode();
-            PushTargetNameIfNeeded();
+            PushStaticMaterialState(false);
+
+            _activeMat.SetFloat("_HudMode", (float)hudMode);
+            _activeMat.SetFloat("_HudHalfFovX", hudHalfFovX);
+            _activeMat.SetFloat("_HudHalfFovY", hudHalfFovY);
+            _activeMat.SetFloat("_HudIntensity", _appliedHudIntensity);
+            _activeMat.SetFloat("_GlassAlpha", _appliedGlassAlpha);
+            _activeMat.SetColor("_GlassTint", _appliedGlassTint);
+
+            if (hudMode == 2)
+            {
+                WriteOrbitModeTo(_activeMat, hudHalfFovX, hudHalfFovY);
+                PushTargetNameIfNeeded();
+            }
+            else if (hudMode == 3)
+            {
+                WriteDockModeTo(_activeMat, hudHalfFovX, hudHalfFovY);
+            }
+            else
+            {
+                // Non-orbit/non-dock primary HUD
+                UpdateDockPortMarker(Vector3.zero, Quaternion.identity, Vector3.forward, false);
+                UpdateDockGates(Vector3.zero, Quaternion.identity, Vector3.forward, false);
+            }
         }
-        else if (hudMode == 3)
+
+        if (_activeMat2 != null)
         {
-            WriteDockMode();
+            PushStaticMaterialState2(false);
+
+            _activeMat2.SetFloat("_HudMode", (float)hudMode2);
+            _activeMat2.SetFloat("_HudHalfFovX", hudHalfFovX2);
+            _activeMat2.SetFloat("_HudHalfFovY", hudHalfFovY2);
+            _activeMat2.SetFloat("_HudIntensity", _appliedHudIntensity2);
+            _activeMat2.SetFloat("_GlassAlpha", _appliedGlassAlpha2);
+            _activeMat2.SetColor("_GlassTint", _appliedGlassTint2);
+
+            if (hudMode2 == 2)
+            {
+                WriteOrbitModeTo(_activeMat2, hudHalfFovX2, hudHalfFovY2);
+                PushTargetNameIfNeeded2();
+            }
+            else if (hudMode2 == 3)
+            {
+                WriteDockModeTo(_activeMat2, hudHalfFovX2, hudHalfFovY2);
+            }
         }
     }
 
@@ -166,24 +248,45 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         if (!force && _lastAssignedMat == _activeMat) return;
 
         if (hudRenderer.sharedMaterial != _activeMat)
-        {
             hudRenderer.sharedMaterial = _activeMat;
-        }
 
         _lastAssignedMat = _activeMat;
 
-        // Force static repush when material changes
         _lastStaticMat = null;
         _lastTargetName = null;
+    }
+
+    private void UpdateActiveMaterial2(bool force)
+    {
+        Material desired = null;
+
+        if (hudMode2 == 2) desired = orbitHudMat2;
+        else if (hudMode2 == 3) desired = dockHudMat2;
+        else desired = orbitHudMat2;
+
+        _activeMat2 = desired;
+
+        if (_activeMat2 == null) return;
+        if (hudRenderer2 == null) return;
+
+        if (!force && _lastAssignedMat2 == _activeMat2) return;
+
+        if (hudRenderer2.sharedMaterial != _activeMat2)
+            hudRenderer2.sharedMaterial = _activeMat2;
+
+        _lastAssignedMat2 = _activeMat2;
+
+        _lastStaticMat2 = null;
+        _lastTargetName2 = null;
     }
 
     // ============================================================
     // Orbit mode writes
     // ============================================================
 
-    private void WriteOrbitMode()
+    private void WriteOrbitModeTo(Material targetMat, float halfFovX, float halfFovY)
     {
-        if (_activeMat == null) return;
+        if (targetMat == null) return;
 
         Vector3 prograde_B = fallbackPrograde_B;
         Vector3 radialOut_B = fallbackRadialOut_B;
@@ -244,11 +347,10 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             else normal_B = Vector3.up;
         }
 
-        _activeMat.SetVector("_ProgradeDir_B", new Vector4(prograde_B.x, prograde_B.y, prograde_B.z, 0f));
-        _activeMat.SetVector("_RadialOutDir_B", new Vector4(radialOut_B.x, radialOut_B.y, radialOut_B.z, 0f));
-        _activeMat.SetVector("_NormalDir_B", new Vector4(normal_B.x, normal_B.y, normal_B.z, 0f));
+        targetMat.SetVector("_ProgradeDir_B", new Vector4(prograde_B.x, prograde_B.y, prograde_B.z, 0f));
+        targetMat.SetVector("_RadialOutDir_B", new Vector4(radialOut_B.x, radialOut_B.y, radialOut_B.z, 0f));
+        targetMat.SetVector("_NormalDir_B", new Vector4(normal_B.x, normal_B.y, normal_B.z, 0f));
 
-        // Mode-agnostic selected target overlay for orbit shader
         bool targetValid = false;
         Vector2 targetPosHUD = Vector2.zero;
         float targetRangeMeters = 0f;
@@ -270,7 +372,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             if (targetPosSq > 1e-8f)
             {
                 targetValid = true;
-                targetPosHUD = DirBToHudUV(targetPos_B);
+                targetPosHUD = DirBToHudUV(targetPos_B, halfFovX, halfFovY);
 
                 int sel = contacts.selectedStationIndex;
                 if (sel >= 0 && contacts.range_m != null && sel < contacts.range_m.Length)
@@ -299,21 +401,22 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 Vector3 relVelProg_B = relVel_B.normalized;
                 Vector3 relVelRetro_B = -relVelProg_B;
 
-                relVelProgHUD = DirBToHudUV(relVelProg_B);
-                relVelRetroHUD = DirBToHudUV(relVelRetro_B);
+                relVelProgHUD = DirBToHudUV(relVelProg_B, halfFovX, halfFovY);
+                relVelRetroHUD = DirBToHudUV(relVelRetro_B, halfFovX, halfFovY);
 
                 relSpeedMps = Mathf.Sqrt(relVelSq);
             }
         }
 
-        _activeMat.SetFloat("_TargetValid", targetValid ? 1f : 0f);
-        _activeMat.SetVector("_TargetPos_HUD", new Vector4(targetPosHUD.x, targetPosHUD.y, 0f, 0f));
-        _activeMat.SetFloat("_TargetRangeMeters", targetRangeMeters);
+        targetMat.SetFloat("_TargetValid", targetValid ? 1f : 0f);
+        targetMat.SetVector("_TargetPos_HUD", new Vector4(targetPosHUD.x, targetPosHUD.y, 0f, 0f));
+        targetMat.SetFloat("_TargetRangeMeters", targetRangeMeters);
 
-        _activeMat.SetFloat("_TargetRelVelValid", relVelValid ? 1f : 0f);
-        _activeMat.SetVector("_TargetRelVelProg_HUD", new Vector4(relVelProgHUD.x, relVelProgHUD.y, 0f, 0f));
-        _activeMat.SetVector("_TargetRelVelRetro_HUD", new Vector4(relVelRetroHUD.x, relVelRetroHUD.y, 0f, 0f));
-        _activeMat.SetFloat("_TargetRelSpeedMps", relSpeedMps);
+        targetMat.SetFloat("_TargetRelVelValid", relVelValid ? 1f : 0f);
+        targetMat.SetVector("_TargetRelVelProg_HUD", new Vector4(relVelProgHUD.x, relVelProgHUD.y, 0f, 0f));
+        targetMat.SetVector("_TargetRelVelRetro_HUD", new Vector4(relVelRetroHUD.x, relVelRetroHUD.y, 0f, 0f));
+        targetMat.SetFloat("_TargetRelSpeedMps", relSpeedMps);
+
         UpdateDockPortMarker(Vector3.zero, Quaternion.identity, Vector3.forward, false);
         UpdateDockGates(Vector3.zero, Quaternion.identity, Vector3.forward, false);
     }
@@ -322,9 +425,9 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     // Dock mode writes
     // ============================================================
 
-    private void WriteDockMode()
+    private void WriteDockModeTo(Material targetMat, float halfFovX, float halfFovY)
     {
-        if (_activeMat == null) return;
+        if (targetMat == null) return;
 
         bool dockValid = false;
         float dockRangeMeters = 0f;
@@ -333,6 +436,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         Vector2 dockRelVelProgHUD = Vector2.zero;
         Vector2 dockRelVelRetroHUD = Vector2.zero;
         float dockRelSpeedMps = 0f;
+
         if (contacts != null && contacts.dockValid0)
         {
             Vector3 targetPortPos_B = new Vector3(
@@ -348,8 +452,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             );
 
             Quaternion qTargetPortInB = contacts.qTargetPortInB0;
-
-            Vector3 portForward_B = qTargetPortInB * Vector3.forward; // +Z outward
+            Vector3 portForward_B = qTargetPortInB * Vector3.forward;
 
             dockValid = true;
             dockRangeMeters = dockErr_B.magnitude;
@@ -374,12 +477,12 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 Vector3 relVelProg_B = relVel_B.normalized;
                 Vector3 relVelRetro_B = -relVelProg_B;
 
-                dockRelVelProgHUD = DirBToHudUV(relVelProg_B);
-                dockRelVelRetroHUD = DirBToHudUV(relVelRetro_B);
+                dockRelVelProgHUD = DirBToHudUV(relVelProg_B, halfFovX, halfFovY);
+                dockRelVelRetroHUD = DirBToHudUV(relVelRetro_B, halfFovX, halfFovY);
 
                 dockRelSpeedMps = Mathf.Sqrt(relVelSq);
             }
-            // Positive closing toward the port
+
             dockClosureMps = Vector3.Dot(relVel_B, -portForward_B);
 
             UpdateDockPortMarker(targetPortPos_B, qTargetPortInB, portForward_B, true);
@@ -391,15 +494,14 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             UpdateDockGates(Vector3.zero, Quaternion.identity, Vector3.forward, false);
         }
 
-        _activeMat.SetFloat("_DockValid", dockValid ? 1f : 0f);
-        _activeMat.SetFloat("_DockRangeMeters", dockRangeMeters);
-        _activeMat.SetFloat("_DockClosureMps", dockClosureMps);
+        targetMat.SetFloat("_DockValid", dockValid ? 1f : 0f);
+        targetMat.SetFloat("_DockRangeMeters", dockRangeMeters);
+        targetMat.SetFloat("_DockClosureMps", dockClosureMps);
 
-        _activeMat.SetFloat("_DockRelVelValid", dockRelVelValid ? 1f : 0f);
-        _activeMat.SetVector("_DockRelVelProg_HUD", new Vector4(dockRelVelProgHUD.x, dockRelVelProgHUD.y, 0f, 0f));
-        _activeMat.SetVector("_DockRelVelRetro_HUD", new Vector4(dockRelVelRetroHUD.x, dockRelVelRetroHUD.y, 0f, 0f));
-        _activeMat.SetFloat("_DockRelSpeedMps", dockRelSpeedMps);
-
+        targetMat.SetFloat("_DockRelVelValid", dockRelVelValid ? 1f : 0f);
+        targetMat.SetVector("_DockRelVelProg_HUD", new Vector4(dockRelVelProgHUD.x, dockRelVelProgHUD.y, 0f, 0f));
+        targetMat.SetVector("_DockRelVelRetro_HUD", new Vector4(dockRelVelRetroHUD.x, dockRelVelRetroHUD.y, 0f, 0f));
+        targetMat.SetFloat("_DockRelSpeedMps", dockRelSpeedMps);
     }
 
     // ============================================================
@@ -430,100 +532,133 @@ public class HudDriver_Colimated : UdonSharpBehaviour
 
         if (fontData == null) return;
 
-        _activeMat.SetTexture("_FontAtlas", fontData.atlas);
-
-        _activeMat.SetFloat("_FontSdfEdge", fontSdfEdge);
-        _activeMat.SetFloat("_FontSdfSoftness", fontSdfSoftness);
-
-        // Digits / symbols
-        _activeMat.SetVector("_FontUV_0", fontData.uv_0);
-        _activeMat.SetVector("_FontUV_1", fontData.uv_1);
-        _activeMat.SetVector("_FontUV_2", fontData.uv_2);
-        _activeMat.SetVector("_FontUV_3", fontData.uv_3);
-        _activeMat.SetVector("_FontUV_4", fontData.uv_4);
-        _activeMat.SetVector("_FontUV_5", fontData.uv_5);
-        _activeMat.SetVector("_FontUV_6", fontData.uv_6);
-        _activeMat.SetVector("_FontUV_7", fontData.uv_7);
-        _activeMat.SetVector("_FontUV_8", fontData.uv_8);
-        _activeMat.SetVector("_FontUV_9", fontData.uv_9);
-        _activeMat.SetVector("_FontUV_Minus", fontData.uv_minus);
-        _activeMat.SetVector("_FontUV_Plus", fontData.uv_plus);
-        _activeMat.SetVector("_FontUV_Dot", fontData.uv_dot);
-
-        _activeMat.SetFloat("_FontAspect_0", fontData.aspect_0);
-        _activeMat.SetFloat("_FontAspect_1", fontData.aspect_1);
-        _activeMat.SetFloat("_FontAspect_2", fontData.aspect_2);
-        _activeMat.SetFloat("_FontAspect_3", fontData.aspect_3);
-        _activeMat.SetFloat("_FontAspect_4", fontData.aspect_4);
-        _activeMat.SetFloat("_FontAspect_5", fontData.aspect_5);
-        _activeMat.SetFloat("_FontAspect_6", fontData.aspect_6);
-        _activeMat.SetFloat("_FontAspect_7", fontData.aspect_7);
-        _activeMat.SetFloat("_FontAspect_8", fontData.aspect_8);
-        _activeMat.SetFloat("_FontAspect_9", fontData.aspect_9);
-        _activeMat.SetFloat("_FontAspect_Minus", fontData.aspect_minus);
-        _activeMat.SetFloat("_FontAspect_Plus", fontData.aspect_plus);
-        _activeMat.SetFloat("_FontAspect_Dot", fontData.aspect_dot);
-
-        _activeMat.SetFloat("_FontSignWidthScale", fontSignWidthScale);
-        _activeMat.SetFloat("_FontSignHeightScale", fontSignHeightScale);
-
-        // Uppercase UV
-        _activeMat.SetVector("_FontUV_A", fontData.uv_A);
-        _activeMat.SetVector("_FontUV_B", fontData.uv_B);
-        _activeMat.SetVector("_FontUV_C", fontData.uv_C);
-        _activeMat.SetVector("_FontUV_D", fontData.uv_D);
-        _activeMat.SetVector("_FontUV_E", fontData.uv_E);
-        _activeMat.SetVector("_FontUV_F", fontData.uv_F);
-        _activeMat.SetVector("_FontUV_G", fontData.uv_G);
-        _activeMat.SetVector("_FontUV_H", fontData.uv_H);
-        _activeMat.SetVector("_FontUV_I", fontData.uv_I);
-        _activeMat.SetVector("_FontUV_J", fontData.uv_J);
-        _activeMat.SetVector("_FontUV_K", fontData.uv_K);
-        _activeMat.SetVector("_FontUV_L", fontData.uv_L);
-        _activeMat.SetVector("_FontUV_M", fontData.uv_M);
-        _activeMat.SetVector("_FontUV_N", fontData.uv_N);
-        _activeMat.SetVector("_FontUV_O", fontData.uv_O);
-        _activeMat.SetVector("_FontUV_P", fontData.uv_P);
-        _activeMat.SetVector("_FontUV_Q", fontData.uv_Q);
-        _activeMat.SetVector("_FontUV_R", fontData.uv_R);
-        _activeMat.SetVector("_FontUV_S", fontData.uv_S);
-        _activeMat.SetVector("_FontUV_T", fontData.uv_T);
-        _activeMat.SetVector("_FontUV_U", fontData.uv_U);
-        _activeMat.SetVector("_FontUV_V", fontData.uv_V);
-        _activeMat.SetVector("_FontUV_W", fontData.uv_W);
-        _activeMat.SetVector("_FontUV_X", fontData.uv_X);
-        _activeMat.SetVector("_FontUV_Y", fontData.uv_Y);
-        _activeMat.SetVector("_FontUV_Z", fontData.uv_Z);
-
-        // Uppercase aspect
-        _activeMat.SetFloat("_FontAspect_A", fontData.aspect_A);
-        _activeMat.SetFloat("_FontAspect_B", fontData.aspect_B);
-        _activeMat.SetFloat("_FontAspect_C", fontData.aspect_C);
-        _activeMat.SetFloat("_FontAspect_D", fontData.aspect_D);
-        _activeMat.SetFloat("_FontAspect_E", fontData.aspect_E);
-        _activeMat.SetFloat("_FontAspect_F", fontData.aspect_F);
-        _activeMat.SetFloat("_FontAspect_G", fontData.aspect_G);
-        _activeMat.SetFloat("_FontAspect_H", fontData.aspect_H);
-        _activeMat.SetFloat("_FontAspect_I", fontData.aspect_I);
-        _activeMat.SetFloat("_FontAspect_J", fontData.aspect_J);
-        _activeMat.SetFloat("_FontAspect_K", fontData.aspect_K);
-        _activeMat.SetFloat("_FontAspect_L", fontData.aspect_L);
-        _activeMat.SetFloat("_FontAspect_M", fontData.aspect_M);
-        _activeMat.SetFloat("_FontAspect_N", fontData.aspect_N);
-        _activeMat.SetFloat("_FontAspect_O", fontData.aspect_O);
-        _activeMat.SetFloat("_FontAspect_P", fontData.aspect_P);
-        _activeMat.SetFloat("_FontAspect_Q", fontData.aspect_Q);
-        _activeMat.SetFloat("_FontAspect_R", fontData.aspect_R);
-        _activeMat.SetFloat("_FontAspect_S", fontData.aspect_S);
-        _activeMat.SetFloat("_FontAspect_T", fontData.aspect_T);
-        _activeMat.SetFloat("_FontAspect_U", fontData.aspect_U);
-        _activeMat.SetFloat("_FontAspect_V", fontData.aspect_V);
-        _activeMat.SetFloat("_FontAspect_W", fontData.aspect_W);
-        _activeMat.SetFloat("_FontAspect_X", fontData.aspect_X);
-        _activeMat.SetFloat("_FontAspect_Y", fontData.aspect_Y);
-        _activeMat.SetFloat("_FontAspect_Z", fontData.aspect_Z);
+        PushFontDataToMaterial(_activeMat);
 
         _lastTargetName = null;
+    }
+
+    private void PushStaticMaterialState2(bool force)
+    {
+        if (_activeMat2 == null) return;
+
+        bool matChanged =
+            force ||
+            _activeMat2 != _lastStaticMat2 ||
+            fontData != _lastFontData2 ||
+            !Mathf.Approximately(fontSdfEdge, _lastFontSdfEdge2) ||
+            !Mathf.Approximately(fontSdfSoftness, _lastFontSdfSoftness2) ||
+            !Mathf.Approximately(fontSignWidthScale, _lastFontSignWidthScale2) ||
+            !Mathf.Approximately(fontSignHeightScale, _lastFontSignHeightScale2);
+
+        if (!matChanged) return;
+
+        _lastStaticMat2 = _activeMat2;
+        _lastFontData2 = fontData;
+        _lastFontSdfEdge2 = fontSdfEdge;
+        _lastFontSdfSoftness2 = fontSdfSoftness;
+        _lastFontSignWidthScale2 = fontSignWidthScale;
+        _lastFontSignHeightScale2 = fontSignHeightScale;
+
+        if (fontData == null) return;
+
+        PushFontDataToMaterial(_activeMat2);
+
+        _lastTargetName2 = null;
+    }
+
+    private void PushFontDataToMaterial(Material mat)
+    {
+        if (mat == null || fontData == null) return;
+
+        mat.SetTexture("_FontAtlas", fontData.atlas);
+
+        mat.SetFloat("_FontSdfEdge", fontSdfEdge);
+        mat.SetFloat("_FontSdfSoftness", fontSdfSoftness);
+
+        mat.SetVector("_FontUV_0", fontData.uv_0);
+        mat.SetVector("_FontUV_1", fontData.uv_1);
+        mat.SetVector("_FontUV_2", fontData.uv_2);
+        mat.SetVector("_FontUV_3", fontData.uv_3);
+        mat.SetVector("_FontUV_4", fontData.uv_4);
+        mat.SetVector("_FontUV_5", fontData.uv_5);
+        mat.SetVector("_FontUV_6", fontData.uv_6);
+        mat.SetVector("_FontUV_7", fontData.uv_7);
+        mat.SetVector("_FontUV_8", fontData.uv_8);
+        mat.SetVector("_FontUV_9", fontData.uv_9);
+        mat.SetVector("_FontUV_Minus", fontData.uv_minus);
+        mat.SetVector("_FontUV_Plus", fontData.uv_plus);
+        mat.SetVector("_FontUV_Dot", fontData.uv_dot);
+
+        mat.SetFloat("_FontAspect_0", fontData.aspect_0);
+        mat.SetFloat("_FontAspect_1", fontData.aspect_1);
+        mat.SetFloat("_FontAspect_2", fontData.aspect_2);
+        mat.SetFloat("_FontAspect_3", fontData.aspect_3);
+        mat.SetFloat("_FontAspect_4", fontData.aspect_4);
+        mat.SetFloat("_FontAspect_5", fontData.aspect_5);
+        mat.SetFloat("_FontAspect_6", fontData.aspect_6);
+        mat.SetFloat("_FontAspect_7", fontData.aspect_7);
+        mat.SetFloat("_FontAspect_8", fontData.aspect_8);
+        mat.SetFloat("_FontAspect_9", fontData.aspect_9);
+        mat.SetFloat("_FontAspect_Minus", fontData.aspect_minus);
+        mat.SetFloat("_FontAspect_Plus", fontData.aspect_plus);
+        mat.SetFloat("_FontAspect_Dot", fontData.aspect_dot);
+
+        mat.SetFloat("_FontSignWidthScale", fontSignWidthScale);
+        mat.SetFloat("_FontSignHeightScale", fontSignHeightScale);
+
+        mat.SetVector("_FontUV_A", fontData.uv_A);
+        mat.SetVector("_FontUV_B", fontData.uv_B);
+        mat.SetVector("_FontUV_C", fontData.uv_C);
+        mat.SetVector("_FontUV_D", fontData.uv_D);
+        mat.SetVector("_FontUV_E", fontData.uv_E);
+        mat.SetVector("_FontUV_F", fontData.uv_F);
+        mat.SetVector("_FontUV_G", fontData.uv_G);
+        mat.SetVector("_FontUV_H", fontData.uv_H);
+        mat.SetVector("_FontUV_I", fontData.uv_I);
+        mat.SetVector("_FontUV_J", fontData.uv_J);
+        mat.SetVector("_FontUV_K", fontData.uv_K);
+        mat.SetVector("_FontUV_L", fontData.uv_L);
+        mat.SetVector("_FontUV_M", fontData.uv_M);
+        mat.SetVector("_FontUV_N", fontData.uv_N);
+        mat.SetVector("_FontUV_O", fontData.uv_O);
+        mat.SetVector("_FontUV_P", fontData.uv_P);
+        mat.SetVector("_FontUV_Q", fontData.uv_Q);
+        mat.SetVector("_FontUV_R", fontData.uv_R);
+        mat.SetVector("_FontUV_S", fontData.uv_S);
+        mat.SetVector("_FontUV_T", fontData.uv_T);
+        mat.SetVector("_FontUV_U", fontData.uv_U);
+        mat.SetVector("_FontUV_V", fontData.uv_V);
+        mat.SetVector("_FontUV_W", fontData.uv_W);
+        mat.SetVector("_FontUV_X", fontData.uv_X);
+        mat.SetVector("_FontUV_Y", fontData.uv_Y);
+        mat.SetVector("_FontUV_Z", fontData.uv_Z);
+
+        mat.SetFloat("_FontAspect_A", fontData.aspect_A);
+        mat.SetFloat("_FontAspect_B", fontData.aspect_B);
+        mat.SetFloat("_FontAspect_C", fontData.aspect_C);
+        mat.SetFloat("_FontAspect_D", fontData.aspect_D);
+        mat.SetFloat("_FontAspect_E", fontData.aspect_E);
+        mat.SetFloat("_FontAspect_F", fontData.aspect_F);
+        mat.SetFloat("_FontAspect_G", fontData.aspect_G);
+        mat.SetFloat("_FontAspect_H", fontData.aspect_H);
+        mat.SetFloat("_FontAspect_I", fontData.aspect_I);
+        mat.SetFloat("_FontAspect_J", fontData.aspect_J);
+        mat.SetFloat("_FontAspect_K", fontData.aspect_K);
+        mat.SetFloat("_FontAspect_L", fontData.aspect_L);
+        mat.SetFloat("_FontAspect_M", fontData.aspect_M);
+        mat.SetFloat("_FontAspect_N", fontData.aspect_N);
+        mat.SetFloat("_FontAspect_O", fontData.aspect_O);
+        mat.SetFloat("_FontAspect_P", fontData.aspect_P);
+        mat.SetFloat("_FontAspect_Q", fontData.aspect_Q);
+        mat.SetFloat("_FontAspect_R", fontData.aspect_R);
+        mat.SetFloat("_FontAspect_S", fontData.aspect_S);
+        mat.SetFloat("_FontAspect_T", fontData.aspect_T);
+        mat.SetFloat("_FontAspect_U", fontData.aspect_U);
+        mat.SetFloat("_FontAspect_V", fontData.aspect_V);
+        mat.SetFloat("_FontAspect_W", fontData.aspect_W);
+        mat.SetFloat("_FontAspect_X", fontData.aspect_X);
+        mat.SetFloat("_FontAspect_Y", fontData.aspect_Y);
+        mat.SetFloat("_FontAspect_Z", fontData.aspect_Z);
     }
 
     // ============================================================
@@ -547,6 +682,25 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         _activeMat.SetFloat("_TargetNameC2", EncodeUpperIndexAt(safeName, 2));
         _activeMat.SetFloat("_TargetNameC3", EncodeUpperIndexAt(safeName, 3));
         _activeMat.SetFloat("_TargetNameC4", EncodeUpperIndexAt(safeName, 4));
+    }
+
+    private void PushTargetNameIfNeeded2()
+    {
+        if (_activeMat2 == null) return;
+
+        string safeName = SanitizeTargetName(targetName);
+
+        if (_lastTargetName2 == safeName) return;
+        _lastTargetName2 = safeName;
+
+        int len = safeName.Length;
+        _activeMat2.SetFloat("_TargetNameLen", (float)len);
+
+        _activeMat2.SetFloat("_TargetNameC0", EncodeUpperIndexAt(safeName, 0));
+        _activeMat2.SetFloat("_TargetNameC1", EncodeUpperIndexAt(safeName, 1));
+        _activeMat2.SetFloat("_TargetNameC2", EncodeUpperIndexAt(safeName, 2));
+        _activeMat2.SetFloat("_TargetNameC3", EncodeUpperIndexAt(safeName, 3));
+        _activeMat2.SetFloat("_TargetNameC4", EncodeUpperIndexAt(safeName, 4));
     }
 
     private static string SanitizeTargetName(string raw)
@@ -584,7 +738,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     // Projection helpers
     // ============================================================
 
-    private Vector2 DirBToHudUV(Vector3 dir_B)
+    private Vector2 DirBToHudUV(Vector3 dir_B, float halfFovX, float halfFovY)
     {
         if (dir_B.sqrMagnitude < 1e-8f) return Vector2.zero;
 
@@ -594,8 +748,8 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         float el = Mathf.Atan2(dir_B.y, dir_B.z);
 
         Vector2 uvh;
-        uvh.x = az / Mathf.Max(hudHalfFovX, 1e-6f);
-        uvh.y = el / Mathf.Max(hudHalfFovY, 1e-6f);
+        uvh.x = az / Mathf.Max(halfFovX, 1e-6f);
+        uvh.y = el / Mathf.Max(halfFovY, 1e-6f);
         return uvh;
     }
 
@@ -637,6 +791,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             gate.localRotation = portRot_B;
         }
     }
+
     private void UpdateDockPortMarker(Vector3 portPos_B, Quaternion portRot_B, Vector3 portForward_B, bool visible)
     {
         if (dockPortMarkerRoot == null) return;
@@ -660,22 +815,16 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         }
         else
         {
-            // Optional later mode: face the viewer while staying anchored.
-            // For now, just use true port orientation.
             dockPortMarkerRoot.localRotation = portRot_B;
         }
     }
 
+    // ============================================================
+    // Knob UI hooks
+    // ============================================================
 
     public void ApplyHudModeFromKnob()
     {
-        // 4-position knob example:
-        //   0   = OFF
-        //   90  = GROUND
-        //   180 = ORBIT
-        //   270 = DOCK
-        //
-        // We map by nearest quadrant center.
         float v = hudModeKnobValue;
 
         if (v < 22.5f) hudMode = 0;
@@ -698,4 +847,27 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         _appliedGlassTint = Color.Lerp(minGlassTint, maxGlassTint, t);
     }
 
+    public void ApplyHudMode2FromKnob()
+    {
+        float v = hudModeKnobValue2;
+
+        if (v < 22.5f) hudMode2 = 0;
+        else if (v < 67.5f) hudMode2 = 1;
+        else if (v < 112.5f) hudMode2 = 2;
+        else hudMode2 = 3;
+    }
+
+    public void ApplyHudIntensity2FromKnob()
+    {
+        float t = Mathf.InverseLerp(0f, 100f, hudIntensityKnobValue2);
+        _appliedHudIntensity2 = Mathf.Lerp(minHudIntensity, maxHudIntensity, t);
+    }
+
+    public void ApplyGlassTint2FromKnob()
+    {
+        float t = Mathf.InverseLerp(0f, 100f, glassTintKnobValue2);
+
+        _appliedGlassAlpha2 = Mathf.Lerp(minGlassAlpha, maxGlassAlpha, t);
+        _appliedGlassTint2 = Color.Lerp(minGlassTint, maxGlassTint, t);
+    }
 }

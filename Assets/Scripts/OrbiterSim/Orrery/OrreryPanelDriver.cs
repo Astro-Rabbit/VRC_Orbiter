@@ -47,16 +47,16 @@ public class OrreryPanelDriver : UdonSharpBehaviour
     // ---------------------------------------------------------------------
     [Header("Panel Input Registers")]
     [Tooltip("3-way mode switch. 0=BODY, 1=CRAFT, 2=TARGET")]
-    public int modeSwitchState = VIEW_BODY;
+    public byte modeSwitchState = VIEW_BODY;
 
     [Tooltip("2-way switch. 0=OFF, 1=ON")]
-    public int orbitsSwitchState = 1;
+    public byte orbitsSwitchState = 1;
 
     [Tooltip("2-way switch. 0=OFF, 1=ON")]
-    public int markersSwitchState = 1;
+    public byte markersSwitchState = 1;
 
     [Tooltip("2-way switch. 0=OFF, 1=ON. Reserved for future target/station layer control.")]
-    public int targetsSwitchState = 1;
+    public byte targetsSwitchState = 1;
 
     [Tooltip("Relative zoom knob input value.")]
     public float zoomKnobValue = 0f;
@@ -120,7 +120,7 @@ public class OrreryPanelDriver : UdonSharpBehaviour
 
     public void EVT_ModeChanged()
     {
-        modeSwitchState = ClampViewMode(modeSwitchState);
+        modeSwitchState = (byte)ClampViewMode(modeSwitchState);
 
         // Per your requirement:
         // changing mode resets manual zoom and also resets the knob zero reference.

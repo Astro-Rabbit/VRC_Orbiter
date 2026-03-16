@@ -47,12 +47,16 @@ public class CraftNetState : UdonSharpBehaviour
     public Vector3 dockRelPos_SB;
     public Quaternion dock_qCraftToStation;
 
+    [Header("Read-only (ownership transfer policy mirrors synced)")]
+    public bool ownershipTransferHardLocked = false;
+
     // --- synced core ---
     [UdonSynced] private int _rev;
     [UdonSynced] private int _craftId;
     [UdonSynced] private byte _mode;
     [UdonSynced] private byte _primaryBodyId;
 
+    [UdonSynced] private bool _ownershipTransferHardLocked;
     // Delayed remote presentation transition support
     [UdonSynced] private byte _prevMode;
     [UdonSynced] private byte _prevPrimaryBodyId;
@@ -101,6 +105,7 @@ public class CraftNetState : UdonSharpBehaviour
         prevMode = _prevMode;
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;        
     }
 
     public byte GetMode() => _mode;
@@ -213,6 +218,13 @@ public class CraftNetState : UdonSharpBehaviour
         double denom = craft.dryMassKg + craft.propMassKg;
         _fuel01 = (denom > 1e-6) ? (float)(craft.propMassKg / denom) : 0f;
 
+        if (simManager != null)
+        {
+            _ownershipTransferHardLocked = simManager.ownershipTransferHardLocked;
+        }
+
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;
+
         if (bumpRevision) _rev++;
 
         mode = _mode;
@@ -230,6 +242,8 @@ public class CraftNetState : UdonSharpBehaviour
         prevMode = _prevMode;
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
+
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;
 
         dockPhase = _dockPhase;
         dockStationIndex = _dockStationIndex;
@@ -337,6 +351,6 @@ public class CraftNetState : UdonSharpBehaviour
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
     }
-
+    public bool GetOwnershipTransferHardLocked() => _ownershipTransferHardLocked;
 
 }

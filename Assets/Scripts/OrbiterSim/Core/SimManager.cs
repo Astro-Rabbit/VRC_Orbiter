@@ -106,6 +106,10 @@ public class SimManager : UdonSharpBehaviour
     [Tooltip("Objects that should follow SimManager ownership during sim authority handoff.")]
     public GameObject[] ownershipObjects;
 
+    [Header("Ownership transfer policy")]
+    [Tooltip("Hard lock for sim ownership transfer. Intended to be controlled by tablet/UI policy, not by cockpit release timing.")]
+    public bool ownershipTransferHardLocked = false;
+
     // -------------------------------------------------------------------------
     // Integrated stepping
     // -------------------------------------------------------------------------
@@ -812,6 +816,12 @@ public class SimManager : UdonSharpBehaviour
         if (Networking.IsOwner(gameObject))
         {
             ForcePublishAuthoritativeState();
+
+            if (!CanApproveOwnershipTransfer())
+            {
+                Debug.Log("[SimManager] OnOwnershipRequest: denied (hard ownership lock active).");
+                return false;
+            }
         }
 
         Debug.Log("[SimManager] OnOwnershipRequest: approving transfer.");
@@ -880,6 +890,35 @@ public class SimManager : UdonSharpBehaviour
         if (netAtt != null)
             netAtt.ForcePublishAttitude();
     }
+
+
+
+    public void SetOwnershipTransferHardLocked(bool locked)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (ownershipTransferHardLocked == locked) return;
+
+        ownershipTransferHardLocked = locked;
+
+        if (netCore != null)
+            netCore.ForcePublishCore();
+    }
+
+    public void ToggleOwnershipTransferHardLocked()
+    {
+        SetOwnershipTransferHardLocked(!ownershipTransferHardLocked);
+    }
+
+    public bool IsOwnershipTransferHardLocked()
+    {
+        return ownershipTransferHardLocked;
+    }
+
+    public bool CanApproveOwnershipTransfer()
+    {
+        return !ownershipTransferHardLocked;
+    }
+
 
     /// <summary>
     /// New manager owner pulls subordinate sync objects under the same owner.
