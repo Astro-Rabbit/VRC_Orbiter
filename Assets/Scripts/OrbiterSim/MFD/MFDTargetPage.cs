@@ -71,6 +71,9 @@ public class MFDTargetPage : MFDPage
 
     public override void DrawDisplay(MFD display)
     {
+        display.ClearGraphics();
+        display.ClearText();
+
         int stationCount = contacts.stations.Length;
         for (int i = 0; i < stationCount; i++) {
             display.DrawText(contacts.stations[i].gameObject.name, 2 + i, 2, i == targetIndex ? Color.green : Color.white);
