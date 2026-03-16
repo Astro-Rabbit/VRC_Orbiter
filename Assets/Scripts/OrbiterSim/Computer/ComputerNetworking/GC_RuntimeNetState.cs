@@ -142,7 +142,10 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
     public void ForcePublish()
     {
         if (!HasAuthority()) return;
-        CaptureFromLocal();
+
+        bool changed = CaptureFromLocal();
+        if (!changed) _rev++;
+
         PublishNow();
     }
 
@@ -160,4 +163,52 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
         CaptureFromLocal();
         PublishNow();
     }
+
+
+    public void ResetPresentationState()
+    {
+        _publishCooldown = 0f;
+        _heartbeatAccum = 0f;
+        _appliedRev = -1;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _publishCooldown = 0f;
+        _heartbeatAccum = 0f;
+
+        if (runtime != null)
+        {
+            _status = runtime.status;
+            _activeModeId = runtime.activeModeId;
+            _activeTranslateModeId = runtime.activeTranslateModeId;
+            _activeProgramId = runtime.activeProgramId;
+            _activeExecutorId = runtime.activeExecutorId;
+            _executorPhase = runtime.executorPhase;
+        }
+        else
+        {
+            _status = 0;
+            _activeModeId = 0;
+            _activeTranslateModeId = 0;
+            _activeProgramId = 0;
+            _activeExecutorId = 0;
+            _executorPhase = 0;
+        }
+
+        if (modeParams != null)
+        {
+            _bodyAxisToPoint = modeParams.bodyAxisToPoint;
+            _rtnDir = modeParams.rtnDir;
+        }
+        else
+        {
+            _bodyAxisToPoint = 0;
+            _rtnDir = 0;
+        }
+
+        ApplySyncedToLocals();
+    }
+
+
 }

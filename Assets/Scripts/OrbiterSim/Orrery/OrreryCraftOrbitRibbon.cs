@@ -5,6 +5,10 @@ using UnityEngine;
 [RequireComponent(typeof(MeshRenderer))]
 public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
 {
+
+    [Header("Display Enable")]
+    public bool displayEnabled = true;
+
     [Header("References")]
     public OrreryController orrery;
     public GuidanceNavCoreState nav;
@@ -46,6 +50,26 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
 
     [Header("Visibility")]
     public bool hideWhenInvalid = true;
+
+
+
+    [Header("Display Basis Stabilization")]
+    [Tooltip("Enter circular-display mode below this eccentricity.")]
+    public double circularDisplayEnterE = 0.01;
+
+    [Tooltip("Leave circular-display mode above this eccentricity.")]
+    public double circularDisplayExitE = 0.03;
+
+    [Tooltip("Angle change needed before updating cached display basis while circular.")]
+    public float circularBasisRefreshAngleDeg = 8.0f;
+
+    [Header("Ticking")]
+    [Tooltip("If true, ribbon updates from its own LateUpdate. If false, another system must call TickRibbon().")]
+    public bool useInternalLateUpdate = false;
+    private bool _displayCircularMode = false;
+    private bool _hasCachedDisplayBasis = false;
+    private Vector3 _cachedDisplayP = Vector3.right;
+    private Vector3 _cachedDisplayQ = Vector3.up;
 
     // ---------------------------------------------------------------------
     // Internal mesh data
@@ -93,8 +117,21 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
 
     void LateUpdate()
     {
+        if (!useInternalLateUpdate) return;
+        TickRibbon();
+    }
+    public void TickRibbon()
+    {
         if (orrery == null || nav == null || bodies == null || meshFilter == null)
             return;
+
+        if (!displayEnabled)
+        {
+            ClearMesh();
+            _hasPrevOrbit = false;
+            _hasPrevView = false;
+            return;
+        }
 
         if (!nav.valid || nav.muPrimary <= 0.0 || nav.p <= 0.0)
         {
@@ -105,6 +142,15 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
             return;
         }
 
+
+        if (orrery != null && orrery.focusMode == OrreryController.FOCUS_CRAFT)
+        {
+            ClearMesh();
+            _hasPrevOrbit = false;
+            _hasPrevView = false;
+            return;
+        }
+        
         float hz = maxRebuildHz;
         if (hz < 0.1f) hz = 0.1f;
         float minDt = 1.0f / hz;
@@ -217,7 +263,27 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
             return;
         }
 
-        double px, py, pz;
+
+        Vector3 hDir = new Vector3((float)wx, (float)wy, (float)wz);
+        hDir.Normalize();
+
+        UpdateDisplayCircularMode();
+        UpdateCachedDisplayBasis(hDir);
+
+        if (!_hasCachedDisplayBasis)
+        {
+            if (hideWhenInvalid) ClearMesh();
+            return;
+        }
+
+        double px = _cachedDisplayP.x;
+        double py = _cachedDisplayP.y;
+        double pz = _cachedDisplayP.z;
+
+        double qx = _cachedDisplayQ.x;
+        double qy = _cachedDisplayQ.y;
+        double qz = _cachedDisplayQ.z;
+
         if (!BuildStablePeriapsisDirectionD(wx, wy, wz, out px, out py, out pz))
         {
             if (hideWhenInvalid) ClearMesh();
@@ -225,19 +291,14 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
         }
 
         // Q = W x P
-        double qx = wy * pz - wz * py;
-        double qy = wz * px - wx * pz;
-        double qz = wx * py - wy * px;
+
         if (!NormalizeD(ref qx, ref qy, ref qz))
         {
             if (hideWhenInvalid) ClearMesh();
             return;
         }
 
-        // Rebuild P = Q x W for orthonormality
-        px = qy * wz - qz * wy;
-        py = qz * wx - qx * wz;
-        pz = qx * wy - qy * wx;
+
         if (!NormalizeD(ref px, ref py, ref pz))
         {
             if (hideWhenInvalid) ClearMesh();
@@ -506,7 +567,60 @@ public class OrreryCraftOrbitRibbon : UdonSharpBehaviour
         ry = r * (c * py + s * qy);
         rz = r * (c * pz + s * qz);
     }
+    private void UpdateDisplayCircularMode()
+    {
+        double e = nav.e;
 
+        if (_displayCircularMode)
+        {
+            if (e > circularDisplayExitE)
+                _displayCircularMode = false;
+        }
+        else
+        {
+            if (e < circularDisplayEnterE)
+                _displayCircularMode = true;
+        }
+    }
+
+    private void UpdateCachedDisplayBasis(Vector3 hDir)
+    {
+        Vector3 pCandidate = BuildStablePeriapsisDirection(hDir);
+        if (pCandidate.sqrMagnitude < 1e-12f)
+            return;
+
+        pCandidate.Normalize();
+        Vector3 qCandidate = Vector3.Cross(hDir, pCandidate);
+        if (qCandidate.sqrMagnitude < 1e-12f)
+            return;
+        qCandidate.Normalize();
+
+        if (!_hasCachedDisplayBasis)
+        {
+            _cachedDisplayP = pCandidate;
+            _cachedDisplayQ = qCandidate;
+            _hasCachedDisplayBasis = true;
+            return;
+        }
+
+        if (_displayCircularMode)
+        {
+            float dotP = Mathf.Clamp(Vector3.Dot(_cachedDisplayP, pCandidate), -1.0f, 1.0f);
+            float angP = Mathf.Acos(dotP) * Mathf.Rad2Deg;
+
+            // Only refresh circular display basis if it moved a lot
+            if (angP > circularBasisRefreshAngleDeg)
+            {
+                _cachedDisplayP = pCandidate;
+                _cachedDisplayQ = qCandidate;
+            }
+        }
+        else
+        {
+            _cachedDisplayP = pCandidate;
+            _cachedDisplayQ = qCandidate;
+        }
+    }
     private static bool NormalizeD(ref double x, ref double y, ref double z)
     {
         double m2 = x * x + y * y + z * z;

@@ -316,4 +316,27 @@ public class CraftNetState : UdonSharpBehaviour
         dockRelPos_SB = Vector3.zero;
         dock_qCraftToStation = Quaternion.identity;
     }
+
+    public void ResetPresentationState()
+    {
+        _accum = 0f;
+        _appliedRev = -1;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _accum = 0f;
+
+        _prevMode = _mode;
+        _prevPrimaryBodyId = _primaryBodyId;
+        _modeChangeNetT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
+
+        mode = _mode;
+        primaryBodyId = _primaryBodyId;
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+    }
+
+
 }

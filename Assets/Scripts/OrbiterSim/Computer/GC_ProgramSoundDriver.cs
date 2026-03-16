@@ -100,6 +100,9 @@ public class GC_ProgramSoundDriver : UdonSharpBehaviour
             case GC_RuntimeState.PROG_RELVEL_PRO:
             case GC_RuntimeState.PROG_RELVEL_RETRO:
             case GC_RuntimeState.PROG_EXEC_NODE:
+            case GC_RuntimeState.PROG_DOCK_POINT_PORT:
+            case GC_RuntimeState.PROG_DOCK_ALIGN_PORTS:
+
                 return true;
 
             default:

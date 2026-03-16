@@ -28,6 +28,9 @@ Shader "Orbiter/HologramBodyLit"
         _FlickerSpeed ("Flicker Speed", Float) = 6.0
 
         _StencilRef ("Stencil Ref", Float) = 64
+
+        _ClipCenterWorld ("Clip Center World", Vector) = (0,0,0,0)
+        _ClipRadiusWorld ("Clip Radius World", Float) = 1.0
     }
 
     SubShader
@@ -87,6 +90,9 @@ Shader "Orbiter/HologramBodyLit"
 
             float4 _SunDirWorld; // set from script, xyz used
 
+            float4 _ClipCenterWorld;
+            float _ClipRadiusWorld;
+
             struct appdata
             {
                 float4 vertex : POSITION;
@@ -118,6 +124,9 @@ Shader "Orbiter/HologramBodyLit"
 
             fixed4 frag(v2f i) : SV_Target
             {
+                float3 clipDelta = i.worldPos - _ClipCenterWorld.xyz;
+                clip(_ClipRadiusWorld - length(clipDelta));
+
                 float3 N = normalize(i.worldN);
                 float3 V = normalize(_WorldSpaceCameraPos.xyz - i.worldPos);
                 float3 L = normalize(_SunDirWorld.xyz);
@@ -129,25 +138,20 @@ Shader "Orbiter/HologramBodyLit"
                 fixed3 dayTex = tex2D(_MainTex, i.uv).rgb;
                 fixed3 nightTex = tex2D(_NightTex, i.uv).rgb;
 
-                // Day side
                 fixed3 litDay = dayTex * _Color.rgb * _Intensity * dayLight;
 
-                // Night lights only on dark side
                 float nightBase = saturate(1.0 - ndl);
                 float nightMask = saturate((nightBase - _NightThreshold) / max(1e-4, 1.0 - _NightThreshold));
                 nightMask = pow(nightMask, _NightSharpness);
 
                 fixed3 litNight = nightTex * _NightIntensity * nightMask;
 
-                // Hologram edge boost
                 float fres = pow(1.0 - saturate(dot(N, V)), _FresnelPower);
                 float fresBoost = 1.0 + fres * _FresnelStrength;
 
-                // Subtle scanline
                 float scan = sin((i.worldPos.y + _Time.y * _ScanlineScroll) * _ScanlineDensity) * 0.5 + 0.5;
                 float scanMod = lerp(1.0, scan, _ScanlineStrength);
 
-                // Subtle flicker
                 float flicker = 1.0 + _FlickerStrength *
                     sin(_Time.y * _FlickerSpeed + i.worldPos.x * 9.7 + i.worldPos.y * 5.3 + i.worldPos.z * 7.1);
 

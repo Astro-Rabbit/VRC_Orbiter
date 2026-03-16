@@ -150,7 +150,7 @@ public class SimManager : UdonSharpBehaviour
     public OrbitRenderer orbitline;
     public SkyBoxDriver skyrender;
     public StationRenderManager stationRender;
-
+    public CraftNetCabinAccel netCabinAccel;
     // -------------------------------------------------------------------------
     // Initialization helpers
     // -------------------------------------------------------------------------
@@ -160,6 +160,35 @@ public class SimManager : UdonSharpBehaviour
     public CraftInitializer_NearStation initialNearStation;
     public CraftInitializer_DockedToStation initialDocked;
 
+
+    // -------------------------------------------------------------------------
+    // Restart / scenario reset
+    // -------------------------------------------------------------------------
+
+    [Header("Scenario initializer")]
+    public SimScenarioInitializer scenarioInitializer;
+
+    [Header("Restart / Reset")]
+    [Tooltip("If true, restart transaction is in progress and normal sim ticking is suppressed.")]
+    public bool isRestarting = false;
+
+    [Tooltip("If true, instance master has locked scenario resets.")]
+    public bool resetLockedByMaster = false;
+
+    [Tooltip("Optional: if true, Start() will run the selected startup scenario through the shared restart pipeline.")]
+    public bool useSharedStartupRestart = false;
+
+    [Tooltip("Which authored startup scenario INDEX to use.")]
+    public int startupScenarioIndex = 0;
+
+
+    [Header("Restart runtime clears")]
+    public GC_RuntimeState gcRuntime;
+    public NodePlanState nodePlan;
+    public GuidanceNavContactsState contactsState;
+    public GC_Core gcCore;
+    public GC_RuntimeNetState gcRuntimeNet;
+    public GC_NodePlanNetState nodePlanNet;
     // -------------------------------------------------------------------------
     // Internal state
     // -------------------------------------------------------------------------
@@ -179,26 +208,33 @@ public class SimManager : UdonSharpBehaviour
 
     void Start()
     {
-        if (initialDocked != null)
+        if (!useSharedStartupRestart)
         {
-            bool okDocked = initialDocked.InitializeNow();
-            if (okDocked) return;
+            if (initialDocked != null)
+            {
+                bool okDocked = initialDocked.InitializeNow();
+                if (okDocked) return;
+            }
+
+            if (initialNearStation != null)
+            {
+                bool okNear = initialNearStation.InitializeNow();
+                if (okNear) return;
+            }
+
+            if (InitialConic != null)
+                InitialConic.InitializeNow();
+
+            return;
         }
 
-        if (initialNearStation != null)
-        {
-            bool okNear = initialNearStation.InitializeNow();
-            if (okNear) return;
-        }
-
-        if (InitialConic != null)
-            InitialConic.InitializeNow();
+        if (Networking.IsOwner(gameObject))
+            RestartToScenarioIndex_Internal(startupScenarioIndex, true);
     }
 
     void Update()
     {
-        if (paused || clock == null) return;
-
+        if (paused || isRestarting || clock == null) return;
         double Tmission = clock.Now();
 
         bool hasNetCore = (netCore != null);
@@ -324,7 +360,7 @@ public class SimManager : UdonSharpBehaviour
 
     private void FixedUpdate()
     {
-        if (paused || clock == null || netCore == null || craft == null)
+        if (paused || isRestarting || clock == null || netCore == null || craft == null)
             return;
 
         bool isOwner = Networking.IsOwner(gameObject);
@@ -474,6 +510,19 @@ public class SimManager : UdonSharpBehaviour
         // Publish once per FixedUpdate; individual net scripts remain internally rate-limited
         if (netCore != null)
             netCore.PublishCore();
+
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
+        {
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.PublishAccel();
+        }
 
         if (netKin != null)
         {
@@ -652,6 +701,19 @@ public class SimManager : UdonSharpBehaviour
 
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
+        {
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.ForcePublishAccel();
+        }
+
         if (netKin != null)
         {
             netKin.currentOwnerSimT = _simT;
@@ -682,6 +744,9 @@ public class SimManager : UdonSharpBehaviour
             netConic.ForcePublishConic();
 
         netCore.SetMode(MODE_RAILS, pid, true);
+
+        if (netCabinAccel != null)
+            netCabinAccel.ForceZeroAccel(T);
 
         if (netAtt != null)
             netAtt.ForcePublishAttitude();
@@ -877,6 +942,133 @@ public class SimManager : UdonSharpBehaviour
     }
 
     // -------------------------------------------------------------------------
+    // Restart helpers
+    // -------------------------------------------------------------------------
+
+    public void SetResetLockByMaster(bool locked)
+    {
+        if (!Networking.IsMaster) return;
+        resetLockedByMaster = locked;
+    }
+
+    public void RestartToScenarioIndex(int scenarioIndex)
+    {
+        RestartToScenarioIndex_Internal(scenarioIndex, false);
+    }
+
+    private void RestartToScenarioIndex_Internal(int scenarioIndex, bool ignoreResetPermission)
+    {
+        if (!ignoreResetPermission && !CanLocalUserReset()) return;
+        if (isRestarting) return;
+
+        isRestarting = true;
+
+        BeginRestartTransaction();
+
+        bool ok = ApplyAuthoredScenario(scenarioIndex);
+
+        EndRestartTransaction(ok);
+    }
+
+    private void BeginRestartTransaction()
+    {
+        paused = true;
+
+        _settleAccum = 0f;
+        _simT = 0.0;
+        _simTValid = false;
+        _accumSim = 0.0;
+
+        if (clock != null)
+            clock.ResetScenarioTime(0.0, 1.0);
+
+        if (netAtt != null)
+            netAtt.ResetPresentationState();
+
+        if (netCore != null)
+            netCore.ResetPresentationState();
+
+        if (netKin != null)
+            netKin.ResetPresentationState();
+
+        if (dock != null)
+            dock.ResetState();
+
+        if (dockingComp != null)
+        {
+            dockingComp.requestUndock = false;
+            dockingComp.requestLeaveDockedToRails = false;
+            dockingComp.requestEnterDocked = false;
+        }
+
+        if (gcCore != null)
+            gcCore.ResetForScenario(0.0);
+        else if (gcRuntime != null)
+            gcRuntime.ResetState(0.0);
+
+        if (nodePlan != null)
+            nodePlan.ClearAll();
+
+        if (gcRuntimeNet != null)
+            gcRuntimeNet.ResetPresentationState();
+
+        if (nodePlanNet != null)
+            nodePlanNet.ResetPresentationState();
+
+        if (contactsState != null)
+        {
+            contactsState.ClearFull();
+            contactsState.selectedStationIndex = -1;
+            contactsState.selectedStationDockPortIndex = 0;
+            contactsState.selectedCraftDockPortIndex = 0;
+            contactsState.selValid = false;
+        }
+    }
+
+    private bool ApplyAuthoredScenario(int scenarioIndex)
+    {
+        if (scenarioInitializer == null) return false;
+        return scenarioInitializer.ApplyScenarioByIndex(scenarioIndex, 0.0);
+    }
+
+    private void EndRestartTransaction(bool ok)
+    {
+        
+        if (ok)
+        {
+            if (netCore != null)
+                netCore.ResetSyncedStateFromCurrent();
+
+            if (netAtt != null)
+                netAtt.ResetSyncedStateFromCurrent();
+
+            if (gcRuntimeNet != null)
+                gcRuntimeNet.ResetSyncedStateFromCurrent();
+
+            if (nodePlanNet != null)
+                nodePlanNet.ResetSyncedStateFromCurrent();
+
+            if (gcRuntimeNet != null)
+                gcRuntimeNet.ForcePublish();
+
+            if (nodePlanNet != null)
+                nodePlanNet.ForcePublish();
+
+            if (netKin != null)
+            {
+                netKin.currentOwnerSimT = 0.0;
+                netKin.ResetSyncedStateFromCurrent();
+            }
+
+            ForcePublishAuthoritativeState();
+        }
+
+        paused = false;
+        isRestarting = false;
+    }
+
+
+    // -------------------------------------------------------------------------
     // Small helpers
     // -------------------------------------------------------------------------
 
@@ -892,6 +1084,12 @@ public class SimManager : UdonSharpBehaviour
         return true;
     }
 
+    public bool CanLocalUserReset()
+    {
+        if (!Networking.IsOwner(gameObject)) return false;
+        if (resetLockedByMaster && !Networking.IsMaster) return false;
+        return true;
+    }
     private void ApplyRender()
     {
         if (orbit != null) orbit.Evaluate();

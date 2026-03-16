@@ -164,15 +164,74 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
     {
         if (!HasAuthority()) return;
 
-        CaptureFromPlan();
+        bool changed = CaptureFromPlan();
+        if (!changed) _rev++;
 
-        _rev++;
         PublishNow();
     }
 
     public override void OnDeserialization()
     {
         if (_rev == _appliedRev) return;
+        ApplySyncedToPlan();
+    }
+
+
+    public void ResetPresentationState()
+    {
+        _publishCooldown = 0f;
+        _heartbeatAccum = 0f;
+        _appliedRev = -1;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _publishCooldown = 0f;
+        _heartbeatAccum = 0f;
+
+        EnsureNetArrays();
+
+        if (plan != null)
+        {
+            plan.EnsureArrays();
+
+            _activeIndex = plan.activeIndex;
+
+            int n = plan.maxNodes;
+            for (int i = 0; i < n; i++)
+            {
+                _status[i] = plan.status[i];
+                _trigType[i] = plan.trigType[i];
+                _triggerTime[i] = plan.triggerTime[i];
+                _triggerNuRad[i] = plan.triggerNuRad[i];
+                _dV_E[i] = plan.dV_E[i];
+                _bodyAxisToPoint[i] = plan.bodyAxisToPoint[i];
+                _preSlewLeadSec[i] = plan.preSlewLeadSec[i];
+                _postHoldSec[i] = plan.postHoldSec[i];
+                _burnDurationSec[i] = plan.burnDurationSec[i];
+                _burnThrottle01[i] = plan.burnThrottle01[i];
+            }
+        }
+        else
+        {
+            _activeIndex = -1;
+
+            int n = _status.Length;
+            for (int i = 0; i < n; i++)
+            {
+                _status[i] = NodePlanState.STATUS_EMPTY;
+                _trigType[i] = NodePlanState.TRIG_TIME;
+                _triggerTime[i] = 0.0;
+                _triggerNuRad[i] = 0.0;
+                _dV_E[i] = Vector3.zero;
+                _bodyAxisToPoint[i] = 2;
+                _preSlewLeadSec[i] = 30f;
+                _postHoldSec[i] = 5f;
+                _burnDurationSec[i] = 0f;
+                _burnThrottle01[i] = 0f;
+            }
+        }
+
         ApplySyncedToPlan();
     }
 

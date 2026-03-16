@@ -79,6 +79,9 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public const byte PROG_HOLD_ANTINORM = 10;
     public const byte PROG_RELVEL_PRO   = 11;
     public const byte PROG_RELVEL_RETRO= 12;
+
+    public const byte PROG_DOCK_POINT_PORT  = 13;
+    public const byte PROG_DOCK_ALIGN_PORTS = 14;
     public const byte PROG_EXEC_NODE     = 20; // executor is actively controlling
 
 

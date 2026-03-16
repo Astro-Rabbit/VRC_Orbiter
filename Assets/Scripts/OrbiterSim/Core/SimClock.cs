@@ -314,4 +314,43 @@ public class SimClock : UdonSharpBehaviour
 
         _appliedRevision = _revision;
     }
+
+    /// <summary>
+    /// Owner-only: hard-reset the mission clock to a specific sim time and warp,
+    /// anchored at the current server time. This is used for scenario restarts.
+    /// </summary>
+    public void ResetScenarioTime(double newSimTime, double newTimeScale)
+    {
+        if (newTimeScale < 0.0) newTimeScale = 0.0;
+
+        timeScale = newTimeScale;
+
+        if (!useNetworkTime)
+        {
+            simTime = newSimTime;
+            lastSimDt = 0.0;
+            return;
+        }
+
+        if (!HasSimAuthority()) return;
+        if (!Networking.IsOwner(gameObject)) return;
+
+        double serverNow = Networking.GetServerTimeInSeconds();
+
+        _epochServerTime = serverNow;
+        _epochSimTime = newSimTime;
+        _timeScale = newTimeScale;
+
+        if (_revision < 0) _revision = 0;
+        else _revision++;
+
+        _appliedRevision = _revision;
+        simTime = newSimTime;
+        lastSimDt = 0.0;
+        _hbAccum = 0f;
+
+        RequestSerialization();
+    }
+
+
 }
