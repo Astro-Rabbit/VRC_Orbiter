@@ -25,6 +25,7 @@ public class MFDTransferPage : MFDPage
     public ConicPropagator propagator;
 
     [Header("Display Data")]
+    public bool hasTarget = false;
     public double tgtPx;
     public double tgtPy;
     public double tfrPx;
@@ -73,6 +74,12 @@ public class MFDTransferPage : MFDPage
 
     void Update()
     {
+        if (tgt.conic == null) {
+            hasTarget = false;
+            return;
+        }
+        hasTarget = true;
+
         bool conicsUpdated = false;
         bool transferUpdated = false;
 
@@ -91,7 +98,7 @@ public class MFDTransferPage : MFDPage
         }
 
         calcBurnTime = Math.Max(burnTime, clock.simTime);
-        if (burnChanged || (calcBurnTime != burnTime && burnDv > 0)) {
+        if (burnChanged || conicsUpdated || (calcBurnTime != burnTime && burnDv > 0)) {
             burnChanged = false;
 
             propagator.conic = src.conic;
@@ -300,6 +307,18 @@ public class MFDTransferPage : MFDPage
 
     public override void DrawDisplay(MFD display)
     {
+        if (!hasTarget) {
+            display.ClearGraphics();
+            display.ClearText();
+            display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
+
+            string msg = "NO TARGET SELECTED";
+            display.DrawText(msg, 10, 24 - msg.Length/2, Color.green);
+
+            display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
+            return;
+        }
+
         display.ClearGraphics();
         const float orbitSize = 0.4f;
         float scale = orbitSize / (float)src.a;

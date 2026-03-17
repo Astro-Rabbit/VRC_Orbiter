@@ -24,7 +24,7 @@ public class MFDMenuPage : MFDPage
             string name = pageNames[i];
             int len = name.Length;
 
-            display.DrawVerticalText(name, (2*i + 1) * MFD.TEXT_ROWS / (5*2) - 2, 0, Color.white);
+            display.DrawVerticalText(name, i * 5, 0, Color.white);
         }
     }
 }
