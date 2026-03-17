@@ -12,6 +12,10 @@ public class PenUpdater : UdonSharpBehaviour
     public VRC_Pickup PenRPickup;
     public GameObject PenLMesh;
     public GameObject PenRMesh;
+
+    public bool PickupableL;
+    public bool PickupableR;
+
     [Header("Use Filter")]
     public bool useFilter;
 
@@ -164,13 +168,50 @@ public class PenUpdater : UdonSharpBehaviour
         );
     }
     // --- Existing UI / Pickup Methods ---
-    public void TogglePickup(VRC_Pickup pen) { pen.pickupable = !pen.pickupable; }
-    public void EnterPickUpable(VRC_Pickup pen) { pen.pickupable = true; }
-    public void ExitPickUpable(VRC_Pickup pen) { pen.pickupable = false; }
-    public void EnterLeft() => EnterPickUpable(PenLPickup);
-    public void ExitLeft() => ExitPickUpable(PenLPickup);
-    public void EnterRight() => EnterPickUpable(PenRPickup);
-    public void ExitRight() => ExitPickUpable(PenRPickup);
+    public void TogglePickup(VRC_Pickup pen)
+    {
+        pen.pickupable = !pen.pickupable;
+        PickupableL = pen.pickupable;
+        PickupableR = pen.pickupable;
+    }
+    public void EnterPickUpable(VRC_Pickup pen)
+    {
+        pen.pickupable = true;
+        PickupableL = pen.pickupable;
+        PickupableR = pen.pickupable;
+    }
+    public void ExitPickUpable(VRC_Pickup pen)
+    {
+        pen.pickupable = false;
+        PickupableL = pen.pickupable;
+        PickupableR = pen.pickupable;
+    }
+    public void EnterLeft()
+    {
+        EnterPickUpable(PenLPickup);
+    }
+    public void ExitLeft()
+    {
+        ExitPickUpable(PenLPickup);
+    }
+
+    public void EnterRight()
+    {
+        EnterPickUpable(PenRPickup);
+    }
+    public void ExitRight()
+    {
+        ExitPickUpable(PenRPickup);
+    }
+
+    public void ToggleLeft()
+    {
+        TogglePickup(PenLPickup);
+    }
+    public void ToggleRight()
+    {
+        TogglePickup(PenRPickup);
+    }
 
     public void toggleFilter()
     {

@@ -55,6 +55,9 @@ public class TabletPen : UdonSharpBehaviour
 
     private Object _lastHapticTarget; // Tracks Colliders or TabletButtons
 
+    public float PenTouchOffset = 0f;
+
+    private bool _wasTriggerHeld;
 
     void Start()
     {
@@ -83,7 +86,7 @@ public class TabletPen : UdonSharpBehaviour
 
         bool isVR = _localPlayer.IsUserInVR();
         bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
-
+        bool triggerJustPressed = triggerHeld && !_wasTriggerHeld;
         // 1. IF LOCKED (KNOB/MFD)
         if (_isLocked)
         {
@@ -107,6 +110,23 @@ public class TabletPen : UdonSharpBehaviour
         }
 
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
+
+        if (PenMesh != null)
+        {
+            if (currentlyHitting)
+            {
+                // hit.distance is world-space. We divide by localScale.y to get the 
+                // correct local-space translation along the Y axis.
+                // We use negative because the ray is cast along -transform.up.
+                float localExtension = -(hit.distance / transform.localScale.y);
+                PenMesh.transform.localPosition = new Vector3(0, localExtension + PenTouchOffset, 0);
+            }
+            else
+            {
+                // Reset to zero if nothing is hit
+                PenMesh.transform.localPosition = Vector3.zero;
+            }
+        }
 
         // --- Haptic Hover Logic Start ---
         Object currentHitComp = null;
@@ -143,7 +163,8 @@ public class TabletPen : UdonSharpBehaviour
             MFDSwitch mfdSwitch = hit.collider.GetComponent<MFDSwitch>();
 
             // A. Handle Locked Objects (Knobs/MFD)
-            if (triggerHeld && (knob != null || mfdBtn != null || mfdSwitch != null))
+            //if (triggerHeld && (knob != null || mfdBtn != null || mfdSwitch != null))
+            if (triggerJustPressed && (knob != null || mfdBtn != null || mfdSwitch != null))
             {
 
                 // Inside TabletPen.cs -> AttemptCapture
@@ -199,11 +220,13 @@ public class TabletPen : UdonSharpBehaviour
         {
             ClearTabletInteraction();
         }
+        _wasTriggerHeld = triggerHeld;
     }
+    public bool TriggerRequiredForTablet = true;
 
     private void HandleTabletInteraction(TabletButton hovered, bool triggerHeld)
     {
-        // Hover Logic
+        // Hover Logic (Remains the same)
         if (hovered != _lastHoveredTabletBtn)
         {
             if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
@@ -211,8 +234,12 @@ public class TabletPen : UdonSharpBehaviour
             _lastHoveredTabletBtn = hovered;
         }
 
+        // NEW: Check for interaction condition
+        // If Trigger is NOT required, we treat the 'touch' as an automatic press
+        bool isInteracting = TriggerRequiredForTablet ? triggerHeld : (hovered != null);
+
         // Press Logic
-        if (triggerHeld)
+        if (isInteracting)
         {
             if (!_wasTouchingTablet)
             {
@@ -473,7 +500,7 @@ public class TabletPen : UdonSharpBehaviour
     public void SetHoveredPickup(TabletPenPickup pickup)
     {
         // Don't change hover targets while we are actively holding something
-        if (_heldPickup != null) return;
+       // if (_heldPickup != null) return;
         _hoveredPickup = pickup;
     }
 
