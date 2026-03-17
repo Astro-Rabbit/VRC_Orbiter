@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Skybox_SkySTarOnly_OrbiterEcl
-  m_Shader: {fileID: 4800000, guid: 7ab48199365a68443b9203f639b6bb64, type: 3}
+  m_Shader: {fileID: 4800000, guid: 5f487f1fa319d8e40968a6fa3ecc01fd, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -23,6 +23,10 @@ Material:
   m_SavedProperties:
     serializedVersion: 3
     m_TexEnvs:
+    - _EarthAlbedo:
+        m_Texture: {fileID: 2800000, guid: 6c2127442a36658468abdc8da29e2a25, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MoonAlbedo:
         m_Texture: {fileID: 2800000, guid: c27b840437571ad49a63ed534ef1fd7e, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -53,9 +57,16 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _EarthAmbient: 0.1
+    - _EarthFlipU: 0
+    - _EarthFlipV: 1
+    - _EarthGamma: 1
+    - _EarthLonOffsetDeg: 180
+    - _EarthRadiusM: 6371000
+    - _EarthShadowPow: 1
     - _MWbright: 0.06
     - _MoonAmbient: 0.002
-    - _MoonFlipU: 0
+    - _MoonFlipU: 1
     - _MoonFlipV: 0
     - _MoonGamma: 1
     - _MoonLonOffsetDeg: 270
@@ -69,7 +80,7 @@ Material:
     - _SpikeSharpness: 80
     - _SpikeStrength: 2.52
     - _SpikeWidth: 0.0012
-    - _SunAngRad: 0.0046430505
+    - _SunAngRad: 0.0046773986
     - _SunEdgeSoft: 0.000002
     - _SunGlow: 0.06
     - _SunGlowPow: 3
@@ -79,11 +90,14 @@ Material:
     - _scaleFactor: 0
     - _sigma: 90
     m_Colors:
-    - _CraftBodyToEq: {r: -0.49467343, g: -0.50391966, b: 0.4974158, a: 0.5039253}
+    - _CraftBodyToEq: {r: 0, g: 0, b: 0, a: 1}
+    - _EarthAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
+    - _EarthBodyToEcl: {r: -0.10811632, g: 0.17195868, b: 0.8289261, a: 0.52117425}
+    - _EarthPosEcl: {r: 8188396.5, g: 1810573.8, b: 739812.75, a: 0}
     - _MoonAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
-    - _MoonBodyToEcl: {r: 0.039952323, g: -0.022395948, b: 0.13464125, a: 0.9898353}
+    - _MoonBodyToEcl: {r: -0.0020557095, g: -0.04553712, b: 0.9449823, a: 0.32392997}
     - _MoonColor: {r: 1, g: 1, b: 1, a: 0}
-    - _MoonPosEcl: {r: -4491490, g: -69763.805, b: -497.1329, a: 0}
+    - _MoonPosEcl: {r: 313840540, g: -235090110, b: -9169599, a: 0}
     - _SunColor: {r: 1, g: 1, b: 1, a: 1}
-    - _SunDirEcl: {r: 0.9700132, g: 0.24305218, b: 0.00014432226, a: 0}
+    - _SunDirEcl: {r: 0.99883837, g: -0.048186272, b: 0.0000049694468, a: 0}
   m_BuildTextureStacks: []

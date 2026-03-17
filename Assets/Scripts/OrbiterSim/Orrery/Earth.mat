@@ -24,17 +24,17 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: 21a3bf35533752e48a2e6332a01c2b9a, type: 3}
+        m_Texture: {fileID: 2800000, guid: ee983b0a85fcf5a46b20e7e849fab287, type: 3}
         m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
+        m_Offset: {x: 0.5, y: 0}
     - _NightTex:
         m_Texture: {fileID: 2800000, guid: 01100a7ce30d0d5449f8b173183161d2, type: 3}
         m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
+        m_Offset: {x: 0.5, y: 0}
     m_Ints: []
     m_Floats:
     - _Alpha: 1
-    - _Ambient: 0.2
+    - _Ambient: 0
     - _ClipRadiusWorld: 1
     - _DiffuseStrength: 1
     - _FlickerSpeed: 5
@@ -44,8 +44,8 @@ Material:
     - _Intensity: 1
     - _LongitudeOffset: 0
     - _NightIntensity: 1
-    - _NightSharpness: 2
-    - _NightThreshold: 0.2
+    - _NightSharpness: 22.23
+    - _NightThreshold: 0.234
     - _ScanlineDensity: 1000
     - _ScanlineScroll: 0.01
     - _ScanlineStrength: 0.091

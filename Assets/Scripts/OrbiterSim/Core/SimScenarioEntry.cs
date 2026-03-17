@@ -17,7 +17,7 @@ public class SimScenarioEntry : UdonSharpBehaviour
     public double scenarioJd0 = 2460000.5;
 
     [Header("Scenario refs")]
-    public OrbitInitializerFromPrimaryElements orbitScenario;
+    public CraftInitializer_FromPrimaryOrbitElements orbitScenario;
     public CraftInitializer_NearStation nearStationScenario;
     public CraftInitializer_DockedToStation dockedScenario;
 }

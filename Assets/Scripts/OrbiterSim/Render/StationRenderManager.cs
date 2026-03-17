@@ -39,6 +39,11 @@ public class StationRenderManager : UdonSharpBehaviour
     [Tooltip("Optional global model fix applied after qTargetInB (rare; prefer per-station prefab).")]
     public Quaternion globalModelFix = Quaternion.identity;
 
+    [Header("Body presentation mapping")]
+    [Tooltip("Match rendered body-frame convention used by the skybox/cockpit presentation.")]
+    public bool flipPresentationX = true;
+
+
     [Header("Visual smoothing")]
     [Tooltip("If true, smooth rendered station relative position in craft/body space.")]
     public bool smoothRelativePosition = true;
@@ -54,6 +59,8 @@ public class StationRenderManager : UdonSharpBehaviour
 
     [Tooltip("Rotation smoothing gain in 1/seconds. Higher = tighter.")]
     public float rotationLerpRate = 12f;
+
+
 
     [Header("Debug")]
     public bool logSwitches = false;
@@ -296,16 +303,60 @@ public class StationRenderManager : UdonSharpBehaviour
 
     private void ApplyPose(Transform stationRoot, Vector3 drB, Quaternion qTargetInB)
     {
-        // WORLD == craft BODY, anchored at craftCG
+        Vector3 drRender = MapBodyVectorToRender(drB);
+        Quaternion qRender = MapBodyRotationToRender(qTargetInB);
+
+        // WORLD == craft BODY presentation frame, anchored at craftCG
         if (useWorldSpace)
         {
-            stationRoot.position = craftCG.position + drB;
-            stationRoot.rotation = qTargetInB;
+            stationRoot.position = craftCG.position + drRender;
+            stationRoot.rotation = qRender;
         }
         else
         {
-            stationRoot.localPosition = drB;
-            stationRoot.localRotation = qTargetInB;
+            stationRoot.localPosition = drRender;
+            stationRoot.localRotation = qRender;
         }
     }
+
+    private Vector3 MapBodyVectorToRender(Vector3 v)
+    {
+        if (!flipPresentationX) return v;
+        return new Vector3(-v.x, v.y, v.z);
+    }
+
+    private Quaternion MapBodyRotationToRender(Quaternion qBody)
+    {
+        if (!flipPresentationX) return qBody;
+
+        // Take body-frame basis vectors from the sim/body quaternion
+        Vector3 x = qBody * Vector3.right;
+        Vector3 y = qBody * Vector3.up;
+        Vector3 z = qBody * Vector3.forward;
+
+        // Apply the same body-presentation mapping used for positions
+        x = MapBodyVectorToRender(x);
+        y = MapBodyVectorToRender(y);
+        z = MapBodyVectorToRender(z);
+
+        // Rebuild a proper rotation from mapped basis
+        x = SafeNormalize(x, Vector3.right);
+        y = SafeNormalize(y, Vector3.up);
+        z = SafeNormalize(z, Vector3.forward);
+
+        // Re-orthonormalize
+        z = SafeNormalize(z, Vector3.forward);
+        x = SafeNormalize(Vector3.Cross(y, z), Vector3.right);
+        y = SafeNormalize(Vector3.Cross(z, x), Vector3.up);
+
+        return Quaternion.LookRotation(z, y);
+    }
+
+    private Vector3 SafeNormalize(Vector3 v, Vector3 fallback)
+    {
+        float m = v.magnitude;
+        if (m < 1e-8f) return fallback;
+        return v / m;
+    }
+
 }

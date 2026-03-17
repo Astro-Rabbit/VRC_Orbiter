@@ -24,9 +24,9 @@ Material:
     serializedVersion: 3
     m_TexEnvs:
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: c27b840437571ad49a63ed534ef1fd7e, type: 3}
+        m_Texture: {fileID: 2800000, guid: 7fb6ce60ca4afcf48a814cf7ba33be26, type: 3}
         m_Scale: {x: 1, y: 1}
-        m_Offset: {x: 0, y: 0}
+        m_Offset: {x: 0.5, y: 0}
     - _NightTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -35,6 +35,7 @@ Material:
     m_Floats:
     - _Alpha: 1
     - _Ambient: 0
+    - _ClipRadiusWorld: 1
     - _DiffuseStrength: 1
     - _FlickerSpeed: 5
     - _FlickerStrength: 0.1
@@ -50,5 +51,6 @@ Material:
     - _ScanlineStrength: 0.091
     - _StencilRef: 64
     m_Colors:
+    - _ClipCenterWorld: {r: 0, g: 0, b: 0, a: 0}
     - _Color: {r: 0.8820755, g: 0.98507345, b: 1, a: 1}
   m_BuildTextureStacks: []

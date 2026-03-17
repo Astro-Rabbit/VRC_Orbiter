@@ -34,6 +34,10 @@ public class ADIDriver : UdonSharpBehaviour
     public CraftAttitudeState attitude;
     public GuidanceNavCoreState nav;
 
+    [Header("ADI Ball Calibration")]
+    public Vector3 ballEulerOffset = Vector3.zero;
+    public bool invertBallRotation = false;
+
     [Header("Update")]
     [Tooltip("If true, convert source rad/s to deg/s before mapping to the needle scale.")]
     public bool useDegreesPerSecond = true;
@@ -153,14 +157,21 @@ public class ADIDriver : UdonSharpBehaviour
         );
 
 
-    if (_ballMat != null)
-    {
-        Quaternion q = ComputeBallQuaternion();
-        _ballMat.SetVector(
-            ballRotationProperty,
-            new Vector4(q.x, q.y, q.z, q.w)
-        );
-    }
+        if (_ballMat != null)
+        {
+            Quaternion q = ComputeBallQuaternion();
+
+            if (invertBallRotation)
+                q = Quaternion.Inverse(q);
+
+            Quaternion qOffset = Quaternion.Euler(ballEulerOffset);
+            q = q * qOffset;
+
+            _ballMat.SetVector(
+                ballRotationProperty,
+                new Vector4(q.x, q.y, q.z, q.w)
+            );
+        }
 
 
     }
@@ -274,8 +285,8 @@ public class ADIDriver : UdonSharpBehaviour
         Quaternion qBE = nav.qBE;
         Quaternion qEB = Quaternion.Inverse(qBE);
 
-        Vector3 That_B = qEB * nav.That_E;
-        Vector3 Rhat_B = qEB * nav.Rhat_E;
+        Vector3 That_B = -(qEB * nav.That_E);
+        Vector3 Rhat_B = -(qEB * nav.Rhat_E);
         Vector3 Nhat_B = qEB * nav.Nhat_E;
 
         That_B.Normalize();

@@ -49,6 +49,10 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     [Tooltip("Fallback normal dir in body frame.")]
     public Vector3 fallbackNormal_B = new Vector3(0f, 1f, 0f);
 
+    [Header("Body presentation mapping")]
+    [Tooltip("Match the rendered body-frame convention used by skybox / station rendering.")]
+    public bool flipPresentationX = true;
+
     [Header("Font")]
     public HudFontData fontData;
 
@@ -199,7 +203,6 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             }
             else
             {
-                // Non-orbit/non-dock primary HUD
                 UpdateDockPortMarker(Vector3.zero, Quaternion.identity, Vector3.forward, false);
                 UpdateDockGates(Vector3.zero, Quaternion.identity, Vector3.forward, false);
             }
@@ -347,6 +350,10 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             else normal_B = Vector3.up;
         }
 
+        prograde_B = MapBodyVectorToRender(prograde_B);
+        radialOut_B = MapBodyVectorToRender(radialOut_B);
+        normal_B = MapBodyVectorToRender(normal_B);
+
         targetMat.SetVector("_ProgradeDir_B", new Vector4(prograde_B.x, prograde_B.y, prograde_B.z, 0f));
         targetMat.SetVector("_RadialOutDir_B", new Vector4(radialOut_B.x, radialOut_B.y, radialOut_B.z, 0f));
         targetMat.SetVector("_NormalDir_B", new Vector4(normal_B.x, normal_B.y, normal_B.z, 0f));
@@ -367,6 +374,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 (float)contacts.sel_dry_B,
                 (float)contacts.sel_drz_B
             );
+            targetPos_B = MapBodyVectorToRender(targetPos_B);
 
             float targetPosSq = targetPos_B.sqrMagnitude;
             if (targetPosSq > 1e-8f)
@@ -392,8 +400,9 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             );
 
             Vector3 relVel_B = -RotateEToBody(qBE_forRel, relVel_E);
-            float relVelSq = relVel_B.sqrMagnitude;
+            relVel_B = MapBodyVectorToRender(relVel_B);
 
+            float relVelSq = relVel_B.sqrMagnitude;
             if (relVelSq > 1e-10f)
             {
                 relVelValid = true;
@@ -454,8 +463,11 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             Quaternion qTargetPortInB = contacts.qTargetPortInB0;
             Vector3 portForward_B = qTargetPortInB * Vector3.forward;
 
+            Vector3 dockErr_Render = MapBodyVectorToRender(dockErr_B);
+            Vector3 portForward_Render = MapBodyVectorToRender(portForward_B);
+
             dockValid = true;
-            dockRangeMeters = dockErr_B.magnitude;
+            dockRangeMeters = dockErr_Render.magnitude;
 
             Quaternion qBE_forRel = Quaternion.identity;
             if (nav != null && nav.valid)
@@ -468,6 +480,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
             );
 
             Vector3 relVel_B = -RotateEToBody(qBE_forRel, relVel_E);
+            relVel_B = MapBodyVectorToRender(relVel_B);
 
             float relVelSq = relVel_B.sqrMagnitude;
             if (relVelSq > 1e-10f)
@@ -483,7 +496,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 dockRelSpeedMps = Mathf.Sqrt(relVelSq);
             }
 
-            dockClosureMps = Vector3.Dot(relVel_B, -portForward_B);
+            dockClosureMps = Vector3.Dot(relVel_B, -portForward_Render);
 
             UpdateDockPortMarker(targetPortPos_B, qTargetPortInB, portForward_B, true);
             UpdateDockGates(targetPortPos_B, qTargetPortInB, portForward_B, true);
@@ -759,6 +772,46 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         return qEB * vE;
     }
 
+    // ============================================================
+    // Body presentation mapping
+    // ============================================================
+
+    private Vector3 MapBodyVectorToRender(Vector3 v)
+    {
+        if (!flipPresentationX) return v;
+        return new Vector3(-v.x, v.y, v.z);
+    }
+
+    private Quaternion MapBodyRotationToRender(Quaternion qBody)
+    {
+        if (!flipPresentationX) return qBody;
+
+        Vector3 x = qBody * Vector3.right;
+        Vector3 y = qBody * Vector3.up;
+        Vector3 z = qBody * Vector3.forward;
+
+        x = MapBodyVectorToRender(x);
+        y = MapBodyVectorToRender(y);
+        z = MapBodyVectorToRender(z);
+
+        x = SafeNormalize(x, Vector3.right);
+        y = SafeNormalize(y, Vector3.up);
+        z = SafeNormalize(z, Vector3.forward);
+
+        z = SafeNormalize(z, Vector3.forward);
+        x = SafeNormalize(Vector3.Cross(y, z), Vector3.right);
+        y = SafeNormalize(Vector3.Cross(z, x), Vector3.up);
+
+        return Quaternion.LookRotation(z, y);
+    }
+
+    private Vector3 SafeNormalize(Vector3 v, Vector3 fallback)
+    {
+        float m = v.magnitude;
+        if (m < 1e-8f) return fallback;
+        return v / m;
+    }
+
     private void UpdateDockGates(Vector3 portPos_B, Quaternion portRot_B, Vector3 portForward_B, bool visible)
     {
         if (dockGateRoots == null) return;
@@ -766,6 +819,10 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         int gateCount = dockGateRoots.Length;
         int distCount = (dockGateDistancesMeters != null) ? dockGateDistancesMeters.Length : 0;
         int n = (gateCount < distCount) ? gateCount : distCount;
+
+        Vector3 portPos_Render = MapBodyVectorToRender(portPos_B);
+        Quaternion portRot_Render = MapBodyRotationToRender(portRot_B);
+        Vector3 portForward_Render = MapBodyVectorToRender(portForward_B).normalized;
 
         for (int i = 0; i < gateCount; i++)
         {
@@ -785,10 +842,10 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 gate.gameObject.SetActive(true);
 
             float d = dockGateDistancesMeters[i];
-            Vector3 gatePos_B = portPos_B + portForward_B.normalized * (d + dockGateForwardOffset);
+            Vector3 gatePos_B = portPos_Render + portForward_Render * (d + dockGateForwardOffset);
 
             gate.localPosition = gatePos_B;
-            gate.localRotation = portRot_B;
+            gate.localRotation = portRot_Render;
         }
     }
 
@@ -806,16 +863,20 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         if (!dockPortMarkerRoot.gameObject.activeSelf)
             dockPortMarkerRoot.gameObject.SetActive(true);
 
-        Vector3 markerPos_B = portPos_B + portForward_B.normalized * dockMarkerForwardOffset;
+        Vector3 portPos_Render = MapBodyVectorToRender(portPos_B);
+        Quaternion portRot_Render = MapBodyRotationToRender(portRot_B);
+        Vector3 portForward_Render = MapBodyVectorToRender(portForward_B).normalized;
+
+        Vector3 markerPos_B = portPos_Render + portForward_Render * dockMarkerForwardOffset;
         dockPortMarkerRoot.localPosition = markerPos_B;
 
         if (!dockMarkerFaceCamera)
         {
-            dockPortMarkerRoot.localRotation = portRot_B;
+            dockPortMarkerRoot.localRotation = portRot_Render;
         }
         else
         {
-            dockPortMarkerRoot.localRotation = portRot_B;
+            dockPortMarkerRoot.localRotation = portRot_Render;
         }
     }
 
