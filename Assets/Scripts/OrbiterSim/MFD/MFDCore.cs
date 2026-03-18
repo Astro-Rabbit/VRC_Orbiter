@@ -11,6 +11,7 @@ Orbit,
 Target,
 Align,
 Transfer,
+Dock,
 }
 
 public class MFDCore : UdonSharpBehaviour

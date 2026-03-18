@@ -15,28 +15,29 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
     public GC_RuntimeNetState runtimeNet;
     public GC_RuntimeState runtime;
     public GC_ModeParams modeParams;
-    [Header("Button lamps (Renderer using emissive material)")]
-    public Renderer lampManual;
-    public Renderer lampKillRot;
-    public Renderer lampHoldCurrent;
-    public Renderer lampHoldCurrentAndKillRot;
 
-    public Renderer lampPrograde;
-    public Renderer lampRetrograde;
-    public Renderer lampRadialOut;
-    public Renderer lampRadialIn;
-    public Renderer lampNormal;
-    public Renderer lampAntiNormal;
+    [Header("Button lamps (assign both pilot + copilot renderers to each array)")]
+    public Renderer[] lampManual;
+    public Renderer[] lampKillRot;
+    public Renderer[] lampHoldCurrent;
+    public Renderer[] lampHoldCurrentAndKillRot;
 
-    public Renderer lampDockPointShipZAtPort;
-    public Renderer lampDockAlignPorts;
+    public Renderer[] lampPrograde;
+    public Renderer[] lampRetrograde;
+    public Renderer[] lampRadialOut;
+    public Renderer[] lampRadialIn;
+    public Renderer[] lampNormal;
+    public Renderer[] lampAntiNormal;
 
-    public Renderer lampPointAlongRelVel;
-    public Renderer lampPointAgainstRelVel;
+    public Renderer[] lampDockPointShipZAtPort;
+    public Renderer[] lampDockAlignPorts;
 
-    public Renderer lampRelativeKillVel;
-    public Renderer lampRelativeStopAssist;
-    public Renderer lampRelativeToggleKillVel;
+    public Renderer[] lampPointAlongRelVel;
+    public Renderer[] lampPointAgainstRelVel;
+
+    public Renderer[] lampRelativeKillVel;
+    public Renderer[] lampRelativeStopAssist;
+    public Renderer[] lampRelativeToggleKillVel;
 
     [Header("Lamp colors")]
     public Color inactiveEmission = Color.red * 1.5f;
@@ -194,13 +195,22 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
         }
     }
 
-    private void SetLamp(Renderer r, bool active)
+    private void SetLamp(Renderer[] renderers, bool active)
     {
-        if (r == null) return;
+        if (renderers == null) return;
 
-        r.GetPropertyBlock(_mpb);
-        _mpb.SetColor(emissionColorProperty, active ? activeEmission : inactiveEmission);
-        r.SetPropertyBlock(_mpb);
+        Color c = active ? activeEmission : inactiveEmission;
+
+        int count = renderers.Length;
+        for (int i = 0; i < count; i++)
+        {
+            Renderer r = renderers[i];
+            if (r == null) continue;
+
+            r.GetPropertyBlock(_mpb);
+            _mpb.SetColor(emissionColorProperty, c);
+            r.SetPropertyBlock(_mpb);
+        }
     }
 
     // -----------------------------------------------------------------

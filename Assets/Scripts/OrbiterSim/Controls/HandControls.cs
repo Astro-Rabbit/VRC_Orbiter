@@ -7,6 +7,26 @@ using VRC.Udon.Common;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class HandControls : UdonSharpBehaviour
 {
+
+
+    [Header("Seat / Visual Net")]
+    [Tooltip("0=left, 1=right. Seat identity for higher-level authority logic.")]
+    public byte seatId = 0;
+
+    [Tooltip("Single-seat synced visual net state for THIS seat only.")]
+    public CockpitControlsNetState controlsNet;
+
+    [Tooltip("Set by authority manager. True if this seat is currently claimed by someone.")]
+    public bool seatClaimed = false;
+
+    [Tooltip("Set by authority manager. True if this seat is currently the live authority seat.")]
+    public bool activeSeatForVisuals = false;
+
+    // Track seat-visual flag transitions so we can force publish only on discrete state changes.
+    private bool _visualWasDriving = false;
+    private bool _lastPublishedSeatClaimed = false;
+    private bool _lastPublishedActiveSeatForVisuals = false;
+
     // =========================================================
     // JOYSTICK
     // =========================================================
@@ -84,8 +104,10 @@ public class HandControls : UdonSharpBehaviour
     // =========================================================
     // GUIDANCE OUTPUT
     // =========================================================
-    [Header("Output -> Guidance Manual Draft")]
+    [Header("Output -> Seat-local Manual Draft")]
     public GC_ManualDraft manualDraft;
+    public bool seatHasAuthority = true;
+
     public bool manualUseRateControl = true;
     public float maxPitchRateDeg = 20f;
     public float maxYawRateDeg = 20f;
@@ -159,6 +181,8 @@ public class HandControls : UdonSharpBehaviour
         UpdateThrottleVisuals();
         CacheTransGripBasePose();
 
+        if (manualDraft != null)
+            manualDraft.Clear();
     }
 
     private void CacheTransGripBasePose()
@@ -185,7 +209,7 @@ public class HandControls : UdonSharpBehaviour
         UpdateTranslationInput(dt);
 
         WriteManualDraft();
-
+        PublishOrApplyVisualState();
         JoystickGrabbingOld = JoystickGrabbing;
         ThrottleGrabbingOld = ThrottleGrabbing;
         TransGrabbingOld = TransGrabbing;
@@ -411,10 +435,7 @@ public class HandControls : UdonSharpBehaviour
         {
             VRCPlayerApi.TrackingData hand = GetActiveHandData(TransString);
 
-            // Store grab-start hand position in WORLD space so scale does not matter.
             TransHandInitPosW = hand.position;
-
-            // Keep this for optional non-pure-translation mode.
             TransHandLocalInitRot = Quaternion.Inverse(TransCol.transform.rotation) * hand.rotation;
 
             txPrev = 0f; tyPrev = 0f; tzPrev = 0f;
@@ -428,14 +449,10 @@ public class HandControls : UdonSharpBehaviour
         if (TransGrabbing)
         {
             VRCPlayerApi.TrackingData hand = GetActiveHandData(TransString);
-
-            // World-space delta from grab start.
             Vector3 deltaW = hand.position - TransHandInitPosW;
 
             float rawX, rawY, rawZ;
 
-            // Project world delta onto TransCol's ROTATION axes only.
-            // This ignores TransCol scale and parent scale.
             Vector3 axisX_W = TransCol.transform.right;
             Vector3 axisY_W = TransCol.transform.up;
             Vector3 axisZ_W = TransCol.transform.forward;
@@ -480,11 +497,7 @@ public class HandControls : UdonSharpBehaviour
                     0f
                 );
 
-                // Apply visual rotation relative to the original world rotation.
                 TransGripVis.transform.rotation = transGripBaseRotW * tiltLocal;
-
-                // Move along the controller's world forward axis, not localPosition,
-                // so parent scaling does not explode the motion.
                 TransGripVis.transform.position =
                     transGripBasePosW + TransCol.transform.forward * (transZ * TransSensitivity);
             }
@@ -513,11 +526,17 @@ public class HandControls : UdonSharpBehaviour
     }
 
     // =========================================================
-    // OUTPUT TO MANUAL DRAFT
+    // OUTPUT TO SEAT-LOCAL MANUAL DRAFT
     // =========================================================
     private void WriteManualDraft()
     {
         if (manualDraft == null) return;
+
+        if (!seatHasAuthority)
+        {
+            manualDraft.Clear();
+            return;
+        }
 
         bool attActive =
             JoystickisGrabbed ||
@@ -650,4 +669,248 @@ public class HandControls : UdonSharpBehaviour
         joystickModeKnobValue = 0f;
         manualUseRateControl = false;
     }
+
+    // =========================================================
+    // AUTHORITY / TRANSFER HELPERS
+    // =========================================================
+    public void SetSeatAuthority(bool active)
+    {
+        seatHasAuthority = active;
+
+        if (!seatHasAuthority && manualDraft != null)
+            manualDraft.Clear();
+    }
+
+    public bool IsAnyPrimaryControlGrabbed()
+    {
+        return JoystickGrabbing || ThrottleGrabbing || TransGrabbing;
+    }
+
+    public void ForceReleaseAllControls()
+    {
+        JoystickGrabbing = false;
+        ThrottleGrabbing = false;
+        TransGrabbing = false;
+
+        JoystickisGrabbed = false;
+
+        LeftBusy = false;
+        RightBusy = false;
+
+        LeftObject = "";
+        RightObject = "";
+
+        inputX = 0f;
+        inputY = 0f;
+        inputZ = 0f;
+
+        transX = 0f;
+        transY = 0f;
+        transZ = 0f;
+
+        if (manualDraft != null)
+            manualDraft.Clear();
+
+        if (joystickHandle != null) joystickHandle.localRotation = Quaternion.identity;
+        if (twistGrip != null) twistGrip.localRotation = Quaternion.identity;
+
+        if (TransGripVis != null)
+        {
+            if (!transGripBaseCaptured) CacheTransGripBasePose();
+            TransGripVis.transform.position = transGripBasePosW;
+            TransGripVis.transform.rotation = transGripBaseRotW;
+        }
+
+        UpdateThrottleVisuals();
+    }
+
+    public void SetThrottleValueImmediate(float throttle01)
+    {
+        ThrottleValue = Mathf.Clamp01(throttle01);
+        ThrottlePrev = ThrottleValue;
+        ThrottlePrevD = 0f;
+        UpdateThrottleVisuals();
+    }
+
+    /// <summary>
+    /// Visual path only.
+    ///
+    /// Local grab drives this seat's synced visual state.
+    /// Remote/non-grabbing playback only reads and applies visuals.
+    ///
+    /// Optimization policy:
+    /// - write latest local visual values every frame while grabbed
+    /// - force publish only on discrete state changes (grab start/end, claim change, active flag change)
+    /// - let CockpitControlsNetState.Update() handle normal rate-limited streaming
+    /// </summary>
+    private void PublishOrApplyVisualState()
+    {
+        bool localDrivingVisuals = IsAnyPrimaryControlGrabbed();
+
+        if (localDrivingVisuals)
+        {
+            if (controlsNet != null)
+            {
+                EnsureLocalOwnershipOfVisualNet();
+
+                controlsNet.SetLocalVisualState(
+                    inputX, inputY, inputZ,
+                    ThrottleValue,
+                    transX, transY, transZ,
+                    seatClaimed,
+                    true,
+                    activeSeatForVisuals
+                );
+
+                bool forceNow = false;
+
+                // Grab started this frame.
+                if (!_visualWasDriving)
+                    forceNow = true;
+
+                // Seat claim flag changed.
+                if (_lastPublishedSeatClaimed != seatClaimed)
+                    forceNow = true;
+
+                // Active-seat display flag changed.
+                if (_lastPublishedActiveSeatForVisuals != activeSeatForVisuals)
+                    forceNow = true;
+
+                if (forceNow)
+                    controlsNet.ForcePublish();
+            }
+
+            _visualWasDriving = true;
+            _lastPublishedSeatClaimed = seatClaimed;
+            _lastPublishedActiveSeatForVisuals = activeSeatForVisuals;
+            return;
+        }
+
+        // If we just stopped locally driving visuals, push one final release state immediately.
+        if (_visualWasDriving && controlsNet != null)
+        {
+            EnsureLocalOwnershipOfVisualNet();
+
+            controlsNet.SetLocalVisualState(
+                0f, 0f, 0f,
+                ThrottleValue,
+                0f, 0f, 0f,
+                seatClaimed,
+                false,
+                activeSeatForVisuals
+            );
+
+            controlsNet.ForcePublish();
+        }
+
+        _visualWasDriving = false;
+        _lastPublishedSeatClaimed = seatClaimed;
+        _lastPublishedActiveSeatForVisuals = activeSeatForVisuals;
+
+        // Nobody local is grabbing this seat right now.
+        // Use synced playback so this seat still visually follows remote manipulation.
+        ApplyNetVisualStateOnly();
+    }
+
+    /// <summary>
+    /// Playback-only path.
+    /// Reads this seat's synced visual state and applies it to meshes/transforms.
+    /// This must never modify manual input state or write to manualDraft.
+    /// </summary>
+    private void ApplyNetVisualStateOnly()
+    {
+        if (controlsNet == null) return;
+
+        float jx = controlsNet.GetJoyX();
+        float jy = controlsNet.GetJoyY();
+        float jz = controlsNet.GetJoyZ();
+
+        float throttle01 = controlsNet.GetThrottle01();
+
+        float tx = controlsNet.GetTransX();
+        float ty = controlsNet.GetTransY();
+        float tz = controlsNet.GetTransZ();
+
+        ApplyJoystickVisualsOnly(jx, jy, jz);
+        ApplyThrottleVisualsOnly(throttle01);
+        ApplyTranslationVisualsOnly(tx, ty, tz);
+    }
+
+    private void ApplyJoystickVisualsOnly(float x, float y, float z)
+    {
+        if (joystickHandle != null)
+        {
+            joystickHandle.localRotation = Quaternion.Euler(
+                -z * maxTiltAngle,
+                0f,
+                y * maxTiltAngle
+            );
+        }
+
+        if (twistGrip != null)
+        {
+            twistGrip.localRotation = Quaternion.Euler(
+                0f,
+                -x * maxTwistAngle,
+                0f
+            );
+        }
+    }
+
+    private void ApplyThrottleVisualsOnly(float throttle01)
+    {
+        if (ThrottleRotation == null) return;
+
+        Vector3 axis = throttleVisualAxisLocal;
+        if (axis.sqrMagnitude < 1e-6f) axis = Vector3.forward;
+        axis.Normalize();
+
+        float angle = Mathf.Lerp(throttleVisualAngleMinDeg, throttleVisualAngleMaxDeg, throttle01);
+        Quaternion baseRot = Quaternion.Euler(throttleVisualBaseLocalEuler);
+        Quaternion leverRot = Quaternion.AngleAxis(angle, axis);
+
+        ThrottleRotation.localRotation = baseRot * leverRot;
+    }
+
+    private void ApplyTranslationVisualsOnly(float x, float y, float z)
+    {
+        if (TransGripVis == null) return;
+        if (!transGripBaseCaptured) CacheTransGripBasePose();
+
+        Quaternion tiltLocal = Quaternion.Euler(
+            y * maxTiltAngle,
+            x * maxTwistAngle,
+            0f
+        );
+
+        TransGripVis.transform.rotation = transGripBaseRotW * tiltLocal;
+        TransGripVis.transform.position =
+            transGripBasePosW + TransCol.transform.forward * (z * TransSensitivity);
+    }
+
+    public void SetSeatClaimed(bool claimed)
+    {
+        seatClaimed = claimed;
+    }
+
+    public void SetSeatActiveForVisuals(bool active)
+    {
+        activeSeatForVisuals = active;
+    }
+
+    /// <summary>
+    /// Visual net state is seat-local network data, so the manipulating player must own
+    /// this seat's visual-net object before writing to it.
+    /// </summary>
+    private void EnsureLocalOwnershipOfVisualNet()
+    {
+        if (controlsNet == null) return;
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return;
+
+        if (!Networking.IsOwner(local, controlsNet.gameObject))
+            Networking.SetOwner(local, controlsNet.gameObject);
+    }
+
 }

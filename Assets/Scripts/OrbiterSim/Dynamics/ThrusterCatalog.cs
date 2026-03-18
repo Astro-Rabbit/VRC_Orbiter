@@ -125,11 +125,14 @@ public class ThrusterCatalog : UdonSharpBehaviour
 
             // Position relative to CG, expressed in BODY frame
             Vector3 rWorld = t.position - cgTransform.position;
-            mainPosRelCg_B[i] = craftRoot.InverseTransformVector(rWorld);
+            Vector3 rB_render = craftRoot.InverseTransformVector(rWorld);
+            Vector3 rB = RenderBodyPosToSimBodyPos(rB_render);
+            mainPosRelCg_B[i] = rB;
 
             // Nominal thrust direction expressed in BODY frame
             Vector3 dWorld = -t.forward;
             Vector3 dBody = craftRoot.InverseTransformDirection(dWorld);
+            dBody = RenderBodyPosToSimBodyPos(dBody).normalized;
             if (dBody.sqrMagnitude > 1e-12f) dBody.Normalize();
             else dBody = Vector3.forward;
             mainDir_B[i] = dBody;
@@ -141,6 +144,10 @@ public class ThrusterCatalog : UdonSharpBehaviour
 
             Vector3 pitchAxisB = craftRoot.InverseTransformDirection(pitchAxisW);
             Vector3 yawAxisB   = craftRoot.InverseTransformDirection(yawAxisW);
+
+            pitchAxisB = RenderBodyPosToSimBodyPos(pitchAxisB).normalized;
+            yawAxisB   = RenderBodyPosToSimBodyPos(yawAxisB).normalized;
+
 
             if (pitchAxisB.sqrMagnitude > 1e-12f) pitchAxisB.Normalize();
             else pitchAxisB = Vector3.right;
@@ -194,11 +201,13 @@ public class ThrusterCatalog : UdonSharpBehaviour
             }
 
             Vector3 rWorld = t.position - cgTransform.position;
-            Vector3 rB = craftRoot.InverseTransformVector(rWorld);
+            Vector3 rB_render = craftRoot.InverseTransformVector(rWorld);
+            Vector3 rB = RenderBodyPosToSimBodyPos(rB_render);
             posRelCg_B[i] = rB;
 
             Vector3 dWorld = -t.forward;
             Vector3 dB = craftRoot.InverseTransformDirection(dWorld);
+            dB = RenderBodyPosToSimBodyPos(dB).normalized;
             if (dB.sqrMagnitude > 1e-12f) dB.Normalize();
             else dB = Vector3.forward;
 
@@ -264,4 +273,10 @@ public class ThrusterCatalog : UdonSharpBehaviour
         if (mainHasGimbal == null || i < 0 || i >= mainHasGimbal.Length) return false;
         return mainHasGimbal[i];
     }
+
+    private Vector3 RenderBodyPosToSimBodyPos(Vector3 v)
+    {
+        return new Vector3(-v.x, v.y, v.z);
+    }
+
 }

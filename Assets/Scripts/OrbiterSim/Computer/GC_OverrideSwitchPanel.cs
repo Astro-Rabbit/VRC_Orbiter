@@ -4,19 +4,25 @@ using UnityEngine;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class GC_OverrideSwitchPanel : UdonSharpBehaviour
 {
-    [Header("Target override state")]
+    [Header("Seat-local override state")]
+    [Tooltip("This should point to the LOCAL override holder for this cockpit side, not the shared live override state.")]
     public GC_ActuatorOverrideState overrides;
 
     [Header("Raw switch states written by MFDSwitch")]
-    public int rcsSwitchState = 1;
-    public int wheelsSwitchState = 1;
-    public int gimbalSwitchState = 1;
+    public byte rcsSwitchState = 1;
+    public byte wheelsSwitchState = 1;
+    public byte gimbalSwitchState = 1;
 
     [Header("Raw knob values")]
     public float actuatorModeKnobValue = 0f;
     public float rcsModeKnobValue = 0f;
 
-    private byte MapThreeWayAllowPolicy(int rawState)
+    private void Start()
+    {
+        ApplyAll();
+    }
+
+    private byte MapThreeWayAllowPolicy(byte rawState)
     {
         switch (rawState)
         {
@@ -49,11 +55,11 @@ public class GC_OverrideSwitchPanel : UdonSharpBehaviour
     {
         if (overrides == null) return;
 
-        // Example 4-position knob:
+        // 4-position knob:
         // 0   = auto / no override
-        // 30  = translate
-        // 60  = rotate
-        // 90  = blended
+        // 45  = translate
+        // 90  = rotate
+        // 135 = blended
         int idx = Mathf.RoundToInt(rcsModeKnobValue / 45f);
         idx = Mathf.Clamp(idx, 0, 3);
 
@@ -63,12 +69,15 @@ public class GC_OverrideSwitchPanel : UdonSharpBehaviour
             case 0:
                 overrides.overrideRcsMode = GC_ActuatorOverrideState.RCSMODE_NO_OVERRIDE;
                 break;
+
             case 1:
                 overrides.overrideRcsMode = GC_ActuatorOverrideState.RCSMODE_FORCE_TRANSLATE;
                 break;
+
             case 2:
                 overrides.overrideRcsMode = GC_ActuatorOverrideState.RCSMODE_FORCE_ROTATE;
                 break;
+
             case 3:
                 overrides.overrideRcsMode = GC_ActuatorOverrideState.RCSMODE_FORCE_BLENDED;
                 break;
@@ -79,8 +88,8 @@ public class GC_OverrideSwitchPanel : UdonSharpBehaviour
     {
         if (overrides == null) return;
 
-        // Fill this in once we use your real ATT_ACT_* constants.
-        // For now:
+        // Fill in once you finalize the real ATT_ACT_* mapping.
+        // For now leave as no override.
         overrides.overrideAttitudeActuatorMode = 0;
     }
 
@@ -88,12 +97,10 @@ public class GC_OverrideSwitchPanel : UdonSharpBehaviour
     {
         if (overrides == null) return;
 
-        overrides.overrideAllowRCS = MapThreeWayAllowPolicy(rcsSwitchState);
-        overrides.overrideAllowWheels = MapThreeWayAllowPolicy(wheelsSwitchState);
-        overrides.overrideAllowGimbal = MapThreeWayAllowPolicy(gimbalSwitchState);
+        ApplyRCSSwitch();
+        ApplyWheelsSwitch();
+        ApplyGimbalSwitch();
+        ApplyRcsModeKnob();
+        ApplyActuatorModeKnob();
     }
-
-
-
-
 }
