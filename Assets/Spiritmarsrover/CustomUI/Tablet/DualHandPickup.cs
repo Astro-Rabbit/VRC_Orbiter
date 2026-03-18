@@ -17,8 +17,8 @@ public class DualHandPickup : UdonSharpBehaviour
 
     public float lerpSpeed = 50f;
 
-    public GameObject pen1GrabLocalTransform;
-    public GameObject pen2GrabLocalTransform;
+    //public GameObject pen1GrabLocalTransform;
+   // public GameObject pen2GrabLocalTransform;
 
     public GameObject TwoHandedObject;
 
@@ -30,12 +30,31 @@ public class DualHandPickup : UdonSharpBehaviour
     public bool isDocked = false;
     private Transform targetDockTransform; // The specific point to snap to
 
+    //private int _pen1EnterCount;
+    // private int _pen2EnterCount;
+    public BoxCollider TabletPickupCol;
+    public BoxCollider VRpickupCol;//the pick for this object
+    public BoxCollider DesktoppickupCol;//the pick for this object
+
+    private bool isTransitioningToOneHand = false;
+    private bool isTransitioningToDock = false;
+
     private void Start()
     {
-        pickup.pickupable = false;
+        
         if (!Networking.LocalPlayer.IsUserInVR())
         {
             pickup.pickupable = true;
+            TabletPickupCol.center = DesktoppickupCol.center;
+            TabletPickupCol.size = DesktoppickupCol.size;
+            //TabletPickupCol = DesktoppickupCol;
+        }
+        else
+        {
+            pickup.pickupable = false;
+            //TabletPickupCol = VRpickupCol;
+            TabletPickupCol.center = VRpickupCol.center;
+            TabletPickupCol.size = VRpickupCol.size;
         }
     }
     public bool CanBeGrabbed()
@@ -47,14 +66,17 @@ public class DualHandPickup : UdonSharpBehaviour
     public void OnGrab(TabletPen pen)
     {
         isDocked = false; // Release from dock immediately on grab
+        isTransitioningToOneHand = false; // Reset flag so it snaps to hand
+        isTransitioningToDock = false;
+
         if (pen1 == null)
         {
             pen1 = pen;
             // Calculate local offset relative to pen 1
             offsetPos1 = pen.transform.InverseTransformPoint(transform.position);
             offsetRot1 = Quaternion.Inverse(pen.transform.rotation) * transform.rotation;
-            pen1GrabLocalTransform.transform.position = pen.transform.position;
-            pen1GrabLocalTransform.transform.rotation = Quaternion.Euler(Vector3.zero);
+            //pen1GrabLocalTransform.transform.position = pen.transform.position;
+            //pen1GrabLocalTransform.transform.rotation = Quaternion.Euler(Vector3.zero);
         }
         else if (pen2 == null && pen != pen1)
         {
@@ -62,8 +84,10 @@ public class DualHandPickup : UdonSharpBehaviour
             // Calculate local offset relative to pen 2
             offsetPos2 = pen.transform.InverseTransformPoint(transform.position);
             offsetRot2 = Quaternion.Inverse(pen.transform.rotation) * transform.rotation;
-            pen2GrabLocalTransform.transform.position = pen.transform.position;
-            pen2GrabLocalTransform.transform.localRotation = Quaternion.Euler(Vector3.zero);
+            //pen2GrabLocalTransform.transform.position = pen.transform.position;
+            //pen2GrabLocalTransform.transform.localRotation = Quaternion.Euler(Vector3.zero);
+            //HandleTwoHanded();
+            
             HandleTwoHanded();
             transform.SetParent(TwoHandedObject.transform, true);
         }
@@ -82,6 +106,7 @@ public class DualHandPickup : UdonSharpBehaviour
 
                 pen1 = pen2;
                 pen2 = null;
+                isTransitioningToOneHand = true; // Start lerp transition
             }
             else
             {
@@ -94,6 +119,7 @@ public class DualHandPickup : UdonSharpBehaviour
             {
                 // SAVE ROTATION
                 offsetRot1 = Quaternion.Inverse(pen1.transform.rotation) * transform.rotation;
+                isTransitioningToOneHand = true; // Start lerp transition
             }
             pen2 = null;
         }
@@ -115,27 +141,46 @@ public class DualHandPickup : UdonSharpBehaviour
         {
             isDocked = true;
             transform.SetParent(null, true); // Ensure it's not parented to a hand/rig
+            isTransitioningToDock = true;
         }
-        // --- THE FIX: Physics Flush ---
-        // This forces Unity to realize which pens are actually still inside the collider
-        Collider col = GetComponent<Collider>();
-        if (col != null)
+        // --- THE FIX: Physics Flush (Updated for multiple colliders) ---
+        //Collider[] colliders = GetComponentsInChildren<Collider>();
+        Collider[] colliders = GetComponents<Collider>();
+        foreach (Collider col in colliders)
         {
-            col.enabled = false;
-            col.enabled = true;
+            if (col != null)
+            {
+                col.enabled = false;
+                col.enabled = true;
+            }
         }
     }
 
     // LateUpdate is best for following VR trackers to reduce jitter
-    void LateUpdate()
+    //void LateUpdate()
+    public override void PostLateUpdate()
     {
         if (pickup.pickupable) return;
 
         if (isDocked && targetDockTransform != null)
         {
-            // Smoothly snap to the dock position and rotation
-            transform.position = Vector3.Lerp(transform.position, targetDockTransform.position, Time.deltaTime * lerpSpeed);
-            transform.rotation = Quaternion.Slerp(transform.rotation, targetDockTransform.rotation, Time.deltaTime * lerpSpeed);
+            if (isTransitioningToDock)
+            {
+                // Smoothly snap to the dock position and rotation
+                transform.position = Vector3.Lerp(transform.position, targetDockTransform.position, Time.deltaTime * lerpSpeed);
+                transform.rotation = Quaternion.Slerp(transform.rotation, targetDockTransform.rotation, Time.deltaTime * lerpSpeed);
+                // Stop lerping once we are close enough to the hand to prevent "floaty" lag
+                if ((transform.position - targetDockTransform.position).sqrMagnitude < 0.000001f)
+                {
+                    isTransitioningToDock = false;
+                }
+            }
+            else
+            {
+                transform.position = targetDockTransform.position;
+                transform.rotation = targetDockTransform.rotation;
+            }
+            
             return; // Skip hand logic while docked
         }
 
@@ -147,18 +192,43 @@ public class DualHandPickup : UdonSharpBehaviour
         {
             HandleOneHanded();
         }
+
     }
 
+    //private void HandleOneHanded()
+    //{
+    //    Vector3 targetPos = pen1.transform.TransformPoint(offsetPos1);
+    //    Quaternion targetRot = pen1.transform.rotation * offsetRot1;
+    //    //transform.position = pen1.transform.TransformPoint(offsetPos1);
+    //    //transform.rotation = pen1.transform.rotation * offsetRot1;
+
+
+    //    transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * lerpSpeed);
+    //    transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * lerpSpeed);
+    //}
     private void HandleOneHanded()
     {
         Vector3 targetPos = pen1.transform.TransformPoint(offsetPos1);
         Quaternion targetRot = pen1.transform.rotation * offsetRot1;
-        //transform.position = pen1.transform.TransformPoint(offsetPos1);
-        //transform.rotation = pen1.transform.rotation * offsetRot1;
 
+        if (isTransitioningToOneHand)
+        {
+            // Smoothly transition to the new one-handed center
+            transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * lerpSpeed);
+            transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * lerpSpeed);
 
-        transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * lerpSpeed);
-        transform.position = Vector3.Lerp(transform.position, targetPos, Time.deltaTime * lerpSpeed);
+            // Stop lerping once we are close enough to the hand to prevent "floaty" lag
+            if ((transform.position - targetPos).sqrMagnitude < 0.00001f)
+            {
+                isTransitioningToOneHand = false;
+            }
+        }
+        else
+        {
+            // Snappy tracking (No Lerp)
+            transform.position = targetPos;
+            transform.rotation = targetRot;
+        }
     }
 
     //private void HandleTwoHanded()
@@ -206,7 +276,50 @@ public class DualHandPickup : UdonSharpBehaviour
         TwoHandedObject.transform.rotation = Quaternion.LookRotation(targetRot * Vector3.forward, avgUp);
     }
 
-    // Inform the pens when they are hovering over this object
+    ////// Inform the pens when they are hovering over this object
+    //public void OnTriggerEnter(Collider other)
+    //{
+    //    // Existing Pen logic
+    //    TabletPen pen = other.GetComponent<TabletPen>();
+    //    if (pen != null)
+    //    {
+    //        pen.SetHoveredPickup((TabletPenPickup)(Component)this);
+    //        return;
+    //    }
+
+    //    // NEW: Dock logic
+    //    // Check for a "TabletDock" component or a specific tag
+    //    if (other.name == "TabletDockTrigger")
+    //    {
+    //        targetDockTransform = other.transform; // The trigger itself is the dock point
+
+    //    }
+    //}
+
+    //public void OnTriggerExit(Collider other)
+    //{
+    //    // Existing Pen logic
+    //    TabletPen pen = other.GetComponent<TabletPen>();
+    //    if (pen != null)
+    //    {
+    //        if (pen._hoveredPickup == (TabletPenPickup)(Component)this)
+    //        {
+    //            pen.SetHoveredPickup(null);
+    //        }
+    //        return;
+    //    }
+
+    //    // NEW: Dock logic
+    //    if (other.transform == targetDockTransform)
+    //    {
+    //        // If we aren't currently docked, forget this dock point
+    //        if (!isDocked)
+    //        {
+    //            targetDockTransform = null;
+    //        }
+    //    }
+    //}
+
     public void OnTriggerEnter(Collider other)
     {
         // Existing Pen logic
@@ -217,11 +330,10 @@ public class DualHandPickup : UdonSharpBehaviour
             return;
         }
 
-        // NEW: Dock logic
-        // Check for a "TabletDock" component or a specific tag
-        if (other.name == "TabletDockTrigger")
+        // NEW: Only look for a dock if the tablet is currently being held
+        if (pen1 != null && other.name == "TabletDockTrigger")
         {
-            targetDockTransform = other.transform; // The trigger itself is the dock point
+            targetDockTransform = other.transform;
         }
     }
 
@@ -238,14 +350,13 @@ public class DualHandPickup : UdonSharpBehaviour
             return;
         }
 
-        // NEW: Dock logic
-        if (other.transform == targetDockTransform)
+        // Only clear the target dock if we are holding the tablet and moving away
+        // If we are docked (isDocked == true), we keep the reference
+        if (pen1 != null && other.transform == targetDockTransform)
         {
-            // If we aren't currently docked, forget this dock point
-            if (!isDocked)
-            {
-                targetDockTransform = null;
-            }
+            targetDockTransform = null;
         }
     }
+
+
 }

@@ -18,6 +18,7 @@ public class TabletPen : UdonSharpBehaviour
     public AudioClip[] SwitchUpClip;
     public AudioClip[] SwitchDownClip;
     public AudioClip[] KnobClip;
+    public AudioClip[] ScreenTouchClips;
 
 
     public int penID;
@@ -59,6 +60,16 @@ public class TabletPen : UdonSharpBehaviour
 
     private bool _wasTriggerHeld;
 
+    private TabletSlider _activeSlider;
+    private TabletSlider _lastHoveredSlider;
+    bool isVR;
+    public float clickExtensionOffset = -0.01f;
+
+    public float touchCooldown = 0.2f; // Seconds between allowed clicks
+    private float _lastTouchTime;
+
+    private int _lastSliderStep; // Tracks the current "notch" (0-30)
+
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -66,6 +77,14 @@ public class TabletPen : UdonSharpBehaviour
         _gripAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryHandTrigger" : "Oculus_CrossPlatform_PrimaryHandTrigger";
 
         if (ButtonAudioSource == null) ButtonAudioSource = GetComponent<AudioSource>();
+
+        if (!Networking.LocalPlayer.IsUserInVR())
+        {
+            TriggerRequiredForTablet = true;
+            
+
+        }
+        isVR = Networking.LocalPlayer.IsUserInVR();
     }
 
     void Update()
@@ -115,15 +134,16 @@ public class TabletPen : UdonSharpBehaviour
         {
             if (currentlyHitting)
             {
-                // hit.distance is world-space. We divide by localScale.y to get the 
-                // correct local-space translation along the Y axis.
-                // We use negative because the ray is cast along -transform.up.
                 float localExtension = -(hit.distance / transform.localScale.y);
-                PenMesh.transform.localPosition = new Vector3(0, localExtension + PenTouchOffset, 0);
+
+                // NEW: Check if we are actually interacting right now
+                float interactionPlunge = (triggerHeld && currentlyHitting) ? clickExtensionOffset : 0f;
+
+                // Add the plunge to the calculation
+                PenMesh.transform.localPosition = new Vector3(0f, localExtension + PenTouchOffset + interactionPlunge, 0f);
             }
             else
             {
-                // Reset to zero if nothing is hit
                 PenMesh.transform.localPosition = Vector3.zero;
             }
         }
@@ -148,7 +168,11 @@ public class TabletPen : UdonSharpBehaviour
         // If we are looking at a new interactive object, pulse and save it
         if (currentHitComp != _lastHapticTarget)
         {
-            if (currentHitComp != null) TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+            if (currentHitComp != null)
+            {
+                // TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+                TriggerHapticEvent();
+            }
             _lastHapticTarget = currentHitComp; // Will be null if looking at nothing/wall
         }
         // --- Haptic Hover Logic End ---
@@ -209,7 +233,14 @@ public class TabletPen : UdonSharpBehaviour
             // B. Handle Tablet (Previous Hover/Slide System)
             if (screen != null)
             {
-                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), triggerHeld);
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), triggerHeld);
+
+                // Convert the world hit point to the local space of the screen/collider
+                Vector3 localPoint = hit.collider.transform.InverseTransformPoint(hit.point);
+
+                // Pass the slider and the local point into the handler
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), localPoint, triggerHeld);
+                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), hit.point, triggerHeld);
             }
             else
             {
@@ -224,31 +255,82 @@ public class TabletPen : UdonSharpBehaviour
     }
     public bool TriggerRequiredForTablet = true;
 
-    private void HandleTabletInteraction(TabletButton hovered, bool triggerHeld)
+    private void HandleTabletInteraction(TabletButton hoveredBtn, TabletSlider hoveredSlider, Vector3 worldPoint, bool triggerHeld)
     {
-        // Hover Logic (Remains the same)
-        if (hovered != _lastHoveredTabletBtn)
+        // --- Slider Hover Logic ---
+        if (hoveredSlider != _lastHoveredSlider)
         {
-            if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
-            if (hovered != null) hovered.OnHoverEnter(penID);
-            _lastHoveredTabletBtn = hovered;
+            _lastHoveredSlider = hoveredSlider;
         }
 
-        // NEW: Check for interaction condition
-        // If Trigger is NOT required, we treat the 'touch' as an automatic press
-        bool isInteracting = TriggerRequiredForTablet ? triggerHeld : (hovered != null);
+        if (hoveredBtn != _lastHoveredTabletBtn)
+        {
+            if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
+            if (hoveredBtn != null) hoveredBtn.OnHoverEnter(penID);
+            _lastHoveredTabletBtn = hoveredBtn;
+        }
 
-        // Press Logic
+        // --- Interaction Logic ---
+        bool isInteracting;// = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null);
+
+        if (!isVR)
+        {
+            // Desktop: Always require the mouse click (triggerHeld includes Mouse0)
+            isInteracting = (hoveredBtn != null || hoveredSlider != null) && triggerHeld;
+        }
+        else
+        {
+            // VR: Respect the toggle. If false, just hovering counts as interacting.
+            isInteracting = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null);
+        }
+
+
         if (isInteracting)
         {
             if (!_wasTouchingTablet)
             {
-                _activeTabletBtn = hovered;
+
+                // DEBOUNCE CHECK
+                if (Time.time < _lastTouchTime + touchCooldown) return;
+                _lastTouchTime = Time.time;
+
+                _activeTabletBtn = hoveredBtn;
+                _activeSlider = hoveredSlider; // Store the slider we started pressing
+
                 if (_activeTabletBtn != null) _activeTabletBtn.OnDown(penID);
+                if (_activeSlider != null)
+                {
+                    _activeSlider.OnDown(penID, worldPoint);
+                    // Initialize the starting step so it doesn't vibe instantly on touch
+                    float norm = Mathf.InverseLerp(_activeSlider.minValue, _activeSlider.maxValue, _activeSlider.currentValue);
+                    _lastSliderStep = Mathf.FloorToInt(norm * 30f);
+                }
             }
-            else if (_activeTabletBtn != null)
+            else
             {
-                _activeTabletBtn.OnStay(penID);
+                if (_activeTabletBtn != null)
+                {
+                    _activeTabletBtn.OnStay(penID);
+
+                }
+                if (_activeSlider != null)
+                {
+                    _activeSlider.OnStay(penID, worldPoint); // Send localPoint every frame
+                    // --- 30 STEP HAPTIC LOGIC ---
+                    // Calculate 0.0 to 1.0 percentage of the slider
+                    float norm = Mathf.InverseLerp(_activeSlider.minValue, _activeSlider.maxValue, _activeSlider.currentValue);
+
+                    // Convert that to a step index (0 to 30)
+                    int currentStep = Mathf.FloorToInt(norm * 30f);
+
+                    // If we moved into a new step, pulse!
+                    if (currentStep != _lastSliderStep)
+                    {
+                        TriggerHapticEvent();
+                        _lastSliderStep = currentStep;
+                    }
+                }
+
             }
             _wasTouchingTablet = true;
         }
@@ -262,7 +344,11 @@ public class TabletPen : UdonSharpBehaviour
     {
         if (_activeTabletBtn != null)
         {
-            if (_activeTabletBtn == _lastHoveredTabletBtn) _activeTabletBtn.OnUp(penID);
+            if (_activeTabletBtn == _lastHoveredTabletBtn)
+            {
+                _activeTabletBtn.OnUp(penID);
+                PlayScreenTouchClip();
+            }
             else _activeTabletBtn.OnHoverExit(penID);
             _activeTabletBtn = null;
         }
@@ -353,6 +439,25 @@ public class TabletPen : UdonSharpBehaviour
             }
         }
     }
+    //public bool OverRideMeshBool = false; 
+    public void OverRideMeshToggle(bool OverRideMeshBool)
+    {
+        if (OverRideMeshBool)
+        {
+            _zoneCount = 1000;
+            //OverRideMeshBool = false;
+        }
+        else
+        {
+            _zoneCount = 0;
+            //OverRideMeshBool = true;
+        }
+        
+        //if (_zoneCount <= 0)
+        //{
+        //    _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
+        //}
+    }
 
     public void TriggerHaptic(float duration = 0.05f, float amplitude = 0.2f, float frequency = 0.8f)
     {
@@ -399,6 +504,13 @@ public class TabletPen : UdonSharpBehaviour
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
         ButtonAudioSource.PlayOneShot(SwitchUpClip[Random.Range(0, SwitchUpClip.Length)]);
 
+    }
+    public void PlayScreenTouchClip()
+    {
+        if (ScreenTouchClips == null || ScreenTouchClips.Length == 0) return;
+        ButtonAudioSource.pitch = Random.Range(.95f, 1.05f);
+        ButtonAudioSource.volume = Random.Range(0.99f, 1f);
+        ButtonAudioSource.PlayOneShot(ScreenTouchClips[Random.Range(0, ScreenTouchClips.Length)]);
     }
 
     //private void HandlePickupConstraint()
@@ -478,7 +590,8 @@ public class TabletPen : UdonSharpBehaviour
                     // We pass 'this' so the pickup knows which pen is holding it
                     _heldPickup.OnGrab(this);
 
-                    TriggerHaptic(0.05f, 0.3f);
+                    //TriggerHaptic(0.05f, 0.3f);
+                    TriggerHapticEvent();
                     Debug.Log("[TabletPen] Successful Grab");
                 }
             }

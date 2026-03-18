@@ -11,6 +11,9 @@ public class TabletNavigationManager : UdonSharpBehaviour
     void Start()
     {
         CurrentPage = HomePage;
+        ChangePage(HomePage);
+        //CurrentPage = HomePage;
+        
     }
     public void ChangePage(GameObject PageObject)
     {

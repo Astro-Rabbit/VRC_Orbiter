@@ -12,6 +12,8 @@ public class PenUpdater : UdonSharpBehaviour
     public VRC_Pickup PenRPickup;
     public GameObject PenLMesh;
     public GameObject PenRMesh;
+    public TabletPen PenLScript;
+    public TabletPen PenRScript;
 
     public bool PickupableL;
     public bool PickupableR;
@@ -28,6 +30,8 @@ public class PenUpdater : UdonSharpBehaviour
     public float rotMinCutoff = 0.5f;
     public float rotBeta = 0.02f;
     public float rotDCutoff = 1.0f;
+
+    //public float TestValue = 0f;
 
     private VRCPlayerApi _localPlayer;
 
@@ -55,7 +59,7 @@ public class PenUpdater : UdonSharpBehaviour
         }
     }
 
-    private void Update()
+    private void LateUpdate()
     {
         if (_localPlayer == null) return;
 
@@ -216,6 +220,42 @@ public class PenUpdater : UdonSharpBehaviour
     public void toggleFilter()
     {
         useFilter = !useFilter;
+    }
+
+    public void ResetLeftStylus()
+    {
+        PenLPickup.transform.localPosition = Vector3.zero;
+        PenLPickup.transform.localRotation =Quaternion.Euler( Vector3.zero);
+    }
+    public void ResetRightStylus()
+    {
+        PenRPickup.transform.localPosition = Vector3.zero;
+        PenRPickup.transform.localRotation =Quaternion.Euler( Vector3.zero);
+    }
+    public bool TriggerTouch;
+    public void ToggleTriggerTouch()
+    {
+        TriggerTouch = !PenLScript.TriggerRequiredForTablet;
+        SendCustomEventDelayedSeconds("ToggleTriggerDelayed",1.5f);
+    }
+    public void ToggleTriggerDelayed()
+    {
+        PenLScript.TriggerRequiredForTablet = TriggerTouch;
+        PenRScript.TriggerRequiredForTablet = TriggerTouch;
+        
+    }
+    public bool OverrideMesh;
+    public void OverrideMeshToggle()
+    {
+        OverrideMesh = !OverrideMesh;
+        PenLScript.OverRideMeshToggle(OverrideMesh);
+        PenRScript.OverRideMeshToggle(OverrideMesh);
+    }
+    public float Amp = 0.2f;
+    public void SetPenAmp()
+    {
+        PenLScript.HapticAmplitude = Amp;
+        PenRScript.HapticAmplitude = Amp;
     }
 }
 
