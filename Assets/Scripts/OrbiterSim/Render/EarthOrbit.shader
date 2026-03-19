@@ -609,7 +609,7 @@ Shader "Skybox/SkySunEarthTest"
                 float3 dirEq = SafeNormalize(RotateByQuat(dirB, _CraftBodyToEq));
                 float3 sunDirEcl = SafeNormalize(_SunDirEcl.xyz);
 
-                float dist = 1e20; // INF
+                float dist;
 
                 float4 earthCol = EvalEarth(dirEq, sunDirEcl, dist);
                 float4 moonCol  = EvalMoon(dirEq, sunDirEcl);
@@ -641,6 +641,8 @@ Shader "Skybox/SkySunEarthTest"
                 // Earth-dominant policy
                 if (earthCol.a > 0.5)
                     col = earthCol.rgb;
+                else
+                    dist = 1.0 / 0.0; // INF
 
                 if (moonCol.a > 0.5)
                     col = moonCol.rgb;
