@@ -38,6 +38,7 @@ public class TabletButton : UdonSharpBehaviour
     //    Rect rect = rectTransform.rect;
     //    return rect.Contains(localPoint);
     //}
+    public bool released;
 
     void Start()
     {
@@ -62,7 +63,7 @@ public class TabletButton : UdonSharpBehaviour
         if (mode == TabletButtonMode.None) return;
         _lastPenID = id;
         SetColor(pressedColor);
-        if (mode == TabletButtonMode.Trigger) targetScript.SendCustomEvent(eventName);
+        if (mode == TabletButtonMode.Trigger && !string.IsNullOrEmpty(eventName)) targetScript.SendCustomEvent(eventName);
 
         // Add this to update the UI immediately after the click
         updateToggleText();
@@ -72,7 +73,7 @@ public class TabletButton : UdonSharpBehaviour
     {
         if (mode != TabletButtonMode.Continuous) return;
         // Only fire continuous events for the pen that currently owns the button
-        if (id == _lastPenID) targetScript.SendCustomEvent(eventName);
+        if (id == _lastPenID && !string.IsNullOrEmpty(eventName)) targetScript.SendCustomEvent(eventName);
     }
 
     public void OnUp(int id)
@@ -80,11 +81,12 @@ public class TabletButton : UdonSharpBehaviour
         if (id != _lastPenID || mode == TabletButtonMode.None) return;
 
         SetColor(normalColor);
-
+        //Box in the release value for scroll checklist button. 
+        released = true;
         // Trigger event
         if (mode == TabletButtonMode.Trigger && !string.IsNullOrEmpty(releaseEventName))
             targetScript.SendCustomEvent(releaseEventName);
-
+        released = false;
         // Update text after the event has fired
         updateToggleText();
 

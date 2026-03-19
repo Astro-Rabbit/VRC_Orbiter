@@ -9,15 +9,15 @@ public class TabletSliderEditor : EditorWindow
     public static void CreateSlider(MenuCommand menuCommand)
     {
         // 1. Create the Root
-        GameObject root = new GameObject("TabletSlider", typeof(RectTransform), typeof(BoxCollider));
+        GameObject root = new GameObject("TabletSlider", typeof(RectTransform));//, typeof(BoxCollider));
         GameObjectUtility.SetParentAndAlign(root, menuCommand.context as GameObject);
 
         RectTransform rootRect = root.GetComponent<RectTransform>();
         rootRect.sizeDelta = new Vector2(200, 40);
 
-        BoxCollider col = root.GetComponent<BoxCollider>();
-        col.isTrigger = true;
-        col.size = new Vector3(200, 40, 1);
+        //BoxCollider col = root.GetComponent<BoxCollider>();
+        //col.isTrigger = true;
+        //col.size = new Vector3(200, 40, 1);
 
         // 2. Add the TabletSlider Script
         // Note: Assumes the TabletSlider script is compiled and present

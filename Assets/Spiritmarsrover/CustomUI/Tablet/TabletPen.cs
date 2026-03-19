@@ -70,6 +70,9 @@ public class TabletPen : UdonSharpBehaviour
 
     private int _lastSliderStep; // Tracks the current "notch" (0-30)
 
+    private TabletScrollbar _activeScrollbar;
+    private TabletScrollbar _lastHoveredScrollbar;
+
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -240,7 +243,8 @@ public class TabletPen : UdonSharpBehaviour
 
                 // Pass the slider and the local point into the handler
                 //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), localPoint, triggerHeld);
-                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), hit.point, triggerHeld);
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), hit.point, triggerHeld);
+                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point),screen.GetSliderAtPoint(hit.point),screen.GetScrollbarAtPoint(hit.point),hit.point,triggerHeld);
             }
             else
             {
@@ -255,12 +259,16 @@ public class TabletPen : UdonSharpBehaviour
     }
     public bool TriggerRequiredForTablet = true;
 
-    private void HandleTabletInteraction(TabletButton hoveredBtn, TabletSlider hoveredSlider, Vector3 worldPoint, bool triggerHeld)
+    private void HandleTabletInteraction(TabletButton hoveredBtn, TabletSlider hoveredSlider, TabletScrollbar hoveredScrollbar, Vector3 worldPoint, bool triggerHeld)
     {
         // --- Slider Hover Logic ---
         if (hoveredSlider != _lastHoveredSlider)
         {
             _lastHoveredSlider = hoveredSlider;
+        }
+        if (hoveredScrollbar != _lastHoveredScrollbar)
+        {
+            _lastHoveredScrollbar = hoveredScrollbar;
         }
 
         if (hoveredBtn != _lastHoveredTabletBtn)
@@ -276,12 +284,12 @@ public class TabletPen : UdonSharpBehaviour
         if (!isVR)
         {
             // Desktop: Always require the mouse click (triggerHeld includes Mouse0)
-            isInteracting = (hoveredBtn != null || hoveredSlider != null) && triggerHeld;
+            isInteracting = (hoveredBtn != null || hoveredSlider != null || hoveredScrollbar !=null) && triggerHeld;
         }
         else
         {
             // VR: Respect the toggle. If false, just hovering counts as interacting.
-            isInteracting = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null);
+            isInteracting = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null || hoveredScrollbar != null);
         }
 
 
@@ -296,6 +304,7 @@ public class TabletPen : UdonSharpBehaviour
 
                 _activeTabletBtn = hoveredBtn;
                 _activeSlider = hoveredSlider; // Store the slider we started pressing
+                _activeScrollbar = hoveredScrollbar;
 
                 if (_activeTabletBtn != null) _activeTabletBtn.OnDown(penID);
                 if (_activeSlider != null)
@@ -304,6 +313,11 @@ public class TabletPen : UdonSharpBehaviour
                     // Initialize the starting step so it doesn't vibe instantly on touch
                     float norm = Mathf.InverseLerp(_activeSlider.minValue, _activeSlider.maxValue, _activeSlider.currentValue);
                     _lastSliderStep = Mathf.FloorToInt(norm * 30f);
+                }
+                if (_activeScrollbar != null)
+                {
+                    _activeScrollbar.OnDown(penID, worldPoint);
+                    Debug.Log("[TabletPen] ScrollDown");
                 }
             }
             else
@@ -329,6 +343,11 @@ public class TabletPen : UdonSharpBehaviour
                         TriggerHapticEvent();
                         _lastSliderStep = currentStep;
                     }
+                }
+                if (_activeScrollbar != null)
+                {
+                    _activeScrollbar.OnStay(penID, worldPoint);
+                    
                 }
 
             }
@@ -356,6 +375,14 @@ public class TabletPen : UdonSharpBehaviour
         {
             _lastHoveredTabletBtn.OnHoverExit(penID);
             _lastHoveredTabletBtn = null;
+        }
+        if(_lastHoveredScrollbar != null)
+        {
+            _lastHoveredScrollbar = null;
+        }
+        if (_lastHoveredSlider != null)
+        {
+            _lastHoveredSlider = null;
         }
         _wasTouchingTablet = false;
     }
