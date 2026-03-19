@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using System;
 using UnityEngine;
 using VRC.SDKBase;
@@ -27,8 +27,6 @@ public class MFDOrbitPage : MFDPage
     private Quaternion bodyToPerifocal;
 
     private double lastEpochT0 = Double.NegativeInfinity;
-    private string[] suffixes =  new[] {"", "k", "M", "G"};
-
 
     private int leftMargin;
     private int topMargin;
@@ -74,30 +72,6 @@ public class MFDOrbitPage : MFDPage
         posY = -perifocalPos.x;
     }
 
-    private string FormatNumber(string title, double num)
-    {
-        int i;
-        for (i = 0; i < 4; i++) {
-            if (num < 10.0) {
-                break;
-            }
-
-            num /= 1000.0;
-        }
-
-        // FIXME: Is there a better way to fall back?
-        if (i == 4) {
-            return "";
-        }
-
-        return title.PadRight(4) + num.ToString(i == 0 ? "0.0000" : "0.000") + suffixes[i];
-    }
-
-    private string FormatAngle(string title, double angle)
-    {
-        return title.PadRight(4) + (180.0 / Math.PI * angle).ToString("0.0").PadLeft(5) + "°";
-    }
-
     void DrawInfo(int line, string info) 
     {
         currentDisplay.DrawText(info, topMargin + line, leftMargin, infoColor);
@@ -109,9 +83,9 @@ public class MFDOrbitPage : MFDPage
 
         display.ClearGraphics();
         float scale = orbitSize / (float)a;
-        Vector2 pePos = new Vector2(0f, -orbitSize);
         Vector2 center = new Vector2(0f, -orbitSize + (float)periapsis * scale);
-        display.DrawConic(pePos, (float)(periapsis * scale), 0f, (float)eccentricity, Color.green);
+        display.DrawConic(center, scale * (float)bodies.GetRadius(conic.primaryBodyId), 0f, 0f, Color.white * 0.2f);
+        display.DrawConic(center, (float)periapsis * scale, 0f, (float)eccentricity, Color.green);
         display.DrawLine(center, center + scale * new Vector2(posX, posY), Color.green);
 
         // Some nested function support would feel pretty sweet right around now
@@ -122,14 +96,14 @@ public class MFDOrbitPage : MFDPage
 
         display.ClearText();
         if (eccentricity < 1.0 && a > 0.0) {
-            DrawInfo(0, FormatNumber("T", period));
-            DrawInfo(1, FormatNumber("ApR", apoapsis));
+            DrawInfo(0, MFD.FormatNumber("T", period));
+            DrawInfo(1, MFD.FormatNumber("ApR", apoapsis));
         }
-        DrawInfo(2, FormatNumber("PeR", periapsis));
-        DrawInfo(3, FormatNumber("Ecc", eccentricity));
-        DrawInfo(4, FormatAngle("LAN", raan));
-        DrawInfo(5, FormatAngle("Inc", inclination));
-        DrawInfo(6, FormatAngle("AgP", argp));
+        DrawInfo(2, MFD.FormatNumber("PeR", periapsis));
+        DrawInfo(3, MFD.FormatNumber("Ecc", eccentricity));
+        DrawInfo(4, MFD.FormatAngle("LAN", raan));
+        DrawInfo(5, MFD.FormatAngle("Inc", inclination));
+        DrawInfo(6, MFD.FormatAngle("AgP", argp));
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }

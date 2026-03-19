@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -8,6 +8,9 @@ public class CraftNetConic : UdonSharpBehaviour
     [Header("Wiring")]
     public SimClock clock;
     public ConicState conic;
+    [Header("Authority")]
+    public SimManager simManager;
+
     public CraftNetState core;
 
     [Header("Publish rate")]
@@ -33,9 +36,15 @@ public class CraftNetConic : UdonSharpBehaviour
 
     private float Period => (conicHz > 0f) ? (1f / conicHz) : 999999f;
 
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
+
     /// <summary>Owner: publish conic at cadence while in MODE_RAILS. Safe to call every frame.</summary>
     public void PublishConic()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (conic == null || core == null) return;
 
@@ -51,6 +60,7 @@ public class CraftNetConic : UdonSharpBehaviour
     /// <summary>Owner: force publish conic immediately (SOI switch, mode transitions, burn end).</summary>
     public void ForcePublishConic()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (conic == null) return;
 
@@ -81,7 +91,7 @@ public class CraftNetConic : UdonSharpBehaviour
     /// <summary>Remote: apply synced conic into the local ConicState (useful for late joiners).</summary>
     public void ApplyRemoteConic()
     {
-        if (Networking.IsOwner(gameObject)) return;
+        if (HasSimAuthority()) return;
         if (conic == null) return;
 
         conic.primaryBodyId = _primaryBodyId;
@@ -103,7 +113,7 @@ public class CraftNetConic : UdonSharpBehaviour
         _appliedRev = _rev;
 
         // Apply immediately so rails propagation uses the same conic on remotes
-        if (!Networking.IsOwner(gameObject))
+        if (!HasSimAuthority())
             ApplyRemoteConic();
     }
 }

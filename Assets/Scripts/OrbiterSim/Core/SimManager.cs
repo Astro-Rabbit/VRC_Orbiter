@@ -1,12 +1,47 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
+/// <summary>
+/// SimManager
+///
+/// High-level sim orchestrator for a single craft.
+///
+/// Responsibilities:
+/// - Advance deterministic world state:
+///     * ephemeris
+///     * rails objects
+///     * owner craft propagation / attitude / docking
+/// - Choose the correct presentation time for owner vs remote rendering
+/// - Coordinate mode transitions:
+///     * RAILS
+///     * INTEGRATED
+///     * DOCKED
+/// - Trigger networking publishes for the appropriate streams
+///
+/// Timing model:
+/// - Update():
+///     * render-time world evaluation
+///     * rails propagation
+///     * docked kinematics
+///     * remote presentation
+/// - FixedUpdate():
+///     * owner-only integrated translation/attitude stepping
+///
+/// Frame conventions:
+/// - mission time: clock.Now()
+/// - owner integrated sim time: _simT
+/// - remote render sample time: delayed network presentation time
+/// </summary>
 public class SimManager : UdonSharpBehaviour
 {
     public const byte MODE_RAILS = 0;
     public const byte MODE_INTEGRATED = 1;
     public const byte MODE_DOCKED = 2;
+
+    // -------------------------------------------------------------------------
+    // Core systems
+    // -------------------------------------------------------------------------
 
     [Header("Core")]
     public SimClock clock;
@@ -17,24 +52,37 @@ public class SimManager : UdonSharpBehaviour
     [Header("Rails objects")]
     public StationPropSystem[] railObjects;
 
+    // -------------------------------------------------------------------------
+    // Contacts / docking
+    // -------------------------------------------------------------------------
+
     [Header("Contacts (craft <-> stations)")]
-    public StationStateModel[] stations;            // list of station state models (same ordering used by UI/targeting)
-    public CraftAttitudeState craftAtt;             // craft attitude qBE
-    public GuidanceNavContactsComputer contactsComp; // computes snapshot
+    public StationStateModel[] stations;               // ordering matches UI/targeting
+    public CraftAttitudeState craftAtt;                // craft attitude qBE
+    public GuidanceNavContactsComputer contactsComp;   // computes contact snapshot
 
     [Header("Docking (craft <-> station attachment authority)")]
     public DockingComputer dockingComp;
-    public DockingRuntimeState dock; // optional if dockingComp already has it
+    public DockingRuntimeState dock;                   // optional if dockingComp already owns this
     public StewartPlatformTargetResolver stewartResolver;
+
     [Header("Docking policy")]
     [Tooltip("If false, docking detection + docking motion authority are disabled (craft behaves as free-flight).")]
     public bool dockingAllowed = true;
+
+    // -------------------------------------------------------------------------
+    // Active craft
+    // -------------------------------------------------------------------------
 
     [Header("Active craft")]
     public CraftStateModel craft;
     public CraftPropSystem craftProp;
     public ConicState craftConic;
     public SOISwitchSystem soiSwitch;
+
+    // -------------------------------------------------------------------------
+    // Owner-only dynamics / attitude
+    // -------------------------------------------------------------------------
 
     [Header("Dynamics (owner only)")]
     public NumericalPropagator numeric;
@@ -44,11 +92,27 @@ public class SimManager : UdonSharpBehaviour
     public ActuationController actuation;
     public AttitudePropagator attitudeProp;
 
+    // -------------------------------------------------------------------------
+    // Networking
+    // -------------------------------------------------------------------------
+
     [Header("Networking")]
     public CraftNetState netCore;
     public CraftNetKinematics netKin;
     public CraftNetConic netConic;
     public CraftNetAttitude netAtt;
+
+    [Header("Ownership handoff")]
+    [Tooltip("Objects that should follow SimManager ownership during sim authority handoff.")]
+    public GameObject[] ownershipObjects;
+
+    [Header("Ownership transfer policy")]
+    [Tooltip("Hard lock for sim ownership transfer. Intended to be controlled by tablet/UI policy, not by cockpit release timing.")]
+    public bool ownershipTransferHardLocked = false;
+
+    // -------------------------------------------------------------------------
+    // Integrated stepping
+    // -------------------------------------------------------------------------
 
     [Header("Stepping (Integrated mode)")]
     [Tooltip("Fixed simulation step used ONLY in integrated mode.")]
@@ -63,6 +127,10 @@ public class SimManager : UdonSharpBehaviour
     [Header("Pause")]
     public bool paused = false;
 
+    // -------------------------------------------------------------------------
+    // Auto mode switching
+    // -------------------------------------------------------------------------
+
     [Header("Force-based mode switching (owner only)")]
     public double enterIntegratedForceN = 1.0;
     public double exitIntegratedForceN = 0.5;
@@ -76,87 +144,177 @@ public class SimManager : UdonSharpBehaviour
     [Tooltip("If true, entering integrated is blocked while warp != 1 (instead of forcing).")]
     public bool blockEnterIntegratedDuringWarp = false;
 
+    // -------------------------------------------------------------------------
+    // Render / diagnostics
+    // -------------------------------------------------------------------------
+
     [Header("Render")]
     public OrbitDiagnostics orbit;
     public PrimaryOrbitDiagnostics primaryDiag;
     public OrbitRenderer orbitline;
     public SkyBoxDriver skyrender;
     public StationRenderManager stationRender;
+    public CraftNetCabinAccel netCabinAccel;
+    // -------------------------------------------------------------------------
+    // Initialization helpers
+    // -------------------------------------------------------------------------
 
     [Header("Initialize")]
     public OrbitInitializerFromPrimaryElements InitialConic;
     public CraftInitializer_NearStation initialNearStation;
     public CraftInitializer_DockedToStation initialDocked;
 
-    // --- internal ---
+
+    // -------------------------------------------------------------------------
+    // Restart / scenario reset
+    // -------------------------------------------------------------------------
+
+    [Header("Scenario initializer")]
+    public SimScenarioInitializer scenarioInitializer;
+
+    [Header("Restart / Reset")]
+    [Tooltip("If true, restart transaction is in progress and normal sim ticking is suppressed.")]
+    public bool isRestarting = false;
+
+    [Tooltip("If true, instance master has locked scenario resets.")]
+    public bool resetLockedByMaster = false;
+
+    [Tooltip("Optional: if true, Start() will run the selected startup scenario through the shared restart pipeline.")]
+    public bool useSharedStartupRestart = false;
+
+    [Tooltip("Which authored startup scenario INDEX to use.")]
+    public int startupScenarioIndex = 0;
+
+
+    [Header("Restart runtime clears")]
+    public GC_RuntimeState gcRuntime;
+    public NodePlanState nodePlan;
+    public GuidanceNavContactsState contactsState;
+    public GC_Core gcCore;
+    public GC_RuntimeNetState gcRuntimeNet;
+    public GC_NodePlanNetState nodePlanNet;
+    // -------------------------------------------------------------------------
+    // Internal state
+    // -------------------------------------------------------------------------
+
     private float _settleAccum = 0f;
 
-    // Integrated-mode sim time (seconds), kept consistent with mission time
+    // Integrated-mode sim time, kept aligned to mission time progression
     private double _simT = 0.0;
     private bool _simTValid = false;
 
-    // Mission-time accumulator (seconds) used to run fixedDt substeps
+    // Mission-time accumulator used for fixed integrated stepping
     private double _accumSim = 0.0;
+
+    // -------------------------------------------------------------------------
+    // Unity lifecycle
+    // -------------------------------------------------------------------------
 
     void Start()
     {
-        if (initialDocked != null)
+        if (!useSharedStartupRestart)
         {
-            bool okDocked = initialDocked.InitializeNow();
-            if (okDocked) return;
+            if (initialDocked != null)
+            {
+                bool okDocked = initialDocked.InitializeNow();
+                if (okDocked) return;
+            }
+
+            if (initialNearStation != null)
+            {
+                bool okNear = initialNearStation.InitializeNow();
+                if (okNear) return;
+            }
+
+            if (InitialConic != null)
+                InitialConic.InitializeNow();
+
+            return;
         }
 
-        if (initialNearStation != null)
-        {
-            bool ok = initialNearStation.InitializeNow();
-            if (ok) return;
-        }
-
-        if (InitialConic != null)
-            InitialConic.InitializeNow();
+        if (Networking.IsOwner(gameObject))
+            RestartToScenarioIndex_Internal(startupScenarioIndex, true);
     }
 
     void Update()
     {
-        if (paused || clock == null) return;
-
+        if (paused || isRestarting || clock == null) return;
         double Tmission = clock.Now();
 
-        // Choose a single authoritative time for "world/ephem rendering" this frame.
-        // - Owner + integrated: use _simT (craft state is integrated against _simT)
-        // - Everyone else: use mission time
+        bool hasNetCore = (netCore != null);
+        bool isOwner = hasNetCore && Networking.IsOwner(gameObject);
+
+        double backTime = 0.0;
+        if (netAtt != null)
+            backTime = (double)netAtt.interpBackTimeSeconds;
+
+        // Remote render-time cache is updated once per frame from the chosen back-time.
+        if (!isOwner)
+            clock.UpdateRemoteRenderTimeCache(backTime);
+
+        double tRenderNet = clock.GetCachedRemoteRenderTime();
+
+        byte presentedMode = isOwner
+            ? (netCore != null ? netCore.mode : MODE_RAILS)
+            : (netCore != null ? netCore.GetPresentedMode(tRenderNet) : MODE_RAILS);
+
+        // Choose one authoritative time for world/ephemeris/render this frame.
+        //
+        // Owner:
+        // - integrated: use _simT
+        // - otherwise : use mission time
+        //
+        // Remote:
+        // - default delayed presentation time for rails/docked
+        // - integrated: align to sampled netKin sim timeline
         double Tview = Tmission;
-        if (netCore != null && netCore.mode == MODE_INTEGRATED)
+
+        if (isOwner)
         {
-            if (Networking.IsOwner(netCore.gameObject) && _simTValid)
+            if (netCore != null && netCore.mode == MODE_INTEGRATED && _simTValid)
                 Tview = _simT;
         }
+        else
+        {
+            // Default remote delayed sim-time for rails/docked presentation
+            Tview = Tmission - backTime * clock.timeScale;
 
-        // 1) Everyone runs ephemeris for rails + rendering
-        if (ephem != null) ephem.Evaluate(Tview);
+            // Integrated remote world timing comes from latest RAW kinematic snapshot,
+            // not from interpolated kinematic playback.
+            if (presentedMode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
+            {
+                netKin.UpdatePresentedState();   // update separate visual-smoothed output
+                Tview = netKin.rawSimT;          // coherent latest packet sim-time
+            }
+        }
 
-        // 2) Everyone runs rails objects (deterministic vs Tview)
+        // 1) Evaluate ephemeris for the chosen presentation time
+        if (ephem != null)
+            ephem.Evaluate(Tview);
+
+        // 2) Evaluate rails objects against the same presentation time
         TickRailsObjects(Tview);
 
+        // 3) Craft handling:
+        //    - owner rails propagation
+        //    - owner docked motion
+        //    - remote net-driven presentation
+        //    - owner integrated does nothing here (FixedUpdate owns it)
+        TickCraft_UpdateSide(Tmission, Tview, tRenderNet, isOwner);
 
-        // 3) Craft update-side handling:
-        //    - Owner rails: rails propagation uses mission time (warp supported)
-        //    - Owner integrated: stepped in FixedUpdate (no-op here)
-        //    - Owner docked: dock kinematics in Update (same timing as station/render)
-        //    - Remotes: apply net state
-        TickCraft_UpdateSide(Tmission);
+        // -----------------------------------------------------------------
+        // Docking / undocking transitions
+        // -----------------------------------------------------------------
 
-
-        // --- Undock release request: DockingComputer has already written released craft state.
-        // Switch directly to rails/conic to avoid integrated-mode transition oddities.
-        // If owner is docked and undock was requested, the craft has NOW been updated
-        // to the current docked pose for this frame. Release from that pose.
+        // Undock release request:
+        // DockingComputer has already written the released craft state.
+        // Switch directly to rails/conic from the current docked frame state.
         if (dockingComp != null && dockingComp.requestUndock)
         {
             dockingComp.ExecuteUndockRelease(Tmission);
         }
 
-        // Now consume the leave-docked-to-rails request
+        // Consume leave-docked-to-rails transition request
         if (dockingComp != null && dockingComp.requestLeaveDockedToRails)
         {
             dockingComp.requestLeaveDockedToRails = false;
@@ -166,32 +324,32 @@ public class SimManager : UdonSharpBehaviour
             _accumSim = 0.0;
 
             EnterRails();
-            dock.ResetState();
+
+            if (dock != null)
+                dock.ResetState();
         }
 
-        // --- Docking capture check (owner only, gated by dockingAllowed) ---
+        // Docking capture check (owner only, gated by dockingAllowed)
         if (DockingAllowedNow() && dockingComp != null && netCore != null && clock != null)
         {
-            bool isOwner = Networking.IsOwner(netCore.gameObject);
-
             if (isOwner && netCore.mode != MODE_DOCKED)
             {
                 dockingComp.EvaluateLatchAndStart(Tmission);
 
                 if (dockingComp.requestEnterDocked)
                 {
-                    // DockingComputer should already have called netCore.SetDocked(...) to populate dock snapshot.
-                    // We just switch mode here.
+                    // DockingComputer is expected to have already populated dock snapshot via netCore.SetDocked(...)
                     byte pid = craft != null ? craft.primaryBodyId : (byte)0;
                     netCore.SetMode(MODE_DOCKED, pid, true);
 
-                    // Immediate attitude publish helps remotes snap cleanly.
-                    if (netAtt != null) netAtt.ForcePublishAttitude();
+                    // Immediate attitude publish helps remotes snap cleanly
+                    if (netAtt != null)
+                        netAtt.ForcePublishAttitude();
                 }
             }
         }
 
-        // 4) Contacts snapshot (render/GC/orrery all read this)
+        // 4) Contacts snapshot used by render / GC / orrery
         if (contactsComp != null)
         {
             contactsComp.craft = craft;
@@ -200,24 +358,26 @@ public class SimManager : UdonSharpBehaviour
             contactsComp.Evaluate();
         }
 
-        // 5) Render
+        // 5) Render / diagnostics
         ApplyRender();
     }
 
     private void FixedUpdate()
     {
-        if (paused || clock == null || netCore == null || craft == null) return;
+        if (paused || isRestarting || clock == null || netCore == null || craft == null)
+            return;
 
-        bool isOwner = Networking.IsOwner(netCore.gameObject);
+        bool isOwner = Networking.IsOwner(gameObject);
         if (!isOwner) return;
 
         byte mode = netCore.mode;
 
-        // Integrated-only in FixedUpdate
-        if (mode != MODE_INTEGRATED) return;
+        // Integrated mode is stepped only in FixedUpdate
+        if (mode != MODE_INTEGRATED)
+            return;
 
-        // Integrated mode must be warp=1 (by policy)
-        if (clock != null && clock.timeScale != 1.0)
+        // Integrated mode must run at warp = 1 by policy
+        if (clock.timeScale != 1.0)
         {
             if (blockEnterIntegratedDuringWarp)
             {
@@ -229,28 +389,31 @@ public class SimManager : UdonSharpBehaviour
                 clock.SetTimeScale(1.0);
         }
 
-        double targetT = clock.Now(); // mission time (warp is 1 by policy)
+        double targetT = clock.Now(); // mission time (warp == 1 by policy)
 
-        // Accumulate mission-time that has elapsed since our last integrated step
+        // Accumulate mission time since the last integrated step
         double dtMission = targetT - _simT;
-        if (dtMission < 0.0) dtMission = 0.0; // guard for re-anchors / ownership edges
+        if (dtMission < 0.0) dtMission = 0.0; // guard re-anchors / ownership edges
         _accumSim += dtMission;
 
         int steps = 0;
         double h = (double)fixedDt;
         if (h <= 0.0) h = 0.02; // sane fallback
 
+        // -----------------------------------------------------------------
+        // Whole fixed substeps
+        // -----------------------------------------------------------------
+
         while (_accumSim >= h && steps < maxSubstepsPerFixed)
         {
             _accumSim -= h;
             steps++;
 
-            // Advance integrated sim time deterministically
             double t0 = _simT;
             double t1 = t0 + h;
             _simT = t1;
 
-            // Owner attitude + actuation for THIS substep
+            // Owner attitude / actuation for this substep
             TickAttitudeOwner((float)h);
 
             // Propellant bookkeeping
@@ -269,27 +432,31 @@ public class SimManager : UdonSharpBehaviour
             {
                 numeric.force_E = actuation.F_E;
 
-                // IMPORTANT: Step expects tNow as the START of the step (it samples tNow and tNow+dt)
+                // Step expects tNow as the START of the step
                 numeric.Step(h, t0);
             }
 
-            // Auto settle back to rails (based on current net force)
+            // Auto-settle back to rails if force remains low long enough
             if (autoModeSwitch)
             {
                 double F = GetNetForceMagN();
+
                 if (F < exitIntegratedForceN) _settleAccum += (float)h;
                 else _settleAccum = 0f;
 
                 if (_settleAccum >= settleSeconds)
                 {
                     _settleAccum = 0f;
-                    EnterRails(); // fits conic at current time and switches
+                    EnterRails();
                     return;
                 }
             }
         }
 
-        // Finish the remaining fractional time so _simT matches mission time.
+        // -----------------------------------------------------------------
+        // Remaining fractional step to align _simT with mission time
+        // -----------------------------------------------------------------
+
         double rem = _accumSim;
         if (rem > 0.0)
         {
@@ -323,6 +490,7 @@ public class SimManager : UdonSharpBehaviour
             if (autoModeSwitch)
             {
                 double F = GetNetForceMagN();
+
                 if (F < exitIntegratedForceN) _settleAccum += (float)rem;
                 else _settleAccum = 0f;
 
@@ -335,26 +503,57 @@ public class SimManager : UdonSharpBehaviour
             }
         }
 
-        // If we hit the step budget, clamp sim time to mission time and clear accumulator.
-        if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit && _accumSim > 0.0)
+        // If step budget was exhausted, clamp sim time back to mission time
+        // so render / ephemeris stay coherent.
+        // if (steps == maxSubstepsPerFixed && clampToMissionTimeIfBudgetHit && _accumSim > 0.0)
+        // {
+        //     _simT = targetT;
+        //     _accumSim = 0.0;
+        // }
+
+        // Publish once per FixedUpdate; individual net scripts remain internally rate-limited
+        if (netCore != null)
+            netCore.PublishCore();
+
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
         {
-            _simT = targetT;
-            _accumSim = 0.0;
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.PublishAccel();
         }
 
-        // Publish once per FixedUpdate (publish scripts are already rate-limited internally)
-        if (netCore != null) netCore.PublishCore();
-        if (netKin != null)  netKin.PublishKinematics();
-        if (netAtt != null)  netAtt.PublishAttitude();
+        if (netKin != null)
+        {
+            netKin.currentOwnerSimT = _simT;
+            netKin.PublishKinematics();
+        }
+
+        if (netAtt != null)
+            netAtt.PublishAttitude();
     }
 
-    // Update-side craft handling: rails owner + docked owner + all remote application
-    private void TickCraft_UpdateSide(double Tmission)
+    // -------------------------------------------------------------------------
+    // Craft handling
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Update-side craft handling:
+    /// - Owner rails: rails propagation + rails attitude
+    /// - Owner docked: dock kinematics in Update
+    /// - Owner integrated: no-op here (handled in FixedUpdate)
+    /// - Remote: apply presented network state
+    /// </summary>
+    private void TickCraft_UpdateSide(double Tmission, double Tview, double tRenderNet, bool isOwner)
     {
         if (craft == null || netCore == null) return;
 
-        bool isOwner = Networking.IsOwner(netCore.gameObject);
-        byte mode = netCore.mode;
+        byte mode = isOwner ? netCore.mode : netCore.GetPresentedMode(tRenderNet);
 
         if (isOwner)
         {
@@ -367,11 +566,11 @@ public class SimManager : UdonSharpBehaviour
                 if (soiSwitch != null)
                     TryHandleSOISwitchRails(Tmission);
 
-                // Attitude in rails mode: run on frame dt (clamped)
+                // Rails attitude runs on frame dt
                 float dtFrame = Mathf.Min(Time.deltaTime, 0.05f);
                 TickAttitudeOwner(dtFrame);
 
-                // Auto switch to integrated if force exceeds threshold
+                // Auto switch to integrated if force is high enough
                 if (autoModeSwitch)
                 {
                     double F = GetNetForceMagN();
@@ -383,19 +582,19 @@ public class SimManager : UdonSharpBehaviour
                             if (forceWarpTo1OnIntegrated) clock.SetTimeScale(1.0);
                         }
 
-                        EnterIntegrated(); // anchors next FixedUpdate
+                        EnterIntegrated(Tmission); // anchors next FixedUpdate
                         return;
                     }
                 }
 
-                // Publish rails state (core+conic+attitude)
+                // Publish rails state
                 if (netCore != null)  netCore.PublishCore();
                 if (netConic != null) netConic.PublishConic();
                 if (netAtt != null)   netAtt.PublishAttitude();
             }
             else if (mode == MODE_DOCKED)
             {
-                // Docked is kinematic, so keep it in Update with station/render timing.
+                // Docked is kinematic; evaluate in Update with station/render timing
                 if (!DockingAllowedNow())
                 {
                     EnterRails();
@@ -413,40 +612,43 @@ public class SimManager : UdonSharpBehaviour
             }
             else
             {
-                // Integrated owner is stepped in FixedUpdate
+                // Owner integrated mode is stepped in FixedUpdate
             }
         }
         else
         {
-            // Remotes apply networked state in Update (smooth visuals)
+            // Remotes apply networked presentation in Update
             if (mode == MODE_RAILS)
             {
                 if (craftProp != null)
-                    craftProp.Evaluate(Tmission);
+                    craftProp.Evaluate(Tview);
 
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
             }
             else if (mode == MODE_INTEGRATED)
             {
-                if (netKin != null)
-                    netKin.ApplyRemoteKinematics();
-
+                // Integrated translation is currently sampled through netKin render cache;
+                // direct ApplyRemoteKinematics() is intentionally not used here.
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
+                if (netKin != null)
+                    netKin.ApplyRemoteRawToCraft();
+
+
             }
             else if (mode == MODE_DOCKED)
             {
-                // IMPORTANT: do NOT apply netKin while docked; docking is deterministic from station + snapshot.
+                // Do NOT apply netKin while docked; docking is deterministic from station + snapshot
                 if (DockingAllowedNow() && dockingComp != null)
                 {
-                    dockingComp.EvaluateDockedRemote(Tmission);
+                    dockingComp.EvaluateDockedRemote(Tview);
                 }
                 else
                 {
-                    // If docking not allowed, fall back to remote rails propagation
+                    // Fallback to remote rails presentation if docking is disabled
                     if (craftProp != null)
-                        craftProp.Evaluate(Tmission);
+                        craftProp.Evaluate(Tview);
 
                     if (netAtt != null)
                         netAtt.ApplyRemoteAttitude();
@@ -455,9 +657,14 @@ public class SimManager : UdonSharpBehaviour
         }
     }
 
+    // -------------------------------------------------------------------------
+    // World helpers
+    // -------------------------------------------------------------------------
+
     private void TickRailsObjects(double T)
     {
         if (railObjects == null) return;
+
         for (int i = 0; i < railObjects.Length; i++)
         {
             if (railObjects[i] != null)
@@ -480,36 +687,54 @@ public class SimManager : UdonSharpBehaviour
         }
     }
 
-    public void EnterIntegrated()
+    // -------------------------------------------------------------------------
+    // Mode transitions
+    // -------------------------------------------------------------------------
+
+    public void EnterIntegrated(double T)
     {
         if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         _settleAccum = 0f;
 
-        double T = (clock != null) ? clock.Now() : 0.0;
-
-        if (craftProp != null)
-            craftProp.Evaluate(T);
-
-        if (soiSwitch != null)
-            TryHandleSOISwitchRails(T);
-
+        // Caller has already evaluated rails at T if needed; just anchor integrated time here
         _simT = T;
         _simTValid = true;
         _accumSim = 0.0;
 
         netCore.SetMode(MODE_INTEGRATED, craft != null ? craft.primaryBodyId : (byte)0, true);
 
-        if (netKin != null) netKin.ForcePublishKinematics();
-        if (netAtt != null) netAtt.ForcePublishAttitude();
-        if (netConic != null) netConic.ForcePublishConic();
+        if (netCabinAccel != null && actuation != null && craft != null && craftAtt != null)
+        {
+            double m = craft.massKg;
+            if (m < 1.0) m = 1.0;
+
+            Vector3 aE = actuation.F_E / (float)m;
+            Vector3 aB = Quaternion.Inverse(craftAtt.qBE) * aE;
+
+            netCabinAccel.currentOwnerAccelB = aB;
+            netCabinAccel.currentOwnerSimT = _simT;
+            netCabinAccel.ForcePublishAccel();
+        }
+
+        if (netKin != null)
+        {
+            netKin.currentOwnerSimT = _simT;
+            netKin.ForcePublishKinematics();
+        }
+
+        if (netAtt != null)
+            netAtt.ForcePublishAttitude();
+
+        if (netConic != null)
+            netConic.ForcePublishConic();
     }
 
     public void EnterRails()
     {
         if (netCore == null || craft == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         _settleAccum = 0f;
 
@@ -524,6 +749,9 @@ public class SimManager : UdonSharpBehaviour
 
         netCore.SetMode(MODE_RAILS, pid, true);
 
+        if (netCabinAccel != null)
+            netCabinAccel.ForceZeroAccel(T);
+
         if (netAtt != null)
             netAtt.ForcePublishAttitude();
 
@@ -533,42 +761,208 @@ public class SimManager : UdonSharpBehaviour
 
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
-        if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        string playerName = player != null ? player.displayName : "null";
+        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
 
-        _simTValid = false;
+        Debug.Log("[SimManager] OnOwnershipTransferred: local=" + localName +
+                " newOwner=" + playerName +
+                " amOwner=" + Networking.IsOwner(gameObject));
+
+        if (!Networking.IsOwner(gameObject)) return;
+
         _accumSim = 0.0;
         _settleAccum = 0f;
 
-        netCore.ForcePublishCore();
-
-        byte mode = netCore.mode;
-        if (mode == MODE_INTEGRATED)
+        if (netCore != null && netCore.mode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
         {
-            if (netKin != null) netKin.ForcePublishKinematics();
-            if (netAtt != null) netAtt.ForcePublishAttitude();
+            // adopt the same integrated snapshot timeline the remote view was using
+            if (craft != null)
+            {
+                craft.rx = netKin.rawRx;
+                craft.ry = netKin.rawRy;
+                craft.rz = netKin.rawRz;
+
+                craft.vx = netKin.rawVx;
+                craft.vy = netKin.rawVy;
+                craft.vz = netKin.rawVz;
+            }
+
+            _simT = netKin.rawSimT;
+            _simTValid = true;
         }
         else
         {
-            if (netConic != null) netConic.ForcePublishConic();
-            if (netAtt != null)   netAtt.ForcePublishAttitude();
+            _simTValid = false;
+        }
+
+
+        TransferSubordinateOwnershipsToLocal();
+        ForcePublishAuthoritativeState();
+
+        Debug.Log("[SimManager] OnOwnershipTransferred: takeover complete.");
+    }
+
+    public override bool OnOwnershipRequest(VRCPlayerApi requester, VRCPlayerApi newOwner)
+    {
+        string requesterName = requester != null ? requester.displayName : "null";
+        string newOwnerName = newOwner != null ? newOwner.displayName : "null";
+        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
+
+        Debug.Log("[SimManager] OnOwnershipRequest: local=" + localName +
+                " requester=" + requesterName +
+                " newOwner=" + newOwnerName +
+                " amOwner=" + Networking.IsOwner(gameObject));
+
+        if (Networking.IsOwner(gameObject))
+        {
+            ForcePublishAuthoritativeState();
+
+            if (!CanApproveOwnershipTransfer())
+            {
+                Debug.Log("[SimManager] OnOwnershipRequest: denied (hard ownership lock active).");
+                return false;
+            }
+        }
+
+        Debug.Log("[SimManager] OnOwnershipRequest: approving transfer.");
+        return true;
+    }
+
+    public bool IsSimOwner()
+    {
+        return Networking.IsOwner(gameObject);
+    }
+
+    /// <summary>
+    /// Called by the LOCAL requester to ask for sim ownership.
+    /// This does NOT guarantee success; it triggers OnOwnershipRequest on the current owner.
+    /// </summary>
+    public void BeginOwnershipTransfer()
+    {
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null)
+        {
+            Debug.Log("[SimManager] BeginOwnershipTransfer: local player null.");
+            return;
+        }
+
+        bool alreadyOwner = Networking.IsOwner(gameObject);
+        Debug.Log("[SimManager] BeginOwnershipTransfer: local=" + local.displayName +
+                " alreadyOwner=" + alreadyOwner +
+                " managerOwner=" + Networking.GetOwner(gameObject).displayName);
+
+        if (alreadyOwner) return;
+
+        Networking.SetOwner(local, gameObject);
+
+        Debug.Log("[SimManager] BeginOwnershipTransfer: SetOwner called.");
+    }
+
+    /// <summary>
+    /// Current manager owner publishes the latest authoritative state before approving handoff.
+    /// </summary>
+    public void ForcePublishAuthoritativeState()
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        // if (clock != null)
+            // clock.PublishEpochNow();
+
+        if (netCore != null)
+            netCore.ForcePublishCore();
+
+        byte mode = (netCore != null) ? netCore.mode : MODE_RAILS;
+
+        if (mode == MODE_INTEGRATED)
+        {
+            if (netKin != null)
+            {
+                netKin.currentOwnerSimT = _simT;
+                netKin.ForcePublishKinematics();
+            }
+        }
+        else
+        {
+            if (netConic != null)
+                netConic.ForcePublishConic();
+        }
+
+        if (netAtt != null)
+            netAtt.ForcePublishAttitude();
+    }
+
+
+
+    public void SetOwnershipTransferHardLocked(bool locked)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (ownershipTransferHardLocked == locked) return;
+
+        ownershipTransferHardLocked = locked;
+
+        if (netCore != null)
+            netCore.ForcePublishCore();
+    }
+
+    public void ToggleOwnershipTransferHardLocked()
+    {
+        SetOwnershipTransferHardLocked(!ownershipTransferHardLocked);
+    }
+
+    public bool IsOwnershipTransferHardLocked()
+    {
+        return ownershipTransferHardLocked;
+    }
+
+    public bool CanApproveOwnershipTransfer()
+    {
+        return !ownershipTransferHardLocked;
+    }
+
+
+    /// <summary>
+    /// New manager owner pulls subordinate sync objects under the same owner.
+    /// </summary>
+    private void TransferSubordinateOwnershipsToLocal()
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return;
+        if (ownershipObjects == null) return;
+
+        int n = ownershipObjects.Length;
+        for (int i = 0; i < n; i++)
+        {
+            GameObject go = ownershipObjects[i];
+            if (go == null) continue;
+            if (go == gameObject) continue;
+
+            if (!Networking.IsOwner(go))
+                Networking.SetOwner(local, go);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // Rails / SOI helpers
+    // -------------------------------------------------------------------------
 
     private void TryHandleSOISwitchRails(double T)
     {
         if (soiSwitch == null) return;
         if (netCore == null) return;
-        if (!Networking.IsOwner(netCore.gameObject)) return;
+        if (!Networking.IsOwner(gameObject)) return;
 
         byte newPrimary;
         double dMoon, rSOI;
+
         bool wants = soiSwitch.Evaluate(out newPrimary, out dMoon, out rSOI);
         if (!wants) return;
 
         byte oldPrimary = craft != null ? craft.primaryBodyId : (byte)0;
 
-        if (craft != null) craft.primaryBodyId = newPrimary;
+        if (craft != null)
+            craft.primaryBodyId = newPrimary;
 
         if (conicFitter != null)
             conicFitter.Fit(newPrimary, T);
@@ -586,6 +980,137 @@ public class SimManager : UdonSharpBehaviour
         Debug.Log($"[SOI] primary {oldPrimary} -> {newPrimary}  (T={T:F2}s)");
     }
 
+    // -------------------------------------------------------------------------
+    // Restart helpers
+    // -------------------------------------------------------------------------
+
+    public void SetResetLockByMaster(bool locked)
+    {
+        if (!Networking.IsMaster) return;
+        resetLockedByMaster = locked;
+    }
+
+    public void RestartToScenarioIndex(int scenarioIndex)
+    {
+        RestartToScenarioIndex_Internal(scenarioIndex, false);
+    }
+
+    private void RestartToScenarioIndex_Internal(int scenarioIndex, bool ignoreResetPermission)
+    {
+        if (!ignoreResetPermission && !CanLocalUserReset()) return;
+        if (isRestarting) return;
+
+        isRestarting = true;
+
+        BeginRestartTransaction();
+
+        bool ok = ApplyAuthoredScenario(scenarioIndex);
+
+        EndRestartTransaction(ok);
+    }
+
+    private void BeginRestartTransaction()
+    {
+        paused = true;
+
+        _settleAccum = 0f;
+        _simT = 0.0;
+        _simTValid = false;
+        _accumSim = 0.0;
+
+        if (clock != null)
+            clock.ResetScenarioTime(0.0, 1.0);
+
+        if (netAtt != null)
+            netAtt.ResetPresentationState();
+
+        if (netCore != null)
+            netCore.ResetPresentationState();
+
+        if (netKin != null)
+            netKin.ResetPresentationState();
+
+        if (dock != null)
+            dock.ResetState();
+
+        if (dockingComp != null)
+        {
+            dockingComp.requestUndock = false;
+            dockingComp.requestLeaveDockedToRails = false;
+            dockingComp.requestEnterDocked = false;
+        }
+
+        if (gcCore != null)
+            gcCore.ResetForScenario(0.0);
+        else if (gcRuntime != null)
+            gcRuntime.ResetState(0.0);
+
+        if (nodePlan != null)
+            nodePlan.ClearAll();
+
+        if (gcRuntimeNet != null)
+            gcRuntimeNet.ResetPresentationState();
+
+        if (nodePlanNet != null)
+            nodePlanNet.ResetPresentationState();
+
+        if (contactsState != null)
+        {
+            contactsState.ClearFull();
+            contactsState.selectedStationIndex = -1;
+            contactsState.selectedStationDockPortIndex = 0;
+            contactsState.selectedCraftDockPortIndex = 0;
+            contactsState.selValid = false;
+        }
+    }
+
+    private bool ApplyAuthoredScenario(int scenarioIndex)
+    {
+        if (scenarioInitializer == null) return false;
+        return scenarioInitializer.ApplyScenarioByIndex(scenarioIndex, 0.0);
+    }
+
+    private void EndRestartTransaction(bool ok)
+    {
+        
+        if (ok)
+        {
+            if (netCore != null)
+                netCore.ResetSyncedStateFromCurrent();
+
+            if (netAtt != null)
+                netAtt.ResetSyncedStateFromCurrent();
+
+            if (gcRuntimeNet != null)
+                gcRuntimeNet.ResetSyncedStateFromCurrent();
+
+            if (nodePlanNet != null)
+                nodePlanNet.ResetSyncedStateFromCurrent();
+
+            if (gcRuntimeNet != null)
+                gcRuntimeNet.ForcePublish();
+
+            if (nodePlanNet != null)
+                nodePlanNet.ForcePublish();
+
+            if (netKin != null)
+            {
+                netKin.currentOwnerSimT = 0.0;
+                netKin.ResetSyncedStateFromCurrent();
+            }
+
+            ForcePublishAuthoritativeState();
+        }
+
+        paused = false;
+        isRestarting = false;
+    }
+
+
+    // -------------------------------------------------------------------------
+    // Small helpers
+    // -------------------------------------------------------------------------
+
     private double GetNetForceMagN()
     {
         if (actuation == null) return 0.0;
@@ -598,17 +1123,25 @@ public class SimManager : UdonSharpBehaviour
         return true;
     }
 
+    public bool CanLocalUserReset()
+    {
+        if (!Networking.IsOwner(gameObject)) return false;
+        if (resetLockedByMaster && !Networking.IsMaster) return false;
+        return true;
+    }
     private void ApplyRender()
     {
         if (orbit != null) orbit.Evaluate();
         if (primaryDiag != null) primaryDiag.Evaluate();
         if (orbitline != null) orbitline.Apply();
-        skyrender.Tick();
+
+        if (skyrender != null)
+            skyrender.Tick();
+
         if (stationRender != null)
             stationRender.Tick();
 
         if (stewartResolver != null)
             stewartResolver.Tick();
-
     }
 }

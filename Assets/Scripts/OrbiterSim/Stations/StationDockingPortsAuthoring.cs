@@ -26,10 +26,7 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
         if (cacheOnStart)
             CacheNow();
     }
-    void Awake()
-    {
-        CacheNow();
-    }
+
     public void CacheNow()
     {
         if (station == null || stationBody == null || portTransforms == null)
@@ -41,8 +38,6 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
         int n = portTransforms.Length;
         station.EnsureDockPortSize(n);
 
-        Quaternion qSB = Quaternion.Inverse(stationBody.rotation); // world -> station body rotation
-
         for (int i = 0; i < n; i++)
         {
             Transform p = portTransforms[i];
@@ -53,16 +48,46 @@ public class StationDockingPortsAuthoring : UdonSharpBehaviour
                 continue;
             }
 
-            // position in station body axes (meters)
-            Vector3 pB = stationBody.InverseTransformPoint(p.position);
+            // Position in station body frame
+            Vector3 pB_render = stationBody.InverseTransformPoint(p.position);
+            Quaternion qB_render = Quaternion.Inverse(stationBody.rotation) * p.rotation;
+
+            Vector3 pB = RenderBodyToSimBody(pB_render);
+            Quaternion qB = qB_render;
+
             station.dock_px_B[i] = (double)pB.x;
             station.dock_py_B[i] = (double)pB.y;
             station.dock_pz_B[i] = (double)pB.z;
 
-            // orientation in station body axes
-            station.dock_q_B[i] = qSB * p.rotation;
+            station.dock_q_B[i] = qB;
         }
 
-        if (log) Debug.Log($"[StationDockingPortsAuthoring] Cached {n} ports.");
+        station.dockingPortCount = n;
+
+        if (log) Debug.Log("[StationDockingPortsAuthoring] Cached " + n + " ports.");
     }
+
+    private Vector3 RenderBodyToSimBody(Vector3 v)
+    {
+        return new Vector3(-v.x, v.y, v.z);
+    }
+
+    private Quaternion RenderBodyRotToSimBodyRot(Quaternion qRender)
+    {
+        Vector3 x = qRender * Vector3.right;
+        Vector3 y = qRender * Vector3.up;
+        Vector3 z = qRender * Vector3.forward;
+
+        x = RenderBodyToSimBody(x);
+        y = RenderBodyToSimBody(y);
+        z = RenderBodyToSimBody(z);
+
+        x.Normalize();
+        z = Vector3.Cross(x, y).normalized;
+        y = Vector3.Cross(z, x).normalized;
+
+        return Quaternion.LookRotation(z, y);
+    }
+
+
 }

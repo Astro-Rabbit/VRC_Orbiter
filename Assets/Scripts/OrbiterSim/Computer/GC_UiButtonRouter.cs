@@ -14,12 +14,15 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
     public GC_RuntimeState runtime;
     public DockingComputer Dock;
     public DockingRuntimeState DockState;
+    public SimManager simManager;
 
     [Header("Test Settings")]
     public float deltaV_mps = 50f;      // test burn magnitude
     public float leadTimeSec = 60f;     // schedule node this many seconds in future
 
-
+    [Header("Debug")]
+    public bool logRequest = true;
+    
     [Header("Buttons (background Images)")]
     public Image manualBtn;
 
@@ -170,6 +173,11 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
         gc.API_Relative_KillVel_SelectedStation();
     }
 
+    public void stopkillMotion()
+    {
+        gc.API_Relative_StopTranslationAssist();
+    }
+
     public void API_TestNode()
     {
         if (gc == null || gc.nav == null) return;
@@ -203,4 +211,25 @@ public class GC_UiButtonRouter : UdonSharpBehaviour
     {
         DockState.CommandRetract();
     }
+    public void RequestOwnership()
+    {
+        if (simManager == null)
+        {
+            Debug.Log("[OwnershipButton] SimManager not assigned.");
+            return;
+        }
+
+        if (simManager.IsSimOwner())
+        {
+            if (logRequest)
+                Debug.Log("[OwnershipButton] Already sim owner.");
+            return;
+        }
+
+        if (logRequest)
+            Debug.Log("[OwnershipButton] Requesting sim ownership...");
+
+        simManager.BeginOwnershipTransfer();
+    }
+
 }

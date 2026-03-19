@@ -1,8 +1,9 @@
 ﻿using UdonSharp;
 using UnityEngine;
+using VRC.SDKBase;
 using VRC.Udon;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class MFDSwitch : UdonSharpBehaviour
 {
     [Header("References")]
@@ -13,35 +14,61 @@ public class MFDSwitch : UdonSharpBehaviour
 
     [Header("Settings")]
     public bool isThreeWay = false;
-    public float dragThreshold = 0.02f; // VR: Meters moved
-    public float desktopSensitivity = 50f; // Desktop: Degrees tilted
+    public float dragThreshold = 0.02f;
+    public float desktopSensitivity = 50f;
     public float switchAngle = 30f;
 
+    [Header("Axis Setup")]
+    [Tooltip("Which local axis of THIS object the VR pen motion uses. 0=X, 1=Y, 2=Z")]
+    public int dragAxis = 2;
+
+    [Tooltip("Invert the VR drag direction.")]
+    public bool invertDrag = false;
+
+    [Tooltip("Which local axis of the SWITCH MESH rotates. 0=X, 1=Y, 2=Z")]
+    public int rotationAxis = 0;
+
+    [Tooltip("Invert the visual switch rotation.")]
+    public bool invertRotation = false;
+
     [Header("Current State")]
-    public int state = 0;
+    [UdonSynced] public byte state = 0;
 
     private int _activePenID = -1;
     private Vector3 _startLocalTipPos;
     private Quaternion _grabRot;
-    private int _startState;
+    private byte _startState;
     private TabletPen _activePen;
+
     void Start()
     {
         UpdateVisuals();
-        NotifyTarget();
+        if (Networking.IsOwner(Networking.LocalPlayer, gameObject))
+        {
+            NotifyTarget();
+        }
+
+    }
+
+    public override void OnDeserialization()
+    {
+        ApplyState();
+    }
+
+    public override void OnOwnershipTransferred(VRCPlayerApi newOwner)
+    {
+        // Optional: if you want any ownership-dependent UI, handle it here.
     }
 
     public void OnDown(int id, TabletPen pen, Quaternion startRotation)
     {
-        //Debug.Log("[MFDSwitch] Ondown");
         _activePenID = id;
         _startState = state;
         _grabRot = startRotation;
         _activePen = pen;
 
-        // Calculate initial tip position for VR
         Vector3 tipWorldPos = pen.transform.position + (pen.transform.up * -pen.rayDistance);
-        _startLocalTipPos = transform.InverseTransformPoint(tipWorldPos);
+        _startLocalTipPos = WorldToLocalNoScale(tipWorldPos);
     }
 
     public void OnStayVR(int id, TabletPen pen)
@@ -49,36 +76,42 @@ public class MFDSwitch : UdonSharpBehaviour
         if (id != _activePenID) return;
 
         Vector3 currentTipWorld = pen.transform.position + (pen.transform.up * -pen.rayDistance);
-        Vector3 currentLocalTip = transform.InverseTransformPoint(currentTipWorld);
+        Vector3 currentLocalTip = WorldToLocalNoScale(currentTipWorld);
 
-        float deltaY = currentLocalTip.y - _startLocalTipPos.y;
-        ProcessDelta(deltaY / dragThreshold);
+        float startValue = GetAxisValue(_startLocalTipPos, dragAxis);
+        float currentValue = GetAxisValue(currentLocalTip, dragAxis);
+
+        float delta = currentValue - startValue;
+        if (invertDrag) delta = -delta;
+
+        ProcessDelta(delta / dragThreshold);
     }
 
     public void OnStayDesktop(int id, Quaternion currentCameraRotation)
     {
         if (id != _activePenID) return;
 
-        // Same head-tilt logic as knob, focusing on Pitch (Vertical movement)
         Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
         float pitch = Mathf.DeltaAngle(0, relativeRot.eulerAngles.x);
 
-        // Negative pitch because looking "up" should move switch "up"
         ProcessDelta(-pitch / desktopSensitivity);
     }
 
     private void ProcessDelta(float stepDelta)
     {
-        int stepChange = Mathf.RoundToInt(stepDelta);
         int maxState = isThreeWay ? 2 : 1;
-        int newState = Mathf.Clamp(_startState + stepChange, 0, maxState);
-        
-        if (newState != state)
+        int newState = Mathf.Clamp(_startState + Mathf.RoundToInt(stepDelta), 0, maxState);
+        byte newStateByte = (byte)newState;
+        if (newStateByte == state) return;
+
+        // Local interaction feedback
+        if (_activePen != null)
         {
             if(newState == 0)
             {
                 if (_activePen != null) _activePen.PlaySwitchUpClip();
-            }else if(newState == 1)
+            }
+            else if(newState == 1)
             {
                 if (_activePen != null) _activePen.PlaySwitchDownClip();
             }
@@ -87,7 +120,14 @@ public class MFDSwitch : UdonSharpBehaviour
             
             UpdateVisuals();
             NotifyTarget();
+
         }
+
+        EnsureLocalOwnership();
+
+        state = newStateByte;
+        ApplyState();
+        RequestSerialization();
     }
 
     public void OnUp(int id)
@@ -95,21 +135,62 @@ public class MFDSwitch : UdonSharpBehaviour
         if (id == _activePenID)
         {
             _activePenID = -1;
-            _activePen = null; // Clear reference
+            _activePen = null;
         }
+    }
+
+    private void ApplyState()
+    {
+        UpdateVisuals();
+        NotifyTarget();
     }
 
     private void UpdateVisuals()
     {
         if (switchMesh == null) return;
-        float targetAngle = isThreeWay ? (state - 1) * switchAngle : (state == 0 ? -switchAngle : switchAngle);
-        switchMesh.localRotation = Quaternion.Euler(targetAngle, 0, 0);
+
+        float targetAngle = isThreeWay
+            ? (state - 1) * switchAngle
+            : (state == 0 ? -switchAngle : switchAngle);
+
+        if (invertRotation) targetAngle = -targetAngle;
+
+        Vector3 e = Vector3.zero;
+        if (rotationAxis == 0) e.x = targetAngle;
+        else if (rotationAxis == 1) e.y = targetAngle;
+        else e.z = targetAngle;
+
+        switchMesh.localRotation = Quaternion.Euler(e);
     }
 
     private void NotifyTarget()
     {
         if (targetScript == null) return;
-        if (!string.IsNullOrEmpty(variableName)) targetScript.SetProgramVariable(variableName, state);
-        if (!string.IsNullOrEmpty(eventName)) targetScript.SendCustomEvent(eventName);
+
+        if (!string.IsNullOrEmpty(variableName))
+            targetScript.SetProgramVariable(variableName, state);
+
+        if (!string.IsNullOrEmpty(eventName))
+            targetScript.SendCustomEvent(eventName);
+    }
+
+    private void EnsureLocalOwnership()
+    {
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return;
+        if (!Networking.IsOwner(local, gameObject))
+            Networking.SetOwner(local, gameObject);
+    }
+
+    private Vector3 WorldToLocalNoScale(Vector3 worldPoint)
+    {
+        return Quaternion.Inverse(transform.rotation) * (worldPoint - transform.position);
+    }
+
+    private float GetAxisValue(Vector3 v, int axis)
+    {
+        if (axis == 0) return v.x;
+        if (axis == 1) return v.y;
+        return v.z;
     }
 }

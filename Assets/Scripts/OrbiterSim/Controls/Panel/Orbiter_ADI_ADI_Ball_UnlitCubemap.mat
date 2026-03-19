@@ -1,0 +1,60 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Orbiter_ADI_ADI_Ball_UnlitCubemap
+  m_Shader: {fileID: 4800000, guid: 7adbb186d4c913e45ab71cf633586849, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _EnvCube:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _GlobeCube:
+        m_Texture: {fileID: 8900000, guid: 4b542e94fcf5c93439895a3b4cc8914e, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _RoughnessCube:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AmbientStrength: 0.08
+    - _DiffuseStrength: 1
+    - _EnvStrength: 0.25
+    - _F0: 0.0628
+    - _FlipX: 1
+    - _FlipY: 0
+    - _FlipZ: 0
+    - _IndirectSpecStrength: 1
+    - _LightmapStrength: 1.867
+    - _RoughnessInfluence: 1
+    - _RoughnessMax: 1
+    - _RoughnessMin: 0
+    - _Shininess: 72.5
+    - _SpecStrength: 0.203
+    m_Colors:
+    - _ADISpecColor: {r: 1, g: 1, b: 1, a: 1}
+    - _BallRot: {r: 0, g: 0, b: 0, a: 1}
+    - _SpecColor: {r: 1, g: 1, b: 1, a: 1}
+    - _SpecularTint: {r: 0, g: 0, b: 0, a: 1}
+    - _Tint: {r: 1, g: 1, b: 1, a: 1}
+  m_BuildTextureStacks: []

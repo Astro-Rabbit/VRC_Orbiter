@@ -44,6 +44,7 @@ public class TabletPen : UdonSharpBehaviour
     private int _zoneCount = 0;
 
 
+
     public bool IsGripping;
     private string _gripAxis;
     public GameObject Pickup;
@@ -72,6 +73,9 @@ public class TabletPen : UdonSharpBehaviour
 
     private TabletScrollbar _activeScrollbar;
     private TabletScrollbar _lastHoveredScrollbar;
+
+
+    private Object _lastHapticTarget;
 
     void Start()
     {
@@ -133,6 +137,7 @@ public class TabletPen : UdonSharpBehaviour
 
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
 
+
         if (PenMesh != null)
         {
             if (currentlyHitting)
@@ -171,11 +176,13 @@ public class TabletPen : UdonSharpBehaviour
         // If we are looking at a new interactive object, pulse and save it
         if (currentHitComp != _lastHapticTarget)
         {
+
             if (currentHitComp != null)
             {
                 // TriggerHaptic(0.01f, 0.2f); // Quick "tick"
                 TriggerHapticEvent();
             }
+
             _lastHapticTarget = currentHitComp; // Will be null if looking at nothing/wall
         }
         // --- Haptic Hover Logic End ---

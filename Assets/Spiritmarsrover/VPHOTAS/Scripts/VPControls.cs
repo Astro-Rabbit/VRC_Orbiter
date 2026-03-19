@@ -33,6 +33,8 @@ public class VPControls : UdonSharpBehaviour
     public bool invertTransX = false;
     public bool invertTransY = false;
     public bool invertTransZ = false;
+    [Header("Manual Translation Force Mapping")]
+    public Vector3 maxTranslateForce_B = new Vector3(1000f, 1000f, 1000f);
 
     // Optional: if you want translation to automatically imply an RCS mode
     // 0=TRANSLATE, 1=ROTATE, 2=BLENDED (your default), adjust to your project constants
@@ -55,6 +57,9 @@ public class VPControls : UdonSharpBehaviour
     [Header("Joystick Assets")]
     public GameObject JoystickCol;
     public string JoyString = "Joystick";
+
+    [Header("Joystick Mode Selector")]
+    public float joystickModeKnobValue = 90f; // expected values: 0 or 90
 
     [Header("Throttle Assets")]
     public GameObject ThrottleCol;
@@ -121,7 +126,10 @@ public class VPControls : UdonSharpBehaviour
     private int lastIdxTX, lastIdxTY, lastIdxTZ;
 
     public GameObject ThrottleRotation;
-
+    private void Start()
+    {
+        ApplyJoystickModeFromKnob();
+    }
     private void Update()
     {
         float dt = Time.deltaTime;
@@ -207,7 +215,7 @@ public class VPControls : UdonSharpBehaviour
                     manualDraft.rateCmd_B = new Vector3(
                         inputZ * p,  // pitch about +X
                         inputY * y,  // yaw about +Y
-                        inputX * r   // roll about +Z
+                        -inputX * r   // roll about +Z
                     );
                     manualDraft.tauCmd_B = Vector3.zero;
                 }
@@ -216,7 +224,7 @@ public class VPControls : UdonSharpBehaviour
                     manualDraft.tauCmd_B = new Vector3(
                         inputZ * maxTauNm,
                         inputY * maxTauNm,
-                        inputX * maxTauNm
+                        -inputX * maxTauNm
                     );
                     manualDraft.rateCmd_B = Vector3.zero;
                 }
@@ -228,9 +236,16 @@ public class VPControls : UdonSharpBehaviour
 
             // Translation command in BODY frame: X=right, Y=up, Z=forward
             // Clamp + deadzone
-            Vector3 tCmd = new Vector3(tx, ty, tz);
-            if (!transActive) tCmd = Vector3.zero;
-            manualDraft.translateCmd_B = tCmd;
+            Vector3 tCmd01 = new Vector3(tx, ty, tz);
+            if (!transActive) tCmd01 = Vector3.zero;
+
+            Vector3 tCmdN = new Vector3(
+                tCmd01.x * maxTranslateForce_B.x,
+                tCmd01.y * maxTranslateForce_B.y,
+                tCmd01.z * maxTranslateForce_B.z
+            );
+
+            manualDraft.translateCmd_B = tCmdN;
 
             // Optional: set preferred RCS mode when translating
             if (forceRcsModeOnTranslate && transActive)
@@ -536,4 +551,24 @@ public class VPControls : UdonSharpBehaviour
             Networking.LocalPlayer.PlayHapticEventInHand(hand, hapticDur, hapticAmp, hapticFreq);
         }
     }
+
+    public void ApplyJoystickModeFromKnob()
+    {
+        // 0 = torque, 90 = rate
+        manualUseRateControl = (joystickModeKnobValue >= 45f);
+    }
+
+    public void SetJoystickModeRate()
+    {
+        joystickModeKnobValue = 90f;
+        manualUseRateControl = true;
+    }
+
+    public void SetJoystickModeTorque()
+    {
+        joystickModeKnobValue = 0f;
+        manualUseRateControl = false;
+    }
+
+
 }

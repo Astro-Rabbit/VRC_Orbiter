@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -10,6 +10,7 @@ public class CraftNetState : UdonSharpBehaviour
     public const byte MODE_DOCKED = 2;
 
     [Header("Wiring")]
+    public SimManager simManager;
     public SimClock clock;
     public CraftStateModel craft;
 
@@ -24,6 +25,15 @@ public class CraftNetState : UdonSharpBehaviour
     public byte mode = MODE_RAILS;
     public byte primaryBodyId = 1;
 
+    [Header("Read-only (presentation transition mirrors synced)")]
+    [Tooltip("Previous authoritative mode before the latest mode change. Used by remotes for delayed presentation switching.")]
+    public byte prevMode = MODE_RAILS;
+
+    [Tooltip("Previous authoritative primary before the latest mode change. Used by remotes for delayed presentation switching.")]
+    public byte prevPrimaryBodyId = 1;
+
+    [Tooltip("Network/server time when the latest mode change was published.")]
+    public double modeChangeNetT = 0.0;
 
     [Header("Read-only (docking mirrors synced)")]
     public byte dockPhase = 0;
@@ -36,11 +46,21 @@ public class CraftNetState : UdonSharpBehaviour
     [Header("Read-only (docking pose mirrors synced)")]
     public Vector3 dockRelPos_SB;
     public Quaternion dock_qCraftToStation;
+
+    [Header("Read-only (ownership transfer policy mirrors synced)")]
+    public bool ownershipTransferHardLocked = false;
+
     // --- synced core ---
     [UdonSynced] private int _rev;
     [UdonSynced] private int _craftId;
     [UdonSynced] private byte _mode;
     [UdonSynced] private byte _primaryBodyId;
+
+    [UdonSynced] private bool _ownershipTransferHardLocked;
+    // Delayed remote presentation transition support
+    [UdonSynced] private byte _prevMode;
+    [UdonSynced] private byte _prevPrimaryBodyId;
+    [UdonSynced] private double _modeChangeNetT;
 
     // Mass/fuel state (doubles)
     [UdonSynced] private double _dryMassKg;
@@ -53,19 +73,17 @@ public class CraftNetState : UdonSharpBehaviour
     // Optional: time the mode/meta was last published (sim time)
     [UdonSynced] private double _coreEpochT;
 
-
     // --- synced dock attachment (valid when _mode == MODE_DOCKED) ---
-    [UdonSynced] private byte _dockPhase;              // your DockingRuntimeState phase enum byte
-    [UdonSynced] private int  _dockStationIndex;       // index into stations[]
-    [UdonSynced] private byte _dockStationPortIndex;   // station port idx
-    [UdonSynced] private byte _dockCraftPortIndex;     // craft port idx
+    [UdonSynced] private byte _dockPhase;
+    [UdonSynced] private int _dockStationIndex;
+    [UdonSynced] private byte _dockStationPortIndex;
+    [UdonSynced] private byte _dockCraftPortIndex;
 
     // Deterministic animation timing (mission time)
-    [UdonSynced] private double _dockCaptureT0;        // when soft capture started
-    [UdonSynced] private double _dockRetractT0;        // when retract started; 0 if not started
+    [UdonSynced] private double _dockCaptureT0;
+    [UdonSynced] private double _dockRetractT0;
 
     // --- synced dock pose (station body frame) ---
-// --- synced dock pose (station body frame) ---
     [UdonSynced] private Vector3 _dockRelPos_SB;
     [UdonSynced] private Quaternion _dock_qCraftToStation;
 
@@ -74,28 +92,76 @@ public class CraftNetState : UdonSharpBehaviour
 
     private float Period => (coreHz > 0f) ? (1f / coreHz) : 999999f;
 
+
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
     void Start()
     {
         mode = _mode;
         primaryBodyId = _primaryBodyId;
+
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;        
     }
 
     public byte GetMode() => _mode;
     public byte GetPrimaryBodyId() => _primaryBodyId;
 
+    public byte GetPrevMode() => _prevMode;
+    public byte GetPrevPrimaryBodyId() => _prevPrimaryBodyId;
+    public double GetModeChangeNetT() => _modeChangeNetT;
+
+    /// <summary>
+    /// Remote presentation helper:
+    /// - Before tRender reaches the mode-change network time, present the PREVIOUS mode.
+    /// - After that, present the CURRENT mode.
+    /// Owners always use current authoritative mode.
+    /// </summary>
+    public byte GetPresentedMode(double tRender)
+    {
+        if (HasSimAuthority()) return _mode;
+        if (tRender < _modeChangeNetT) return _prevMode;
+        return _mode;
+    }
+
+    /// <summary>
+    /// Remote presentation helper matching GetPresentedMode().
+    /// </summary>
+    public byte GetPresentedPrimaryBodyId(double tRender)
+    {
+        if (HasSimAuthority()) return _primaryBodyId;
+        if (tRender < _modeChangeNetT) return _prevPrimaryBodyId;
+        return _primaryBodyId;
+    }
+
     /// <summary>Owner: set mode (and optionally primary) and publish immediately.</summary>
     public void SetMode(byte newMode, byte newPrimaryBodyId, bool forcePublish = true)
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
+
+        // Record previous authoritative values for delayed remote presentation
+        _prevMode = _mode;
+        _prevPrimaryBodyId = _primaryBodyId;
 
         _mode = newMode;
         _primaryBodyId = newPrimaryBodyId;
+
+        // Stamp the transition in NETWORK/server time for render-delay logic
+        _modeChangeNetT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
 
         if (_mode != MODE_DOCKED)
             ClearDockSynced();
 
         mode = _mode;
         primaryBodyId = _primaryBodyId;
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
 
         if (forcePublish) ForcePublishCore();
     }
@@ -103,6 +169,7 @@ public class CraftNetState : UdonSharpBehaviour
     /// <summary>Owner: publish core/meta at its configured cadence. Safe to call every frame.</summary>
     public void PublishCore()
     {
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (craft == null || clock == null) return;
 
@@ -133,6 +200,7 @@ public class CraftNetState : UdonSharpBehaviour
         _propMassKg = craft.propMassKg;
         _massKg = craft.massKg;
 
+        // Mirror publics for inspector/debug
         dockPhase = _dockPhase;
         dockStationIndex = _dockStationIndex;
         dockStationPortIndex = _dockStationPortIndex;
@@ -142,9 +210,20 @@ public class CraftNetState : UdonSharpBehaviour
         dockRelPos_SB = _dockRelPos_SB;
         dock_qCraftToStation = _dock_qCraftToStation;
 
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+
         // Fuel fraction convenience (avoid div by 0)
         double denom = craft.dryMassKg + craft.propMassKg;
         _fuel01 = (denom > 1e-6) ? (float)(craft.propMassKg / denom) : 0f;
+
+        if (simManager != null)
+        {
+            _ownershipTransferHardLocked = simManager.ownershipTransferHardLocked;
+        }
+
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;
 
         if (bumpRevision) _rev++;
 
@@ -160,26 +239,31 @@ public class CraftNetState : UdonSharpBehaviour
         mode = _mode;
         primaryBodyId = _primaryBodyId;
 
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;
+
         dockPhase = _dockPhase;
         dockStationIndex = _dockStationIndex;
         dockStationPortIndex = _dockStationPortIndex;
         dockCraftPortIndex = _dockCraftPortIndex;
         dockCaptureT0 = _dockCaptureT0;
-        dockRetractT0 = _dockRetractT0;        
+        dockRetractT0 = _dockRetractT0;
         dockRelPos_SB = _dockRelPos_SB;
         dock_qCraftToStation = _dock_qCraftToStation;
+
         if (_rev == _appliedRev) return;
         _appliedRev = _rev;
 
         // Apply mass/fuel to local craft model (remote follow / UI)
-        if (!Networking.IsOwner(gameObject) && craft != null)
+        if (!HasSimAuthority() && craft != null)
         {
             craft.primaryBodyId = _primaryBodyId;
             craft.dryMassKg = _dryMassKg;
             craft.propMassKg = _propMassKg;
             craft.massKg = _massKg;
-
-            
         }
     }
 
@@ -196,7 +280,7 @@ public class CraftNetState : UdonSharpBehaviour
         bool forcePublish = true)
     {
         if (!Networking.IsOwner(gameObject)) return;
-
+        if (!HasSimAuthority()) return;
         _dockStationIndex = stationIndex;
         _dockStationPortIndex = stationPortIndex;
         _dockCraftPortIndex = craftPortIndex;
@@ -209,13 +293,24 @@ public class CraftNetState : UdonSharpBehaviour
 
         dockRelPos_SB = relPos_SB;
         dock_qCraftToStation = qCraftToStation;
+
+        // Record previous authoritative values for delayed remote presentation
+        _prevMode = _mode;
+        _prevPrimaryBodyId = _primaryBodyId;
+
         // Docked mode implies the craft primary matches the station’s primary
         _mode = MODE_DOCKED;
         _primaryBodyId = primary;
 
+        // Stamp the transition in NETWORK/server time
+        _modeChangeNetT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
+
         // Mirror public
         mode = _mode;
         primaryBodyId = _primaryBodyId;
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
 
         if (forcePublish) ForcePublishCore();
     }
@@ -234,7 +329,28 @@ public class CraftNetState : UdonSharpBehaviour
 
         dockRelPos_SB = Vector3.zero;
         dock_qCraftToStation = Quaternion.identity;
-
     }
+
+    public void ResetPresentationState()
+    {
+        _accum = 0f;
+        _appliedRev = -1;
+    }
+
+    public void ResetSyncedStateFromCurrent()
+    {
+        _accum = 0f;
+
+        _prevMode = _mode;
+        _prevPrimaryBodyId = _primaryBodyId;
+        _modeChangeNetT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
+
+        mode = _mode;
+        primaryBodyId = _primaryBodyId;
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+    }
+    public bool GetOwnershipTransferHardLocked() => _ownershipTransferHardLocked;
 
 }

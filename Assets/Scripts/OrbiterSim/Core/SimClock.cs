@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
 
@@ -14,6 +14,10 @@ using VRC.SDKBase;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class SimClock : UdonSharpBehaviour
 {
+
+    [Header("Authority")]
+    public SimManager simManager;
+
     [Header("Mode")]
     [Tooltip("If true, derive simTime from VRChat server time and a synced epoch (recommended for multiplayer).")]
     public bool useNetworkTime = true;
@@ -39,6 +43,12 @@ public class SimClock : UdonSharpBehaviour
     [Tooltip("Optional visual smoothing for non-owners (seconds of correction per second). 0 disables.")]
     public float slewRate = 0f;
 
+
+    [Header("Render-time cache (read-only)")]
+    public double cachedRenderTimeNet;
+    public double cachedRenderBackTime;
+    public int cachedRenderFrame = -1;
+
     // --- Synced epoch mapping (late joiners get this automatically) ---
     [UdonSynced] private double _epochServerTime; // server seconds at epoch
     [UdonSynced] private double _epochSimTime;    // sim seconds at epoch
@@ -49,17 +59,24 @@ public class SimClock : UdonSharpBehaviour
     private int _appliedRevision = -2;            // distinct from -1 sentinel
     private float _hbAccum = 0f;
 
+    private bool HasSimAuthority()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
+
     void Start()
     {
         // Initialize local copies from inspector defaults
         _timeScale = timeScale;
 
         // Owner should publish an initial epoch so late joiners have a stable reference immediately.
-        if (useNetworkTime && Networking.IsOwner(gameObject))
+        if (useNetworkTime && Networking.IsOwner(gameObject) && HasSimAuthority())
         {
             PublishEpochNow(); // will set revision from -1 -> 0
         }
     }
+
+
 
     void Update()
     {
@@ -108,7 +125,7 @@ public class SimClock : UdonSharpBehaviour
         lastSimDt = simTime - prev;
 
         // Optional heartbeat: rebroadcast the current synced values WITHOUT re-anchoring.
-        if (useNetworkTime && heartbeatSeconds > 0f && Networking.IsOwner(gameObject))
+        if (useNetworkTime && heartbeatSeconds > 0f && Networking.IsOwner(gameObject) && HasSimAuthority())
         {
             _hbAccum += Time.deltaTime;
             if (_hbAccum >= heartbeatSeconds)
@@ -117,6 +134,18 @@ public class SimClock : UdonSharpBehaviour
                 Rebroadcast();
             }
         }
+    }
+
+    public void UpdateRemoteRenderTimeCache(double backTimeSeconds)
+    {
+        cachedRenderBackTime = backTimeSeconds;
+        cachedRenderTimeNet = Networking.GetServerTimeInSeconds() - backTimeSeconds;
+        cachedRenderFrame = Time.frameCount;
+    }
+
+    public double GetCachedRemoteRenderTime()
+    {
+        return cachedRenderTimeNet;
     }
 
     /// <summary>
@@ -146,6 +175,16 @@ public class SimClock : UdonSharpBehaviour
         return simTime;
     }
 
+    public double NowNetwork()
+    {
+        return Networking.GetServerTimeInSeconds();
+    }
+
+    public double GetRemoteRenderTime(double backTimeSeconds)
+    {
+        return Networking.GetServerTimeInSeconds() - backTimeSeconds;
+    }
+
     /// <summary>
     /// Local stepping (offline/testing): simTime += dtReal * timeScale.
     /// </summary>
@@ -166,6 +205,7 @@ public class SimClock : UdonSharpBehaviour
         timeScale = newScale;
 
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;
         if (!Networking.IsOwner(gameObject)) return;
 
         PublishEpochNow(); // re-anchors using derived sim-now, and syncs
@@ -179,6 +219,7 @@ public class SimClock : UdonSharpBehaviour
     public void PublishEpochNow()
     {
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
 
         double serverNow = Networking.GetServerTimeInSeconds();
@@ -214,6 +255,7 @@ public class SimClock : UdonSharpBehaviour
     public void Rebroadcast()
     {
         if (!useNetworkTime) return;
+        if (!HasSimAuthority()) return;        
         if (!Networking.IsOwner(gameObject)) return;
         if (_revision < 0) return;
 
@@ -231,14 +273,28 @@ public class SimClock : UdonSharpBehaviour
         }
     }
 
+    public double ServerTimeForSimTime(double simT)
+    {
+        if (!useNetworkTime)
+            return Networking.GetServerTimeInSeconds();
+
+        if (_revision < 0)
+            return Networking.GetServerTimeInSeconds();
+
+        // Avoid divide-by-zero / nonsense when paused at warp 0.
+        if (System.Math.Abs(_timeScale) < 1e-9)
+            return _epochServerTime;
+
+        return _epochServerTime + (simT - _epochSimTime) / _timeScale;
+    }
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
         if (!useNetworkTime) return;
 
-        // New owner becomes authoritative: publish fresh epoch so everyone locks to it.
-        if (Networking.IsOwner(gameObject))
+        // Only the object's new local owner AND current sim authority should republish.
+        if (HasSimAuthority() && Networking.IsOwner(gameObject))
         {
-            PublishEpochNow();
+            // PublishEpochNow();
         }
     }
 
@@ -258,4 +314,43 @@ public class SimClock : UdonSharpBehaviour
 
         _appliedRevision = _revision;
     }
+
+    /// <summary>
+    /// Owner-only: hard-reset the mission clock to a specific sim time and warp,
+    /// anchored at the current server time. This is used for scenario restarts.
+    /// </summary>
+    public void ResetScenarioTime(double newSimTime, double newTimeScale)
+    {
+        if (newTimeScale < 0.0) newTimeScale = 0.0;
+
+        timeScale = newTimeScale;
+
+        if (!useNetworkTime)
+        {
+            simTime = newSimTime;
+            lastSimDt = 0.0;
+            return;
+        }
+
+        if (!HasSimAuthority()) return;
+        if (!Networking.IsOwner(gameObject)) return;
+
+        double serverNow = Networking.GetServerTimeInSeconds();
+
+        _epochServerTime = serverNow;
+        _epochSimTime = newSimTime;
+        _timeScale = newTimeScale;
+
+        if (_revision < 0) _revision = 0;
+        else _revision++;
+
+        _appliedRevision = _revision;
+        simTime = newSimTime;
+        lastSimDt = 0.0;
+        _hbAccum = 0f;
+
+        RequestSerialization();
+    }
+
+
 }

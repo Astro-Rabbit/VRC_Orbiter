@@ -28,7 +28,7 @@ public class GC_Core : UdonSharpBehaviour
     public EphemSnapshot ephem;
     public BodyCatalog bodies;
     public ThrusterCatalog thrusters;
-
+    public GC_NodePlanNetState nodeNet;
     [Header("Optional docking contacts (for docking helper APIs)")]
     public GuidanceNavContactsState contacts;
 
@@ -58,7 +58,7 @@ public class GC_Core : UdonSharpBehaviour
     public Vector3 rel_axisWeights = new Vector3(1f, 1f, 0.5f);
     public float rel_velDeadband = 0.02f;
     public float rel_posDeadband = 0.05f;
-    public byte rel_rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
+    public byte rel_rcsMode = CraftCommandState.RCS_MODE_BLENDED;
 
     // --------------------
     // Tolerances (match helper expectations; tweak later if needed)
@@ -73,6 +73,10 @@ public class GC_Core : UdonSharpBehaviour
     public double rtn_rTol = 1e-6;
     public double rtn_hTol = 1e-9;
 
+    [Header("Optional displays")]
+    public OrreryController orrery;
+    public OrreryCraftOrbitRibbon orreryCraftOrbitRibbon;    
+    public OrreryCraftDirectionMarkers orreryCraftDirectionMarkers;
     // Executor schedule (frozen once when a node is selected)
     private double _exec_tExec = 0.0;
     private double _exec_tBurnStart = 0.0;
@@ -181,6 +185,26 @@ public class GC_Core : UdonSharpBehaviour
         ArbitrateAndWriteIntent();
 
         UpdateActiveProgramIndicator();
+
+        if (orrery != null)
+            orrery.TickOrrery();
+
+        if (orreryCraftOrbitRibbon != null)
+            orreryCraftOrbitRibbon.TickRibbon();
+
+        if (orreryCraftDirectionMarkers != null)
+        {
+            orreryCraftDirectionMarkers.TickMarkers();
+
+            if (orrery != null)
+            {
+                Vector3 clipCenterWorld;
+                float clipRadiusWorld;
+                orrery.GetCurrentClipSphereWorld(out clipCenterWorld, out clipRadiusWorld);
+                orreryCraftDirectionMarkers.ApplyClipVolumeParams(clipCenterWorld, clipRadiusWorld);
+            }
+        }
+
     }
 
     // =====================================================================
@@ -647,7 +671,6 @@ public class GC_Core : UdonSharpBehaviour
                 _manActMode, _manAllowWheels, _manAllowRCS, _manAllowGimbal);
         }
 
-        ApplyActuatorOverrides();
 
 
         // --------------------
@@ -670,6 +693,7 @@ public class GC_Core : UdonSharpBehaviour
         intent.translateCmd_B = xlat;
         intent.rcsMode = rcsMode;
 
+        ApplyActuatorOverrides();
 
         // --------------------
         // THROTTLE CHANNEL: SAFETY > EXECUTOR > MODE > MANUAL
@@ -747,6 +771,15 @@ public class GC_Core : UdonSharpBehaviour
         // actuator selection mode override (0 means no override)
         if (overrides.overrideAttitudeActuatorMode != 0)
             intent.attitudeActuatorMode = overrides.overrideAttitudeActuatorMode;
+
+        // translation RCS mode override
+        if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_TRANSLATE)
+            intent.rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
+        else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_ROTATE)
+            intent.rcsMode = CraftCommandState.RCS_MODE_ROTATE;
+        else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_BLENDED)
+            intent.rcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
     }
     private bool ManualAttitudeIsActive()
     {
@@ -1193,6 +1226,8 @@ public class GC_Core : UdonSharpBehaviour
             runtime.activeModeId = runtime.cachedModeBeforeExec;
             runtime.modeStartTime = nowT;
         }
+        if (nodeNet != null) nodeNet.ForcePublish();
+
     }
 
     private void AbortExecutor(double nowT)
@@ -1287,6 +1322,95 @@ public class GC_Core : UdonSharpBehaviour
         return true;
     }
 
+    public void ResetForScenario(double nowT)
+    {
+        _lastT = double.NaN;
+
+        _exec_tExec = 0.0;
+        _exec_tBurnStart = 0.0;
+        _exec_tBurnEnd = 0.0;
+
+        _manualWritesAtt = false;
+        _manualWritesThr = false;
+        _modeWritesAtt = false;
+        _modeWritesThr = false;
+        _execWritesAtt = false;
+        _execWritesThr = false;
+
+        _manualWritesXlat = false;
+        _modeWritesXlat = false;
+        _execWritesXlat = false;
+
+        _manAttCmd = 0;
+        _manTau_B = Vector3.zero;
+        _manRate_B = Vector3.zero;
+        _manQ_BE = Quaternion.identity;
+        _manPointDir_E = Vector3.forward;
+        _manAxis = 2;
+        _manBlend = true;
+        _manMainT = 0f;
+        _manHoverT = 0f;
+        _manActMode = CraftCommandState.ATT_ACT_AUTO;
+        _manAllowWheels = true;
+        _manAllowRCS = true;
+        _manAllowGimbal = true;
+        _manTranslate_B = Vector3.zero;
+        _manRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        _modeAttCmd = 0;
+        _modeTau_B = Vector3.zero;
+        _modeRate_B = Vector3.zero;
+        _modeQ_BE = Quaternion.identity;
+        _modePointDir_E = Vector3.forward;
+        _modeAxis = 2;
+        _modeBlend = true;
+        _modeMainT = 0f;
+        _modeHoverT = 0f;
+        _modeActMode = CraftCommandState.ATT_ACT_AUTO;
+        _modeAllowWheels = true;
+        _modeAllowRCS = true;
+        _modeAllowGimbal = true;
+        _modeTranslate_B = Vector3.zero;
+        _modeRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        _execAttCmd = 0;
+        _execTau_B = Vector3.zero;
+        _execRate_B = Vector3.zero;
+        _execQ_BE = Quaternion.identity;
+        _execPointDir_E = Vector3.forward;
+        _execAxis = 2;
+        _execBlend = true;
+        _execMainT = 0f;
+        _execHoverT = 0f;
+        _execActMode = CraftCommandState.ATT_ACT_AUTO;
+        _execAllowWheels = true;
+        _execAllowRCS = true;
+        _execAllowGimbal = true;
+        _execTranslate_B = Vector3.zero;
+        _execRcsMode = CraftCommandState.RCS_MODE_BLENDED;
+
+        if (intent != null)
+            intent.ClearToSafeDefaults(craftDefaults);
+
+        if (runtime != null)
+            runtime.ResetState(nowT);
+
+        if (plan != null)
+            plan.ClearAll();
+
+        if (modeParams != null)
+        {
+            modeParams.bodyAxisToPoint = defaultBodyAxisToPoint;
+            modeParams.rtnDir = GC_ModeParams.RTN_T_PLUS;
+            modeParams.qTarget_BE = Quaternion.identity;
+            modeParams.pointDirTarget_E = Vector3.forward;
+            modeParams.rateTarget_B = Vector3.zero;
+            modeParams.tauDirect_B = Vector3.zero;
+            modeParams.blendDirectTorqueWithPD = true;
+        }
+    }
+
+
     private void UpdateActiveProgramIndicator()
     {
         // Executor has priority for "what are we doing"
@@ -1348,7 +1472,14 @@ public class GC_Core : UdonSharpBehaviour
             case GC_RuntimeState.MODE_RELVEL_RETROGRADE:
                 runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_RETRO; // if you added it
                 return;
+                
+            case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
+                runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_POINT_PORT;
+                return;
 
+            case GC_RuntimeState.MODE_DOCK_ALIGN_PORTS:
+                runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_ALIGN_PORTS;
+                return;
 
             default:
                 runtime.activeProgramId = GC_RuntimeState.PROG_NONE;
@@ -1482,7 +1613,8 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
         plan.burnThrottle01[idx] = ok ? 1.0f : 0f; // if can’t compute, burn disabled
-
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
         return idx;
     }
 
@@ -1499,7 +1631,8 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
         plan.burnThrottle01[idx] = ok ? 1.0f : 0f;
-
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
         return idx;
     }
 
@@ -1507,12 +1640,17 @@ public class GC_Core : UdonSharpBehaviour
     {
         if (plan == null) return;
         plan.ClearAll();
+        if (nodeNet != null)
+            nodeNet.ForcePublish();        
     }
 
     public void API_Node_Delete(int i)
     {
         if (plan == null) return;
         plan.API_DeleteNode(i);
+        if (nodeNet != null)
+            nodeNet.ForcePublish();
+
     }
 
     // =====================================================================
