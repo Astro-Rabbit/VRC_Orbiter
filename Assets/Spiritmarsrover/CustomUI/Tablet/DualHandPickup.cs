@@ -319,7 +319,7 @@ public class DualHandPickup : UdonSharpBehaviour
     //        }
     //    }
     //}
-
+    //
     public void OnTriggerEnter(Collider other)
     {
         // Existing Pen logic
