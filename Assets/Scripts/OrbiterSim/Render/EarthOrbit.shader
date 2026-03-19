@@ -446,7 +446,7 @@ Shader "Skybox/SkySunEarthTest"
                 t0 = b - s;
                 t1 = b + s;
 
-                return true;
+                return t0 >= 0.0 && t1 >= 0.0;
             }
 
             float ScatterDensity(float3 pos, float scale)
@@ -472,7 +472,23 @@ Shader "Skybox/SkySunEarthTest"
                 return 3.0 / 16.0 / PI * (1.0 + c*c);
             }
 
-            float3 EvalScattering(float3 origin, float3 dir, float dist, float3 background)
+            float ScatterSun(float3 origin, float dist, float scale)
+            {
+                const int SUN_SCATTER_STEPS = 8;
+
+                float stepLen = dist / SUN_SCATTER_STEPS;
+
+                float total = 0.0;
+                for (int i = 0; i < SUN_SCATTER_STEPS; i++)
+                {
+                    float3 pos = origin + (0.5 + i) * stepLen;
+                    total += stepLen * ScatterDensity(pos, scale);
+                }
+
+                return total;
+            }
+
+            float3 EvalScattering(float3 dir, float dist, float3 background)
             {
                 const int SCATTER_STEPS = 32;
 
@@ -489,11 +505,12 @@ Shader "Skybox/SkySunEarthTest"
 
                 float3 rayleighCam = 0.0;
                 float mieCam = 0.0;
-                float rayleighTotal = 0.0;
-                float mieTotal = 0.0;
+                float3 rayleighTotal = 0.0;
+                float3 mieTotal = 0.0;
                 for (int i = 0; i < SCATTER_STEPS; i++)
                 {
-                    float3 pos = origin + (i + 0.5) * stepLen * dir;
+                    float t = near + (i + 0.5) * stepLen;
+                    float3 pos = t * dir - _EarthPosEcl;
 
                     float3 rayleighLocal = _RayleighAmount * stepLen * ScatterDensity(pos, _RayleighScale);
                     float mieLocal = _MieAmount * stepLen * ScatterDensity(pos, _MieScale);
@@ -501,19 +518,25 @@ Shader "Skybox/SkySunEarthTest"
                     rayleighCam += rayleighLocal;
                     mieCam += mieLocal;
 
-                    float3 transmission = exp(-(rayleighCam + mieCam));
+                    float _, lightFar;
+                    RaySphereHit2(_SunDirEcl, -pos, r, _, lightFar);
+
+                    float3 rayleighSun = _RayleighAmount * ScatterSun(pos, lightFar, _RayleighScale);
+                    float mieSun = _MieAmount * ScatterSun(pos, lightFar, _MieScale);
+
+                    float3 transmission = exp(-(rayleighCam + rayleighSun + mieCam + mieSun));
 
                     rayleighTotal += rayleighLocal * transmission;
                     mieTotal += mieLocal * transmission;
                 }
 
-                float3 totalTransmission = exp(-(rayleighCam + mieCam));
+                float3 groundTransmission = exp(-(rayleighCam + mieCam));
 
-                float c = dot(dir, _SunDirEcl);
-                return rayleighTotal*RayleighPhase(c) + mieTotal*MiePhase(c) + background;//*totalTransmission;
+                float c = dot(dir, -_SunDirEcl);
+                return rayleighTotal*RayleighPhase(c) + mieTotal*MiePhase(c) + background*groundTransmission;
             }
 
-            float4 EvalEarth(float3 rayEcl_unit, float3 sunDirEcl_unit)
+            float4 EvalEarth(float3 rayEcl_unit, float3 sunDirEcl_unit, out float dist)
             {
                 float3 C = _EarthPosEcl.xyz;
                 float  R = _EarthRadiusM;
@@ -521,6 +544,7 @@ Shader "Skybox/SkySunEarthTest"
                 float t;
                 if (!RaySphereHit(rayEcl_unit, C, R, t))
                     return float4(0,0,0,0);
+                dist = t;
 
                 float3 P = rayEcl_unit * t;
                 float3 N = SafeNormalize(P - C);
@@ -585,7 +609,9 @@ Shader "Skybox/SkySunEarthTest"
                 float3 dirEq = SafeNormalize(RotateByQuat(dirB, _CraftBodyToEq));
                 float3 sunDirEcl = SafeNormalize(_SunDirEcl.xyz);
 
-                float4 earthCol = EvalEarth(dirEq, sunDirEcl);
+                float dist = 1e20; // INF
+
+                float4 earthCol = EvalEarth(dirEq, sunDirEcl, dist);
                 float4 moonCol  = EvalMoon(dirEq, sunDirEcl);
                 float3 sunCol   = EvalSun(dirEq, sunDirEcl);
 
@@ -619,7 +645,7 @@ Shader "Skybox/SkySunEarthTest"
                 if (moonCol.a > 0.5)
                     col = moonCol.rgb;
 
-                col = EvalScattering(0, dirEq, 1.0 / 0.0, col);
+                col = EvalScattering(dirEq, dist, col);
 
                 return float4(col, 1.0);
             }
