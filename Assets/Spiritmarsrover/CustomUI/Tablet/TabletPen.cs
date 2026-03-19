@@ -74,9 +74,6 @@ public class TabletPen : UdonSharpBehaviour
     private TabletScrollbar _activeScrollbar;
     private TabletScrollbar _lastHoveredScrollbar;
 
-
-    //private Object _lastHapticTarget;
-
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
