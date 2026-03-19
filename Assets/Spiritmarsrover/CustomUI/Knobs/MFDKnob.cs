@@ -73,19 +73,19 @@ public class MFDKnob : UdonSharpBehaviour
         ApplyDelta(angleDelta);
     }
 
-    public void OnStayDesktop(int id, Quaternion currentCameraRotation)
-    {
-        if (id != _activePenID) return;
+    //public void OnStayDesktop(int id, Quaternion currentCameraRotation)
+    //{
+    //    if (id != _activePenID) return;
 
-        Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
-        Vector3 eulers = relativeRot.eulerAngles;
+    //    Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
+    //    Vector3 eulers = relativeRot.eulerAngles;
 
-        float pitch = Mathf.DeltaAngle(0, eulers.x);
-        float yaw = Mathf.DeltaAngle(0, eulers.y);
+    //    float pitch = Mathf.DeltaAngle(0, eulers.x);
+    //    float yaw = Mathf.DeltaAngle(0, eulers.y);
 
-        float angleDelta = (yaw - pitch) * desktopSensitivity;
-        ApplyDelta(angleDelta);
-    }
+    //    float angleDelta = (yaw - pitch) * desktopSensitivity;
+    //    ApplyDelta(angleDelta);
+    //}
 
     private void ApplyDelta(float angleDelta)
     {
@@ -160,7 +160,7 @@ public class MFDKnob : UdonSharpBehaviour
 
         EnsureLocalOwnership();
 
-        _currentValue = newValue;
+        _currentValue = rawValue;
         ApplyValue();
         RequestSerialization();
     }

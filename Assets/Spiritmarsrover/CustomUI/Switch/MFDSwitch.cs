@@ -116,7 +116,7 @@ public class MFDSwitch : UdonSharpBehaviour
                 if (_activePen != null) _activePen.PlaySwitchDownClip();
             }
             _activePen.TriggerHapticEvent();
-            state = newState;
+            //state = newState;
             
             UpdateVisuals();
             NotifyTarget();

@@ -75,7 +75,7 @@ public class TabletPen : UdonSharpBehaviour
     private TabletScrollbar _lastHoveredScrollbar;
 
 
-    private Object _lastHapticTarget;
+    //private Object _lastHapticTarget;
 
     void Start()
     {
@@ -435,7 +435,7 @@ public class TabletPen : UdonSharpBehaviour
             _focusedMFDBtn.OnStay(penID);
         }
     }
-
+    
     private void ReleaseFocus()
     {
         if (_focusedKnob != null) _focusedKnob.OnUp(penID);

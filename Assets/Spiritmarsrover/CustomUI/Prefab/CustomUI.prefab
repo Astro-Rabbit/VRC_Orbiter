@@ -3558,6 +3558,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &3970776097242454954
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3918,6 +3921,10 @@ MonoBehaviour:
   dragThreshold: 0.02
   desktopSensitivity: 5
   switchAngle: 15
+  dragAxis: 2
+  invertDrag: 0
+  rotationAxis: 0
+  invertRotation: 0
   state: 0
 --- !u!114 &8672892030092691012
 MonoBehaviour:
@@ -4252,6 +4259,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &920895968853315489
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5493,6 +5503,10 @@ MonoBehaviour:
   PenRPickup: {fileID: 7731139513183214053}
   PenLMesh: {fileID: 8083509478455500055}
   PenRMesh: {fileID: 3965126593247209353}
+  PenLScript: {fileID: 0}
+  PenRScript: {fileID: 0}
+  PickupableL: 0
+  PickupableR: 0
   useFilter: 0
   posMinCutoff: 0.95
   posBeta: 100
@@ -5500,6 +5514,9 @@ MonoBehaviour:
   rotMinCutoff: 0.5
   rotBeta: 20
   rotDCutoff: 1
+  TriggerTouch: 0
+  OverrideMesh: 0
+  Amp: 0.2
 --- !u!114 &5853455214244766267
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -5892,6 +5909,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &7485688430857220762
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -6789,6 +6809,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &2740102973911817575
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7698,6 +7721,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &5579742154702724010
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -8821,6 +8847,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &701490307807771600
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -9706,8 +9735,20 @@ MonoBehaviour:
   KnobClip:
   - {fileID: 8300000, guid: 23c601606aa51e3419f5e9af256e35fa, type: 3}
   - {fileID: 8300000, guid: 1eae6c86006547c488922e5751c641dc, type: 3}
+  ScreenTouchClips: []
   penID: 0
   isRightHand: 0
+  HapticDuration: 0.05
+  HapticAmplitude: 0.2
+  HapticFreq: 1
+  IsGripping: 0
+  Pickup: {fileID: 0}
+  _heldPickup: {fileID: 0}
+  PenTouchOffset: 0
+  clickExtensionOffset: -0.01
+  touchCooldown: 0.2
+  TriggerRequiredForTablet: 1
+  _hoveredPickup: {fileID: 0}
 --- !u!114 &7994571649566306082
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -10672,6 +10713,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &3264426455650864018
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -14427,6 +14471,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &1711674737423734096
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -15107,8 +15154,20 @@ MonoBehaviour:
   KnobClip:
   - {fileID: 8300000, guid: 23c601606aa51e3419f5e9af256e35fa, type: 3}
   - {fileID: 8300000, guid: 1eae6c86006547c488922e5751c641dc, type: 3}
+  ScreenTouchClips: []
   penID: 1
   isRightHand: 1
+  HapticDuration: 0.05
+  HapticAmplitude: 0.2
+  HapticFreq: 1
+  IsGripping: 0
+  Pickup: {fileID: 0}
+  _heldPickup: {fileID: 0}
+  PenTouchOffset: 0
+  clickExtensionOffset: -0.01
+  touchCooldown: 0.2
+  TriggerRequiredForTablet: 1
+  _hoveredPickup: {fileID: 0}
 --- !u!114 &2803631759053067791
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -16820,6 +16879,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &8562858171372285606
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -18536,6 +18598,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &7176969185843704677
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -18843,6 +18908,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &423769750414196507
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -18978,6 +19046,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &7997912014311408338
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -25273,6 +25344,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &7157904088819322271
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28146,6 +28220,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &8500119655037656870
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -28625,6 +28702,9 @@ MonoBehaviour:
   highlightedColor: {r: 0.95, g: 0.95, b: 0.95, a: 1}
   pressedColor: {r: 0.78, g: 0.78, b: 0.78, a: 1}
   disabledColor: {r: 0.78, g: 0.78, b: 0.78, a: 0.5}
+  textToggleColor: {fileID: 0}
+  boolVariableName: 
+  released: 0
 --- !u!114 &337170506713615413
 MonoBehaviour:
   m_ObjectHideFlags: 0
