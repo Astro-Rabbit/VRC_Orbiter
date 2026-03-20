@@ -498,7 +498,7 @@ Shader "Skybox/SkySunEarthTest"
                 if (!RaySphereHit2(dir, _EarthPosEcl.xyz, r, near, far))
                     return background;
 
-                if (far > dist)
+                if (dist >= 0.0 && far > dist)
                     far = dist;
 
                 float stepLen = (far - near) / SCATTER_STEPS;
@@ -601,19 +601,48 @@ Shader "Skybox/SkySunEarthTest"
 
             fixed4 frag(v2f i) : SV_Target
             {
-                float3 col;
-
                 float3 dirB = SafeNormalize(float3(-i.dir.x, i.dir.y, i.dir.z));
 
                 // Keep same convention as your current shader path
                 float3 dirEq = SafeNormalize(RotateByQuat(dirB, _CraftBodyToEq));
                 float3 sunDirEcl = SafeNormalize(_SunDirEcl.xyz);
 
-                float dist;
+                float3 col = 0.0;
+                float uncovered = 1.0; // Intended for future anti-aliasing support
 
+                bool moonInFront = dot(_MoonPosEcl.xyz, _MoonPosEcl.xyz) < dot(_EarthPosEcl.xyz, _EarthPosEcl.xyz);
+                if (moonInFront)
+                {
+                    float4 moonCol = EvalMoon(dirEq, sunDirEcl);
+                    col = moonCol.rgb;
+                    uncovered = 1.0 - moonCol.a;
+                    if (uncovered == 0.0) // moon covering earth and stars
+                        return float4(col, 1.0);
+                }
+
+                float dist;
                 float4 earthCol = EvalEarth(dirEq, sunDirEcl, dist);
-                float4 moonCol  = EvalMoon(dirEq, sunDirEcl);
-                float3 sunCol   = EvalSun(dirEq, sunDirEcl);
+                col += uncovered * earthCol.rgb;
+                uncovered *= 1.0 - earthCol.a;
+                if (uncovered == 0.0) // earth covering stars and possibly moon
+                {
+                    col = EvalScattering(dirEq, dist, col);
+                    return float4(col, 1.0);
+                }
+
+                if (!moonInFront)
+                {
+                    float4 moonCol = EvalMoon(dirEq, sunDirEcl);
+                    col += uncovered * moonCol.rgb;
+                    uncovered *= 1.0 - moonCol.a;
+                    if (uncovered == 0.0) // moon covering stars
+                    {
+                        col = EvalScattering(dirEq, -1, col);
+                        return float4(col, 1.0);
+                    }
+                }
+
+                float3 sunCol = EvalSun(dirEq, sunDirEcl);
 
                 float3 dirEcl = SafeNormalize(EqToEcl(dirEq, _ObliquityDeg));
                 float3 ndir = EclToStarTexFrame(dirEcl);
@@ -636,18 +665,9 @@ Shader "Skybox/SkySunEarthTest"
                 float3 rotatedDir = mul(rotMatrix, float4(ndir, 1.0)).xyz;
                 fixed4 mw = Desaturate(texCUBE(_SkyboxTex, rotatedDir) * _MWbright, 0.6);
 
-                col = mw.rgb + (s0+s1+s2+s3+s4+s5+s6+s7+s8) + sunCol;
+                col += uncovered * (mw.rgb + (s0+s1+s2+s3+s4+s5+s6+s7+s8) + sunCol);
 
-                // Earth-dominant policy
-                if (earthCol.a > 0.5)
-                    col = earthCol.rgb;
-                else
-                    dist = 1.0 / 0.0; // INF
-
-                if (moonCol.a > 0.5)
-                    col = moonCol.rgb;
-
-                col = EvalScattering(dirEq, dist, col);
+                col = EvalScattering(dirEq, -1, col);
 
                 return float4(col, 1.0);
             }
