@@ -1,6 +1,8 @@
 ﻿using UdonSharp;
 using UnityEngine;
+using VRC.SDKBase;
 
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class SimScenarioInitializer : UdonSharpBehaviour
 {
     [Header("Core")]
@@ -15,6 +17,17 @@ public class SimScenarioInitializer : UdonSharpBehaviour
     [Header("Debug")]
     public bool log = true;
 
+    [Header("Read-only active scenario")]
+    public int activeScenarioIndex = -1;
+    public double activeScenarioJd0 = 2460000.5;
+
+    [UdonSynced] private int _activeScenarioIndex = -1;
+    [UdonSynced] private double _activeScenarioJd0 = 2460000.5;
+
+    private int _appliedScenarioIndex = -999999;
+    private double _appliedScenarioJd0 = -1.0;
+
+
     public bool ApplySelectedScenario(double t0)
     {
         return ApplyScenarioByIndex(selectedScenarioIndex, t0);
@@ -28,8 +41,25 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         SimScenarioEntry entry = scenarios[index];
         if (entry == null) return false;
 
-        if (entry.overrideScenarioJd0 && ephem != null)
-            ephem.jd0 = entry.scenarioJd0;
+        _activeScenarioIndex = index;
+        activeScenarioIndex = index;
+
+        if (entry.overrideScenarioJd0)
+        {
+            _activeScenarioJd0 = entry.scenarioJd0;
+            activeScenarioJd0 = entry.scenarioJd0;
+
+            if (ephem != null)
+                ephem.jd0 = entry.scenarioJd0;
+        }
+        else if (ephem != null)
+        {
+            _activeScenarioJd0 = ephem.jd0;
+            activeScenarioJd0 = ephem.jd0;
+        }
+
+        if (Networking.IsOwner(gameObject))
+            RequestSerialization();
 
         switch (entry.scenarioType)
         {
@@ -61,6 +91,10 @@ public class SimScenarioInitializer : UdonSharpBehaviour
                 entry.orbitScenario.InitializeNow();
                 return true;
         }
+
+
+
+
     }
 
     public string GetSelectedScenarioName()
@@ -88,6 +122,19 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         if (entry == null) return "";
 
         return entry.scenarioName;
+    }
+
+
+    public override void OnDeserialization()
+    {
+        activeScenarioIndex = _activeScenarioIndex;
+        activeScenarioJd0 = _activeScenarioJd0;
+
+        if (ephem != null)
+            ephem.jd0 = _activeScenarioJd0;
+
+        _appliedScenarioIndex = _activeScenarioIndex;
+        _appliedScenarioJd0 = _activeScenarioJd0;
     }
 
 

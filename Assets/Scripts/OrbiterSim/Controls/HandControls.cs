@@ -239,18 +239,74 @@ public class HandControls : UdonSharpBehaviour
                 JoystickGrabbing = true;
                 objName = JoyString;
                 busy = true;
+                if (busy)
+                {
+                    EnsureLocalOwnershipOfVisualNet();
+
+                    if (controlsNet != null)
+                    {
+                        controlsNet.SetLocalVisualState(
+                            inputX, inputY, inputZ,
+                            ThrottleValue,
+                            transX, transY, transZ,
+                            true,
+                            true,
+                            activeSeatForVisuals
+                        );
+                        controlsNet.ForcePublish();
+                    }
+                }
+
             }
             else if (CheckDist(hand.position, ThrottleCol))
             {
                 ThrottleGrabbing = true;
                 objName = ThrotString;
                 busy = true;
+
+                if (busy)
+                {
+                    EnsureLocalOwnershipOfVisualNet();
+
+                    if (controlsNet != null)
+                    {
+                        controlsNet.SetLocalVisualState(
+                            inputX, inputY, inputZ,
+                            ThrottleValue,
+                            transX, transY, transZ,
+                            true,
+                            true,
+                            activeSeatForVisuals
+                        );
+                        controlsNet.ForcePublish();
+                    }
+                }
+
             }
             else if (CheckDist(hand.position, TransCol))
             {
                 TransGrabbing = true;
                 objName = TransString;
                 busy = true;
+
+                if (busy)
+                {
+                    EnsureLocalOwnershipOfVisualNet();
+
+                    if (controlsNet != null)
+                    {
+                        controlsNet.SetLocalVisualState(
+                            inputX, inputY, inputZ,
+                            ThrottleValue,
+                            transX, transY, transZ,
+                            true,
+                            true,
+                            activeSeatForVisuals
+                        );
+                        controlsNet.ForcePublish();
+                    }
+                }
+
             }
         }
 

@@ -496,6 +496,8 @@ Shader "Skybox/SkySunEarthTest"
                 if (moonCol.a > 0.5)
                     return float4(moonCol.rgb, 1.0);
 
+
+
                 float3 dirEcl = SafeNormalize(EqToEcl(dirEq, _ObliquityDeg));
                 float3 ndir = EclToStarTexFrame(dirEcl);
 

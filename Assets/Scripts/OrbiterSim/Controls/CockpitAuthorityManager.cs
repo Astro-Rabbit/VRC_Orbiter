@@ -105,7 +105,21 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     [Tooltip("Shader emission property name. Most Unity shaders use _EmissionColor.")]
     public string emissionProperty = "_EmissionColor";
 
-    // ---------------------------------------------------------------------
+
+
+    [Header("Ownership handoff gating")]
+    [Tooltip("After requesting sim ownership for a seat, block that seat from writing manual input until ownership is actually established.")]
+    public bool blockInputWhileOwnershipPending = true;
+
+    [Tooltip("Optional short grace after ownership arrives before enabling input.")]
+    public float ownershipAcquireGraceSeconds = 0.05f;
+
+    private bool _ownershipRequestPending = false;
+    private byte _pendingSeat = SEAT_LEFT;
+    private float _ownershipAcquireTime = -1f;
+    private bool _prevSimOwner = false;
+
+        // ---------------------------------------------------------------------
     // Debug
     // ---------------------------------------------------------------------
 
@@ -129,6 +143,8 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
 
     void Start()
     {
+        _prevSimOwner = (simManager != null && simManager.IsSimOwner());
+
         // Push initial local seat flags and write shared state if we already own the sim.
         UpdateSeatStateFlags();
         ApplyActiveSeatToSharedIfOwner();
@@ -146,6 +162,7 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     /// </summary>
     public void TickAuthority()
     {
+        UpdateOwnershipArrivalState();
         // 1) Observe current seat state from local hand scripts + synced seat net objects.
         bool leftClaimed = IsSeatClaimed(SEAT_LEFT);
         bool rightClaimed = IsSeatClaimed(SEAT_RIGHT);
@@ -242,6 +259,12 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     /// </summary>
     private bool IsLocalSeatHolder(byte seat)
     {
+        // Immediate truth: if this client is actively grabbing that seat's controls locally,
+        // then this client is the seat holder, even before the visual-net owner updates.
+        HandControls hc = GetSeatHandControls(seat);
+        if (hc != null && hc.IsAnyPrimaryControlGrabbed())
+            return true;
+
         VRCPlayerApi local = Networking.LocalPlayer;
         if (local == null) return false;
 
@@ -267,39 +290,45 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     {
         seat = ClampSeat(seat);
 
-        // If local client is not the seat holder, we do not initiate anything.
-        // The player actually holding that seat should do it from their own client.
+        // Only the actual local holder of the waiting seat initiates the request.
         if (!IsLocalSeatHolder(seat))
             return;
 
         bool simOwner = (simManager != null && simManager.IsSimOwner());
 
-        // If we already own the sim, seat switch is purely local.
+        // Already sim owner -> just switch active seat locally.
         if (simOwner)
         {
             SetActiveSeatInternal(seat);
             return;
         }
 
-        // We are the waiting seat holder but do not own the sim.
-        // Respect hard transfer lock.
         if (simManager != null && !simManager.CanApproveOwnershipTransfer())
             return;
 
-        // Rate-limit ownership-transfer requests.
         if ((Time.time - _lastOwnershipRequestTime) < ownershipRetrySeconds)
             return;
 
         _lastOwnershipRequestTime = Time.time;
 
+        _ownershipRequestPending = true;
+        _pendingSeat = seat;
+        _ownershipAcquireTime = -1f;
+
         if (logOwnershipRequests)
             Debug.Log("[CockpitAuthorityManager] Requesting sim ownership for seat " + SeatName(seat));
 
-        if (simManager != null)
-            simManager.BeginOwnershipTransfer();
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null || simManager == null) return;
 
-        // Do NOT switch activeSeat locally yet.
-        // Wait until ownership is actually transferred to this client.
+        simManager.SendCustomNetworkEvent(
+            VRC.Udon.Common.Interfaces.NetworkEventTarget.Owner,
+            nameof(SimManager.Evt_RequestHandoff),
+            local.playerId
+        );
+
+        // Do NOT switch activeSeat yet.
+        // Wait until sim ownership actually arrives.
     }
 
     /// <summary>
@@ -341,6 +370,7 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     private void UpdateSeatStateFlags()
     {
         bool simOwner = (simManager != null && simManager.IsSimOwner());
+        bool inputBlocked = IsOwnershipInputBlocked();
 
         bool leftClaimed = IsSeatClaimed(SEAT_LEFT);
         bool rightClaimed = IsSeatClaimed(SEAT_RIGHT);
@@ -352,14 +382,14 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         {
             leftHandControls.SetSeatClaimed(leftClaimed);
             leftHandControls.SetSeatActiveForVisuals(leftActive);
-            leftHandControls.SetSeatAuthority(simOwner && leftActive);
+            leftHandControls.SetSeatAuthority(simOwner && leftActive && !inputBlocked);
         }
 
         if (rightHandControls != null)
         {
             rightHandControls.SetSeatClaimed(rightClaimed);
             rightHandControls.SetSeatActiveForVisuals(rightActive);
-            rightHandControls.SetSeatAuthority(simOwner && rightActive);
+            rightHandControls.SetSeatAuthority(simOwner && rightActive && !inputBlocked);
         }
     }
 
@@ -380,6 +410,13 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
 
         if (simManager == null || !simManager.IsSimOwner())
             return;
+
+        if (IsOwnershipInputBlocked())
+        {
+            sharedManualLive.Clear();
+            sharedOverridesLive.Clear();
+            return;
+        }
 
         GC_ManualDraft srcManual = GetActiveManualSource();
         GC_ActuatorOverrideState srcOverrides = GetActiveOverrideSource();
@@ -508,4 +545,62 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         dst.overrideAttitudeActuatorMode = src.overrideAttitudeActuatorMode;
         dst.overrideRcsMode = src.overrideRcsMode;
     }
+
+    private void UpdateOwnershipArrivalState()
+    {
+        bool simOwner = (simManager != null && simManager.IsSimOwner());
+
+        // Rising edge: we just became sim owner.
+        if (simOwner && !_prevSimOwner)
+        {
+            _ownershipAcquireTime = Time.time;
+
+            // If we requested ownership for a specific seat, snap authority there immediately.
+            if (_ownershipRequestPending)
+            {
+                SetActiveSeatInternal(_pendingSeat);
+                _ownershipRequestPending = false;
+            }
+            else
+            {
+                // Fallback: if exactly one seat is currently grabbed locally, snap to it.
+                bool leftLocal = (leftHandControls != null && leftHandControls.IsAnyPrimaryControlGrabbed());
+                bool rightLocal = (rightHandControls != null && rightHandControls.IsAnyPrimaryControlGrabbed());
+
+                if (leftLocal && !rightLocal) SetActiveSeatInternal(SEAT_LEFT);
+                else if (rightLocal && !leftLocal) SetActiveSeatInternal(SEAT_RIGHT);
+            }
+        }
+
+        // If we lost sim ownership, clear the settle timer.
+        if (!simOwner)
+            _ownershipAcquireTime = -1f;
+
+        _prevSimOwner = simOwner;
+    }
+    private HandControls GetSeatHandControls(byte seat)
+    {
+        return (seat == SEAT_RIGHT) ? rightHandControls : leftHandControls;
+    }
+    private bool IsOwnershipInputBlocked()
+    {
+        if (!blockInputWhileOwnershipPending) return false;
+
+        bool simOwner = (simManager != null && simManager.IsSimOwner());
+
+        // While we are waiting to become owner, stay blocked.
+        if (_ownershipRequestPending && !simOwner)
+            return true;
+
+        // Optional tiny settle window right after ownership lands.
+        if (simOwner && _ownershipAcquireTime >= 0f)
+        {
+            if ((Time.time - _ownershipAcquireTime) < ownershipAcquireGraceSeconds)
+                return true;
+        }
+
+        return false;
+    }
+
+
 }

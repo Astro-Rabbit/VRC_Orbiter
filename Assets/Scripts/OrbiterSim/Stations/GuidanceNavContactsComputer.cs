@@ -76,10 +76,11 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
 
         bool isSimOwner = (simManager != null) ? simManager.IsSimOwner() : (netCore != null && Networking.IsOwner(netCore.gameObject));
         bool allowRenderSmoothing = false;
+        bool freezeActive = (simManager != null && simManager.IsFreezeActive());
 
         if (clock != null && netCore != null)
         {
-            if (!isSimOwner)
+            if (!isSimOwner && !freezeActive)
             {
                 double tRender = clock.GetCachedRemoteRenderTime();
                 byte presentedMode = netCore.GetPresentedMode(tRender);
