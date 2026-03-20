@@ -73,7 +73,7 @@ public class TabletPen : UdonSharpBehaviour
 
     private TabletScrollbar _activeScrollbar;
     private TabletScrollbar _lastHoveredScrollbar;
-
+    public float meshLerpSpeed = 25f; // Adjust this for snappiness (higher = faster)
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -110,15 +110,8 @@ public class TabletPen : UdonSharpBehaviour
         bool isVR = _localPlayer.IsUserInVR();
         bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
         bool triggerJustPressed = triggerHeld && !_wasTriggerHeld;
-        // 1. IF LOCKED (KNOB/MFD)
-        if (_isLocked)
-        {
-            if (!triggerHeld) ReleaseFocus();
-            else StayFocus(isVR);
-            return;
-        }
 
-        // 2. RAYCAST SEARCH
+        
         RaycastHit hit;
         Vector3 rayOrigin; Vector3 rayDirection; float dist;
 
@@ -131,27 +124,59 @@ public class TabletPen : UdonSharpBehaviour
         {
             rayOrigin = transform.position; rayDirection = -transform.up; dist = rayDistance;
         }
-
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
-
-
+        //Pen Movment On trigger press
         if (PenMesh != null)
         {
+            float extension = 0f;
+            float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+
             if (currentlyHitting)
             {
-                float localExtension = -(hit.distance / transform.localScale.y);
-
-                // NEW: Check if we are actually interacting right now
-                float interactionPlunge = (triggerHeld && currentlyHitting) ? clickExtensionOffset : 0f;
-
-                // Add the plunge to the calculation
-                PenMesh.transform.localPosition = new Vector3(0f, localExtension + PenTouchOffset + interactionPlunge, 0f);
+                // Only apply extension and surface offset when touching something
+                extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
             }
-            else
-            {
-                PenMesh.transform.localPosition = Vector3.zero;
-            }
+
+            // interactionPlunge is added regardless of 'currentlyHitting'
+            Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+
+                PenMesh.transform.localPosition = Vector3.Lerp(
+                PenMesh.transform.localPosition,
+                targetPos,
+                Time.deltaTime * meshLerpSpeed
+            );
         }
+        // 1. IF LOCKED (KNOB/MFD)
+        if (_isLocked)
+        {
+            if (!triggerHeld) ReleaseFocus();
+            else StayFocus(isVR);
+            return;
+        }
+
+
+        
+
+
+        //if (PenMesh != null)
+        //{
+        //    Vector3 targetPos = Vector3.zero;
+
+        //    if (currentlyHitting)
+        //    {
+        //        float localExtension = -(hit.distance / transform.localScale.y);
+        //        float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+        //        targetPos = new Vector3(0f, localExtension + PenTouchOffset + interactionPlunge, 0f);
+        //    }
+
+        //    // Smoothly transition to the target position
+        //    PenMesh.transform.localPosition = Vector3.Lerp(
+        //        PenMesh.transform.localPosition,
+        //        targetPos,
+        //        Time.deltaTime * meshLerpSpeed
+        //    );
+        //}
+        
 
         // --- Haptic Hover Logic Start ---
         Object currentHitComp = null;

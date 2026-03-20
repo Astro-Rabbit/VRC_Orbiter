@@ -88,7 +88,7 @@ public class TabletSlider : UdonSharpBehaviour
         // Update Text
         if (valueText != null)
         {
-            valueText.text = wholeNumbers ? currentValue.ToString("F0") : currentValue.ToString("F2");
+            valueText.text = wholeNumbers ? currentValue.ToString("F0") : currentValue.ToString("F3");
         }
     }
 
