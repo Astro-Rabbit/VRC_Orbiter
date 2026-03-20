@@ -39,8 +39,15 @@ Shader "Skybox/SkySunEarthTest"
         // --- Earth (primary body in this shader) ---
         _EarthPosEcl   ("Earth Pos (craft->earth, ECL, meters)", Vector) = (0,0,0,0)
         _EarthRadiusM  ("Earth Radius (m)", Float) = 6371000.0
+        _EarthScatterHeightM ("Height Scattering Height (m)", Float) = 100000.0
         _EarthAmbient  ("Earth Ambient", Range(0,1)) = 0.03
         _EarthShadowPow("Earth Terminator Power", Float) = 1.0
+
+        _RayleighAmount ("Rayleigh Scattering Coefficients", Vector) = (0.0000055, 0.000013, 0.0000224, 0)
+        _RayleighScale ("Rayleigh Scattering Scale Height", Float) = 8000
+        _MieAmount ("Mie Scattering Coefficient", Float) = 0.000021
+        _MieScale ("Mie Scattering Scale Height", Float) = 1200
+        _MieG ("Mie Scattering Direction Coefficient", Float) = -0.78
 
         _EarthAlbedo ("Earth Albedo (equirect)", 2D) = "white" {}
         _EarthBodyToEcl ("Earth BodyToEcl quat (xyzw)", Vector) = (0,0,0,1)
@@ -125,8 +132,15 @@ Shader "Skybox/SkySunEarthTest"
 
             float4 _EarthPosEcl;
             float  _EarthRadiusM;
+            float  _EarthScatterHeightM;
             float  _EarthAmbient;
             float  _EarthShadowPow;
+
+            float3 _RayleighAmount;
+            float  _RayleighScale;
+            float  _MieAmount;
+            float  _MieScale;
+            float  _MieG;
 
             sampler2D _EarthAlbedo;
             float4 _EarthBodyToEcl;
@@ -265,7 +279,7 @@ Shader "Skybox/SkySunEarthTest"
                 baseTexel = floor(pixelSpace);
             }
 
-            float4 RetreivePixInfo(float3 dFlip, float2 baseTexel, float2 pixelOff)
+            float3 RetrievePixInfo(float3 dFlip, float2 baseTexel, float2 pixelOff)
             {
                 float2 pixelCenter = baseTexel + 0.5 + pixelOff;
                 float2 uvCenter = pixelCenter / _PixelSize;
@@ -301,7 +315,7 @@ Shader "Skybox/SkySunEarthTest"
 
                 float intensity = drawStar(vecDistArcsec, _sigma);
 
-                return float4(tempR, 1.0) * (starBrightness * intensity);
+                return tempR * (starBrightness * intensity);
             }
 
             fixed4 Desaturate(fixed4 color, float amount)
@@ -415,7 +429,114 @@ Shader "Skybox/SkySunEarthTest"
                 return (tHit > 0.0);
             }
 
-            float4 EvalEarth(float3 rayEcl_unit, float3 sunDirEcl_unit)
+            bool RaySphereHit2(float3 D_unit, float3 C, float R, out float t0, out float t1)
+            {
+                float b = dot(D_unit, C);
+                float c = dot(C, C) - R * R;
+                float h = b * b - c;
+
+                if (h < 0.0)
+                {
+                    t0 = 0.0;
+                    t1 = 0.0;
+                    return false;
+                }
+
+                float s = sqrt(h);
+                t0 = b - s;
+                t1 = b + s;
+
+                return t0 >= 0.0 && t1 >= 0.0;
+            }
+
+            float ScatterDensity(float3 pos, float scale)
+            {
+                return exp(-max(0.0, (length(pos) - _EarthRadiusM) / scale));
+            }
+
+            #define PI 3.14159265
+
+            float MiePhase(float c)
+            {
+                float g2 = _MieG * _MieG;
+                float c2 = c*c;
+
+                float num = 3.0 / 8.0 / PI * (1.0 - g2) * (1.0 - c2);
+                float inner = 1.0 + g2 - 2.0*_MieG*c;
+                float denom = inner * sqrt(inner) * (2.0 + g2);
+                return num / denom;
+            }
+
+            float RayleighPhase(float c)
+            {
+                return 3.0 / 16.0 / PI * (1.0 + c*c);
+            }
+
+            float ScatterSun(float3 origin, float dist, float scale)
+            {
+                const int SUN_SCATTER_STEPS = 8;
+
+                float stepLen = dist / SUN_SCATTER_STEPS;
+
+                float total = 0.0;
+                for (int i = 0; i < SUN_SCATTER_STEPS; i++)
+                {
+                    float3 pos = origin + (0.5 + i) * stepLen;
+                    total += stepLen * ScatterDensity(pos, scale);
+                }
+
+                return total;
+            }
+
+            float3 EvalScattering(float3 dir, float dist, float3 background)
+            {
+                const int SCATTER_STEPS = 32;
+
+                float near;
+                float far;
+                float r = _EarthRadiusM + _EarthScatterHeightM;
+                if (!RaySphereHit2(dir, _EarthPosEcl.xyz, r, near, far))
+                    return background;
+
+                if (dist >= 0.0 && far > dist)
+                    far = dist;
+
+                float stepLen = (far - near) / SCATTER_STEPS;
+
+                float3 rayleighCam = 0.0;
+                float mieCam = 0.0;
+                float3 rayleighTotal = 0.0;
+                float3 mieTotal = 0.0;
+                for (int i = 0; i < SCATTER_STEPS; i++)
+                {
+                    float t = near + (i + 0.5) * stepLen;
+                    float3 pos = t * dir - _EarthPosEcl;
+
+                    float3 rayleighLocal = _RayleighAmount * stepLen * ScatterDensity(pos, _RayleighScale);
+                    float mieLocal = _MieAmount * stepLen * ScatterDensity(pos, _MieScale);
+
+                    rayleighCam += rayleighLocal;
+                    mieCam += mieLocal;
+
+                    float _, lightFar;
+                    RaySphereHit2(_SunDirEcl, -pos, r, _, lightFar);
+
+                    float3 rayleighSun = _RayleighAmount * ScatterSun(pos, lightFar, _RayleighScale);
+                    float mieSun = _MieAmount * ScatterSun(pos, lightFar, _MieScale);
+
+                    float3 transmission = exp(-(rayleighCam + rayleighSun + mieCam + mieSun));
+
+                    rayleighTotal += rayleighLocal * transmission;
+                    mieTotal += mieLocal * transmission;
+                }
+
+                float3 groundTransmission = exp(-(rayleighCam + mieCam));
+
+                float c = dot(dir, -_SunDirEcl);
+                return rayleighTotal*RayleighPhase(c) + mieTotal*MiePhase(c) + background*groundTransmission;
+            }
+
+            float4 EvalEarth(float3 rayEcl_unit, float3 sunDirEcl_unit, out float dist)
             {
                 float3 C = _EarthPosEcl.xyz;
                 float  R = _EarthRadiusM;
@@ -423,6 +544,7 @@ Shader "Skybox/SkySunEarthTest"
                 float t;
                 if (!RaySphereHit(rayEcl_unit, C, R, t))
                     return float4(0,0,0,0);
+                dist = t;
 
                 float3 P = rayEcl_unit * t;
                 float3 N = SafeNormalize(P - C);
@@ -485,16 +607,42 @@ Shader "Skybox/SkySunEarthTest"
                 float3 dirEq = SafeNormalize(RotateByQuat(dirB, _CraftBodyToEq));
                 float3 sunDirEcl = SafeNormalize(_SunDirEcl.xyz);
 
-                float4 earthCol = EvalEarth(dirEq, sunDirEcl);
-                float4 moonCol  = EvalMoon(dirEq, sunDirEcl);
-                float3 sunCol   = EvalSun(dirEq, sunDirEcl);
+                float3 col = 0.0;
+                float uncovered = 1.0; // Intended for future anti-aliasing support
 
-                // Earth-dominant policy
-                if (earthCol.a > 0.5)
-                    return float4(earthCol.rgb, 1.0);
+                bool moonInFront = dot(_MoonPosEcl.xyz, _MoonPosEcl.xyz) < dot(_EarthPosEcl.xyz, _EarthPosEcl.xyz);
+                if (moonInFront)
+                {
+                    float4 moonCol = EvalMoon(dirEq, sunDirEcl);
+                    col = moonCol.rgb;
+                    uncovered = 1.0 - moonCol.a;
+                    if (uncovered == 0.0) // moon covering earth and stars
+                        return float4(col, 1.0);
+                }
 
-                if (moonCol.a > 0.5)
-                    return float4(moonCol.rgb, 1.0);
+                float dist;
+                float4 earthCol = EvalEarth(dirEq, sunDirEcl, dist);
+                col += uncovered * earthCol.rgb;
+                uncovered *= 1.0 - earthCol.a;
+                if (uncovered == 0.0) // earth covering stars and possibly moon
+                {
+                    col = EvalScattering(dirEq, dist, col);
+                    return float4(col, 1.0);
+                }
+
+                if (!moonInFront)
+                {
+                    float4 moonCol = EvalMoon(dirEq, sunDirEcl);
+                    col += uncovered * moonCol.rgb;
+                    uncovered *= 1.0 - moonCol.a;
+                    if (uncovered == 0.0) // moon covering stars
+                    {
+                        col = EvalScattering(dirEq, -1, col);
+                        return float4(col, 1.0);
+                    }
+                }
+
+                float3 sunCol = EvalSun(dirEq, sunDirEcl);
 
 
 
@@ -505,21 +653,25 @@ Shader "Skybox/SkySunEarthTest"
                 float2 baseTexel;
                 OctaBaseFromDir(ndir, dFlip, baseTexel);
 
-                float4 s0 = RetreivePixInfo(dFlip, baseTexel, float2(0,0));
-                float4 s1 = RetreivePixInfo(dFlip, baseTexel, float2(1,0));
-                float4 s2 = RetreivePixInfo(dFlip, baseTexel, float2(1,1));
-                float4 s3 = RetreivePixInfo(dFlip, baseTexel, float2(0,1));
-                float4 s4 = RetreivePixInfo(dFlip, baseTexel, float2(-1,1));
-                float4 s5 = RetreivePixInfo(dFlip, baseTexel, float2(-1,0));
-                float4 s6 = RetreivePixInfo(dFlip, baseTexel, float2(-1,-1));
-                float4 s7 = RetreivePixInfo(dFlip, baseTexel, float2(0,-1));
-                float4 s8 = RetreivePixInfo(dFlip, baseTexel, float2(1,-1));
+                float3 s0 = RetrievePixInfo(dFlip, baseTexel, float2(0,0));
+                float3 s1 = RetrievePixInfo(dFlip, baseTexel, float2(1,0));
+                float3 s2 = RetrievePixInfo(dFlip, baseTexel, float2(1,1));
+                float3 s3 = RetrievePixInfo(dFlip, baseTexel, float2(0,1));
+                float3 s4 = RetrievePixInfo(dFlip, baseTexel, float2(-1,1));
+                float3 s5 = RetrievePixInfo(dFlip, baseTexel, float2(-1,0));
+                float3 s6 = RetrievePixInfo(dFlip, baseTexel, float2(-1,-1));
+                float3 s7 = RetrievePixInfo(dFlip, baseTexel, float2(0,-1));
+                float3 s8 = RetrievePixInfo(dFlip, baseTexel, float2(1,-1));
 
                 float4x4 rotMatrix = RotationMatrix(300, 171, 156);
                 float3 rotatedDir = mul(rotMatrix, float4(ndir, 1.0)).xyz;
                 fixed4 mw = Desaturate(texCUBE(_SkyboxTex, rotatedDir) * _MWbright, 0.6);
 
-                return mw + (s0+s1+s2+s3+s4+s5+s6+s7+s8) + float4(sunCol, 0);
+                col += uncovered * (mw.rgb + (s0+s1+s2+s3+s4+s5+s6+s7+s8) + sunCol);
+
+                col = EvalScattering(dirEq, -1, col);
+
+                return float4(col, 1.0);
             }
             ENDCG
         }
