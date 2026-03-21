@@ -74,6 +74,21 @@ public class TabletPen : UdonSharpBehaviour
     private TabletScrollbar _activeScrollbar;
     private TabletScrollbar _lastHoveredScrollbar;
     public float meshLerpSpeed = 25f; // Adjust this for snappiness (higher = faster)
+
+    [Header("Pointer Mode")]
+    public bool usePointerMode;
+    public GameObject PointerMesh;
+    public GameObject PointerBase;
+    public GameObject PointerTipArrow;
+    public GameObject PointerTipHand;
+    // public LineRenderer PointerLine;
+
+    [Header("Pointer Colors")]
+    public Material PointerMat;
+    public Color PointerDefaultColor = Color.white;
+    public Color PointerHoverColor = Color.cyan;
+    public Color PointerClickColor = Color.green;
+
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
@@ -85,8 +100,13 @@ public class TabletPen : UdonSharpBehaviour
         if (!Networking.LocalPlayer.IsUserInVR())
         {
             TriggerRequiredForTablet = true;
-            
 
+
+        }
+        else
+        {
+            if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
+            if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);
         }
         isVR = Networking.LocalPlayer.IsUserInVR();
     }
@@ -126,26 +146,85 @@ public class TabletPen : UdonSharpBehaviour
         }
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
         //Pen Movment On trigger press
-        if (PenMesh != null)
-        {
-            float extension = 0f;
-            float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+        //if (PenMesh != null)
+        //{
+        //    float extension = 0f;
+        //    float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
 
+        //    if (currentlyHitting)
+        //    {
+        //        // Only apply extension and surface offset when touching something
+        //        extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
+        //    }
+
+        //    // interactionPlunge is added regardless of 'currentlyHitting'
+        //    Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+
+        //        PenMesh.transform.localPosition = Vector3.Lerp(
+        //        PenMesh.transform.localPosition,
+        //        targetPos,
+        //        Time.deltaTime * meshLerpSpeed
+        //    );
+        //}
+
+        // --- Mesh & Pointer Logic ---
+        //if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
+        //if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);
+
+        float extension = 0f;
+        float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+        bool isInteractiveHit = false;
+
+        if (currentlyHitting)
+        {
+            extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
+
+            // Determine if hit is interactive for color/icon logic
+            isInteractiveHit = (hit.collider.GetComponent<MFDKnob>() != null ||
+                                hit.collider.GetComponent<MFDButton>() != null ||
+                                hit.collider.GetComponent<MFDSwitch>() != null ||
+                                hit.collider.GetComponent<TabletScreen>() != null);
+        }
+
+        Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+
+        // Update Pointer Color
+        if (PointerMat != null)
+        {
+            Color targetColor = PointerDefaultColor;
+            if (isInteractiveHit)
+            {
+                targetColor = triggerHeld ? PointerClickColor : PointerHoverColor;
+            }
+            PointerMat.SetColor("_Color", targetColor); // Standard/Mobile shaders
+            PointerMat.SetColor("_EmissionColor", targetColor); // Standard/Mobile shaders
+                                                                // PointerMat.color = targetColor; // Alternative if not using SetColor
+        }
+
+        if (!usePointerMode)
+        {
+            // Traditional Pen Behavior
+            PenMesh.transform.localPosition = Vector3.Lerp(PenMesh.transform.localPosition, targetPos, Time.deltaTime * meshLerpSpeed);
+        }
+        else
+        {
+            // Pointer Behavior
+            bool isPhysical = false;
             if (currentlyHitting)
             {
-                // Only apply extension and surface offset when touching something
-                extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
+                isPhysical = (hit.collider.GetComponent<MFDKnob>() != null || hit.collider.GetComponent<MFDSwitch>() != null);
             }
 
-            // interactionPlunge is added regardless of 'currentlyHitting'
-            Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+            if (PointerTipArrow != null) PointerTipArrow.SetActive(!isPhysical);
+            if (PointerTipHand != null) PointerTipHand.SetActive(isPhysical);
 
-                PenMesh.transform.localPosition = Vector3.Lerp(
-                PenMesh.transform.localPosition,
-                targetPos,
-                Time.deltaTime * meshLerpSpeed
-            );
+            GameObject activeTip = isPhysical ? PointerTipHand : PointerTipArrow;
+            if (activeTip != null)
+            {
+                activeTip.transform.localPosition = Vector3.Lerp(activeTip.transform.localPosition, targetPos, Time.deltaTime * meshLerpSpeed);
+            }
         }
+
         // 1. IF LOCKED (KNOB/MFD)
         if (_isLocked)
         {
@@ -478,23 +557,23 @@ public class TabletPen : UdonSharpBehaviour
     }
 
     // Trigger and Audio methods remain the same...
-    public void OnTriggerEnter(Collider other)
-    {
-        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
-        {
-            _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
-        }
-    }
-    public void OnTriggerExit(Collider other)
-    {
-        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
-        {
-            _zoneCount--; if (_zoneCount <= 0)
-            {
-                _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
-            }
-        }
-    }
+    //public void OnTriggerEnter(Collider other)
+    //{
+    //    if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+    //    {
+    //        _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
+    //    }
+    //}
+    //public void OnTriggerExit(Collider other)
+    //{
+    //    if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+    //    {
+    //        _zoneCount--; if (_zoneCount <= 0)
+    //        {
+    //            _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
+    //        }
+    //    }
+    //}
     //public bool OverRideMeshBool = false; 
     public void OverRideMeshToggle(bool OverRideMeshBool)
     {
@@ -508,11 +587,44 @@ public class TabletPen : UdonSharpBehaviour
             _zoneCount = 0;
             //OverRideMeshBool = true;
         }
-        
+
         //if (_zoneCount <= 0)
         //{
         //    _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
         //}
+    }
+    public void OnTriggerEnter(Collider other)
+    {
+        if (!_localPlayer.IsUserInVR()) return;
+        if (other.name == "PenEnable")
+        {
+            _zoneCount++;
+            RefreshMeshVisibility();
+        }
+    }
+
+    public void OnTriggerExit(Collider other)
+    {
+        if (!_localPlayer.IsUserInVR()) return;
+        if (other.name == "PenEnable")
+        {
+            _zoneCount--;
+            if (_zoneCount < 0) _zoneCount = 0;
+            RefreshMeshVisibility();
+        }
+    }
+
+    //public void OverRideMeshToggle(bool OverRideMeshBool)
+    //{
+    //    _zoneCount = OverRideMeshBool ? 1000 : 0;
+    //   // RefreshMeshVisibility();
+    //}
+
+    private void RefreshMeshVisibility()
+    {
+        bool show = _zoneCount > 0;
+        if (PenMesh != null) PenMesh.SetActive(show && !usePointerMode);
+        if (PointerMesh != null) PointerMesh.SetActive(show && usePointerMode);
     }
 
     public void TriggerHaptic(float duration = 0.05f, float amplitude = 0.2f, float frequency = 0.8f)
