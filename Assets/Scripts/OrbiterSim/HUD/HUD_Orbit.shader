@@ -37,6 +37,27 @@ Shader "HUD/CollimatedOrbitV2"
         _RadialOutDir_B ("Radial Out Dir (Body)", Vector) = (1,0,0,0)
         _NormalDir_B ("Normal Dir (Body)", Vector) = (0,1,0,0)
 
+        // Selected maneuver node overlay
+        _NodeValid ("Node Valid", Float) = 0
+        _NodePos_HUD ("Node Pos HUD", Vector) = (0,0,0,0)
+        _NodeDVmag_mps ("Node DV Magnitude mps", Float) = 0.0
+        _NodeRemainingDV_mps ("Node Remaining DV mps", Float) = 0.0
+        _NodeMarkerRadius ("Node Marker Radius", Float) = 0.028
+        _NodeMarkerThickness ("Node Marker Thickness", Float) = 0.004
+
+        _OrbitReadoutTextHeight ("Orbit Readout Text Height", Float) = 0.018
+
+        _OrbitRDV_Value ("Orbit RDV Value", Float) = 0.0
+        _OrbitRDV_UnitCode ("Orbit RDV Unit Code", Float) = 1
+
+        _OrbitAPO_Valid ("Orbit APO Valid", Float) = 0
+        _OrbitAPO_Value ("Orbit APO Value", Float) = 0.0
+        _OrbitAPO_UnitCode ("Orbit APO Unit Code", Float) = 1
+
+        _OrbitPER_Valid ("Orbit PER Valid", Float) = 0
+        _OrbitPER_Value ("Orbit PER Value", Float) = 0.0
+        _OrbitPER_UnitCode ("Orbit PER Unit Code", Float) = 1
+
         _FontAtlas ("Font Atlas", 2D) = "white" {}
         _FontSdfEdge ("Font SDF Edge", Float) = 0.5
         _FontSdfSoftness ("Font SDF Softness", Float) = 0.06
@@ -305,6 +326,25 @@ Shader "HUD/CollimatedOrbitV2"
             float _TargetRelMarkerRadius;
             float _TargetRelMarkerThickness;
 
+            float _NodeValid;
+            float4 _NodePos_HUD;
+            float _NodeDVmag_mps;
+            float _NodeRemainingDV_mps;
+            float _NodeMarkerRadius;
+            float _NodeMarkerThickness;
+
+            float _OrbitReadoutTextHeight;
+
+            float _OrbitRDV_Value;
+            float _OrbitRDV_UnitCode;
+
+            float _OrbitAPO_Valid;
+            float _OrbitAPO_Value;
+            float _OrbitAPO_UnitCode;
+
+            float _OrbitPER_Valid;
+            float _OrbitPER_Value;
+            float _OrbitPER_UnitCode;
             float _FontDotWidthScale;
             float _FontDotHeightScale;
             float _FontDotBaselineOffset;
@@ -863,6 +903,52 @@ Shader "HUD/CollimatedOrbitV2"
                 return a;
             }
 
+
+            float DrawUnitLabel(float2 uvh, float2 center, float glyphHeight, int unitCode)
+            {
+                // 0 = M
+                // 1 = KM
+                // 2 = MM
+
+                if (unitCode < 0.5)
+                {
+                    return DrawUpperLabel(
+                        uvh, center, glyphHeight,
+                        1,
+                        12, // M
+                        -1, -1, -1, -1,
+                        float2(1.0, 0.0),
+                        float2(0.0, 1.0),
+                        false
+                    );
+                }
+
+                if (unitCode < 1.5)
+                {
+                    return DrawUpperLabel(
+                        uvh, center, glyphHeight,
+                        2,
+                        10, // K
+                        12, // M
+                        -1, -1, -1,
+                        float2(1.0, 0.0),
+                        float2(0.0, 1.0),
+                        false
+                    );
+                }
+
+                return DrawUpperLabel(
+                    uvh, center, glyphHeight,
+                    2,
+                    12, // M
+                    12, // M
+                    -1, -1, -1,
+                    float2(1.0, 0.0),
+                    float2(0.0, 1.0),
+                    false
+                );
+            }
+
             float MarkerOpenCircle(float2 uvh, float3 dir_B, float radius, float thickness, float softness)
             {
                 float2 m = DirToHudUV(dir_B, _HudHalfFovX, _HudHalfFovY);
@@ -921,6 +1007,34 @@ Shader "HUD/CollimatedOrbitV2"
                 return a;
             }
 
+
+            float MarkerNode(float2 uvh, float2 center, float radius, float thickness, float softness)
+            {
+                float2 dp = uvh - center;
+
+                float diamond = aa_diamond(dp, radius, thickness, softness);
+
+                float crossH = aa_segment_local(
+                    dp,
+                    float2(1.0, 0.0),
+                    float2(0.0, 1.0),
+                    radius * 0.45,
+                    thickness * 0.80,
+                    softness
+                );
+
+                float crossV = aa_segment_local(
+                    dp,
+                    float2(0.0, 1.0),
+                    float2(1.0, 0.0),
+                    radius * 0.45,
+                    thickness * 0.80,
+                    softness
+                );
+
+                return max(diamond, max(crossH, crossV));
+            }
+
             fixed4 fragHud(v2f i) : SV_Target
             {
                 float3 ray_B = normalize(i.worldPos - _WorldSpaceCameraPos.xyz);
@@ -960,8 +1074,9 @@ Shader "HUD/CollimatedOrbitV2"
                 float chevron = max(lLine * lLen, rLine * rLen) * below;
 
                 float hud = bars + chevron;
-                bool orbitMode = (_HudMode > 1.5 && _HudMode < 2.5);
-                bool dockMode  = (_HudMode > 2.5 && _HudMode < 3.5);
+                bool orbitMode    = (_HudMode > 1.5 && _HudMode < 2.5);
+                bool approachMode = (_HudMode > 2.5 && _HudMode < 3.5);
+                bool dockMode     = (_HudMode > 3.5 && _HudMode < 4.5);
                 if (orbitMode)
                 {
                     float3 F = float3(0.0, 0.0, 1.0);
@@ -1267,11 +1382,151 @@ Shader "HUD/CollimatedOrbitV2"
                     hud += 0.80 * MarkerBox(uvh, -N, _MarkerRadius * 0.70, _MarkerThickness, _Softness);
                 }
 
+                // --------------------------------
+                // Orbit-mode readouts: RDV / APO / PER
+                // --------------------------------
+                if (orbitMode)
+                {
+                    float textH = _OrbitReadoutTextHeight;
+
+                    // Row anchors
+                    float2 rdvLabelCenter = float2(-0.42, 0.34);
+                    float2 rdvValueCenter = float2(-0.33, 0.34);
+                    float2 rdvUnitCenter  = float2(-0.25, 0.34);
+
+                    float2 apoLabelCenter = float2(-0.42, 0.28);            
+                    float2 apoValueCenter = float2(-0.33, 0.28);
+                    float2 apoUnitCenter  = float2(-0.25, 0.28);
+
+                    float2 perLabelCenter = float2(-0.42, 0.22);             
+                    float2 perValueCenter = float2(-0.33, 0.22);
+                    float2 perUnitCenter  = float2(-0.25, 0.22);
+
+                    if (_NodeValid > 0.5)
+                    {
+                        hud += DrawUpperLabel(
+                            uvh,
+                            rdvLabelCenter,
+                            textH,
+                            3,
+                            17, // R
+                            3,  // D
+                            21, // V
+                            -1, -1,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnsignedFixed2Generic(
+                            uvh,
+                            rdvValueCenter,
+                            textH,
+                            _OrbitRDV_Value,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnitLabel(
+                            uvh,
+                            rdvUnitCenter,
+                            textH,
+                            (int)_OrbitRDV_UnitCode
+                        );
+                    }
+
+                    if (_OrbitAPO_Valid > 0.5)
+                    {
+                        hud += DrawUpperLabel(
+                            uvh,
+                            apoLabelCenter,
+                            textH,
+                            3,
+                            0,  // A
+                            15, // P
+                            14, // O
+                            -1, -1,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnsignedFixed2Generic(
+                            uvh,
+                            apoValueCenter,
+                            textH,
+                            _OrbitAPO_Value,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnitLabel(
+                            uvh,
+                            apoUnitCenter,
+                            textH,
+                            (int)_OrbitAPO_UnitCode
+                        );
+                    }
+
+                    if (_OrbitPER_Valid > 0.5)
+                    {
+                        hud += DrawUpperLabel(
+                            uvh,
+                            perLabelCenter,
+                            textH,
+                            3,
+                            15, // P
+                            4,  // E
+                            17, // R
+                            -1, -1,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnsignedFixed2Generic(
+                            uvh,
+                            perValueCenter,
+                            textH,
+                            _OrbitPER_Value,
+                            float2(1.0, 0.0),
+                            float2(0.0, 1.0),
+                            false
+                        );
+
+                        hud += DrawUnitLabel(
+                            uvh,
+                            perUnitCenter,
+                            textH,
+                            (int)_OrbitPER_UnitCode
+                        );
+                    }
+                }
+                // --------------------------------
+                // Orbit-mode selected node overlay
+                // --------------------------------
+                if (orbitMode && _NodeValid > 0.5)
+                {
+                    float2 nodePos = _NodePos_HUD.xy;
+                    float nodeInside = step(max(abs(nodePos.x), abs(nodePos.y)), 1.08);
+
+                    float nodeMarker = MarkerNode(
+                        uvh,
+                        nodePos,
+                        _NodeMarkerRadius,
+                        _NodeMarkerThickness,
+                        _Softness
+                    ) * nodeInside;
+
+                    hud += nodeMarker;
+                }
 
                 // --------------------------------
                 // Mode-independent selected target overlay
                 // --------------------------------
-                if (_TargetValid > 0.5 && !dockMode)
+                if (approachMode && _TargetValid > 0.5)
                 {
                     float2 targetPos = _TargetPos_HUD.xy;
                     float targetInside = step(max(abs(targetPos.x), abs(targetPos.y)), 1.08);
@@ -1341,7 +1596,7 @@ Shader "HUD/CollimatedOrbitV2"
                     );
                 }
 
-                if (_TargetRelVelValid > 0.5 && !dockMode)
+                if (approachMode && _TargetRelVelValid > 0.5)
                 {
                     float2 relProg = _TargetRelVelProg_HUD.xy;
                     float2 relRetro = _TargetRelVelRetro_HUD.xy;

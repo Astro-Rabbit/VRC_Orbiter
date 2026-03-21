@@ -27,6 +27,14 @@ Material:
         m_Texture: {fileID: 2800000, guid: 5691abdf1f5033848a4b90ffb9b6be2f, type: 3}
         m_Scale: {x: 0, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _EarthClouds:
+        m_Texture: {fileID: 2800000, guid: f29c481a7829a844c8f0992e7426eabd, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EarthMask:
+        m_Texture: {fileID: 2800000, guid: 7d38fb52287b82b419a88aba70e21da4, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MoonAlbedo:
         m_Texture: {fileID: 2800000, guid: 7fb6ce60ca4afcf48a814cf7ba33be26, type: 3}
         m_Scale: {x: 1, y: 1}
@@ -53,19 +61,45 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _EarthAmbient: 0.39
+    - _EarthAirglowHeightM: 85000
+    - _EarthAirglowIntensity: 0.03
+    - _EarthAirglowNightBias: 1
+    - _EarthAirglowThicknessM: 1000
+    - _EarthAmbient: 0.001
+    - _EarthCloudAmbient: 0.02
+    - _EarthCloudHeightM: 16010.27
+    - _EarthCloudLimbBrightening: 0.2
+    - _EarthCloudLimbPower: 3
+    - _EarthCloudOpacity: 1
+    - _EarthCloudShadowPow: 1
     - _EarthFlipU: 1
     - _EarthFlipV: 0
     - _EarthGamma: 1
     - _EarthLonOffsetDeg: 270
+    - _EarthNightLightIntensity: 2.5
+    - _EarthNightLightThreshold: 0.15
     - _EarthRadiusM: 6371000
     - _EarthScatterHeightM: 100000
     - _EarthShadowPow: 1
+    - _EarthTwilightIntensity: 0.04
+    - _EarthTwilightWidth: 0.035
+    - _EarthWaterBaseReflect: 0.02
+    - _EarthWaterEdgeReflect: 0.2
+    - _EarthWaterFresnel: 1
+    - _EarthWaterNoiseScale1: 96.8
+    - _EarthWaterNoiseScale2: 100
+    - _EarthWaterNoiseStrength: 0.22
+    - _EarthWaterSpecBroadPower: 36
+    - _EarthWaterSpecBroadStrength: 0.1
+    - _EarthWaterSpecIntensity: 1
+    - _EarthWaterSpecPower: 90
+    - _EarthWaterSpecSharpPower: 220
+    - _EarthWaterSpecSharpStrength: 1.2
     - _MWbright: 0.06
     - _MieAmount: 0.000021
     - _MieG: -0.78
     - _MieScale: 1200
-    - _MoonAmbient: 0.01
+    - _MoonAmbient: 0
     - _MoonFlipU: 1
     - _MoonFlipV: 0
     - _MoonGamma: 1
@@ -74,14 +108,18 @@ Material:
     - _MoonShadowPow: 1
     - _ObliquityDeg: -23.43928
     - _PixelSize: 1024
-    - _RayleighScale: 8000
+    - _RayleighScale: 8083.92
     - _SpikeLength: 0.02
     - _SpikeRotateDeg: 29.9
     - _SpikeSharpness: 80
     - _SpikeStrength: 2.52
     - _SpikeWidth: 0.0012
-    - _SunAngRad: 0.004678547
+    - _SunAngRad: 0.004678311
+    - _SunCoreFalloff: 2.2
     - _SunEdgeSoft: 0.000002
+    - _SunGlowFalloff: 3.5
+    - _SunGlowIntensity: 0.1
+    - _SunGlowRadiusMul: 5
     - _SunIntensity: 25.49
     - _brightnessScale: 20
     - _maxMag: 10
@@ -89,13 +127,20 @@ Material:
     - _sigma: 90
     m_Colors:
     - _CraftBodyToEq: {r: 0, g: 0, b: 0, a: 1}
-    - _EarthAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
-    - _EarthBodyToEcl: {r: -0.17493092, g: -0.103238136, b: -0.49765894, a: 0.8432536}
-    - _EarthPosEcl: {r: -8323440, g: -428011.75, b: -169932.42, a: 0}
+    - _EarthAirglowColor: {r: 0.09999997, g: 0.21999997, b: 0.17999998, a: 1}
+    - _EarthAlbedoTint: {r: 0.9575472, g: 0.9860282, b: 1, a: 1}
+    - _EarthBodyToEcl: {r: -0.17486472, g: -0.1033502, b: -0.49819916, a: 0.84293455}
+    - _EarthCloudTint: {r: 1, g: 1, b: 1, a: 1}
+    - _EarthPosEcl: {r: -469829.12, g: 5322595.5, b: 4401597, a: 0}
+    - _EarthTwilightCoolColor: {r: 0.09999997, g: 0.21999997, b: 0.34999996, a: 1}
+    - _EarthTwilightWarmColor: {r: 0.9, g: 0.45, b: 0.17999998, a: 1}
+    - _EarthWaterDeepColor: {r: 0.015, g: 0.049999982, b: 0.09999997, a: 1}
+    - _EarthWaterReflectColor: {r: 0.11999995, g: 0.19999996, b: 0.27999997, a: 1}
+    - _EarthWaterShallowColor: {r: 0.03, g: 0.089999996, b: 0.15999997, a: 1}
     - _MoonAlbedoTint: {r: 1, g: 1, b: 1, a: 1}
-    - _MoonBodyToEcl: {r: 0.0003973766, g: -0.045773726, b: 0.9256307, a: 0.3756493}
-    - _MoonPosEcl: {r: 270824740, g: -270870000, b: -13830465, a: 0}
+    - _MoonBodyToEcl: {r: 0.00039838746, g: -0.045773797, b: 0.9256221, a: 0.37567046}
+    - _MoonPosEcl: {r: 278666620, g: -265132690, b: -9260465, a: 0}
     - _RayleighAmount: {r: 0.0000055, g: 0.000013, b: 0.0000224, a: 0}
-    - _SunColor: {r: 1, g: 1, b: 1, a: 1}
-    - _SunDirEcl: {r: 0.9983924, g: -0.05667985, b: -0.0000011417449, a: 0}
+    - _SunColor: {r: 1, g: 0.9490196, b: 0.90588236, a: 1}
+    - _SunDirEcl: {r: 0.99839455, g: -0.056641873, b: 0.000029572033, a: 0}
   m_BuildTextureStacks: []

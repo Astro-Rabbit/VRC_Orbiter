@@ -6,9 +6,9 @@ import os
 # ---------------------------------------------------------------------
 tile_size = 512
 
-level7_path = r"H:\Orbiter-2024\Textures\Earth\Surf\07"
-level8_path = r"H:\Orbiter-2024\Textures\Earth\Surf\08"
-output_file = r"H:\3d objects\VRC_Orbiter\Assets\Scripts\OrbiterSim\Earth_16k.png"
+level7_path = r"H:\Orbiter-2024\Textures\Earth\Cloud\07"
+level8_path = r"H:\Orbiter-2024\Textures\Earth\Cloud\08"
+output_file = r"H:\3d objects\VRC_Orbiter\Assets\Scripts\OrbiterSim\Render\EarthCloud_16k.png"
 
 # Orbiter quadtree counts
 # level 7 -> 16 x 8 tiles  = 8192 x 4096
@@ -25,11 +25,10 @@ def load_tile(tile_path):
     if not os.path.exists(tile_path):
         return None
     try:
-        return Image.open(tile_path).convert("RGB")
+        return Image.open(tile_path).convert("RGBA")
     except Exception as e:
         print(f"Failed to load {tile_path}: {e}")
         return None
-
 def paste_level(level_path, lat_tiles, lon_tiles, atlas, label):
     found = 0
     for lat in range(lat_tiles):
@@ -51,7 +50,7 @@ def paste_level(level_path, lat_tiles, lon_tiles, atlas, label):
 # ---------------------------------------------------------------------
 # Pass 1: build full atlas from level 7
 # ---------------------------------------------------------------------
-lvl7_atlas = Image.new("RGB", (lvl7_lon_tiles * tile_size, lvl7_lat_tiles * tile_size))
+lvl7_atlas = Image.new("RGBA", (lvl7_lon_tiles * tile_size, lvl7_lat_tiles * tile_size))
 paste_level(level7_path, lvl7_lat_tiles, lvl7_lon_tiles, lvl7_atlas, "Level 7")
 
 # Upscale level 7 atlas to level 8 size

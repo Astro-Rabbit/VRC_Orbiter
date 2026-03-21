@@ -29,6 +29,7 @@ public class GC_Core : UdonSharpBehaviour
     public BodyCatalog bodies;
     public ThrusterCatalog thrusters;
     public GC_NodePlanNetState nodeNet;
+
     [Header("Optional docking contacts (for docking helper APIs)")]
     public GuidanceNavContactsState contacts;
 
@@ -39,14 +40,13 @@ public class GC_Core : UdonSharpBehaviour
     public GC_ManualDraft manual;
     public GC_ActuatorOverrideState overrides;
     public NodePlanState plan;
+    public GC_AlertState alerts;
 
     [Header("Output Register")]
     public GuidanceCommandIntentState intent;
 
     [Header("Optional: craft defaults for intent.ClearToSafeDefaults")]
     public CraftCommandState craftDefaults;
-
-
 
     // =====================================================================
     // Docking helper tuning (V1)
@@ -75,8 +75,9 @@ public class GC_Core : UdonSharpBehaviour
 
     [Header("Optional displays")]
     public OrreryController orrery;
-    public OrreryCraftOrbitRibbon orreryCraftOrbitRibbon;    
+    public OrreryCraftOrbitRibbon orreryCraftOrbitRibbon;
     public OrreryCraftDirectionMarkers orreryCraftDirectionMarkers;
+
     // Executor schedule (frozen once when a node is selected)
     private double _exec_tExec = 0.0;
     private double _exec_tBurnStart = 0.0;
@@ -116,7 +117,7 @@ public class GC_Core : UdonSharpBehaviour
     private byte _modeActMode;
     private bool _modeAllowWheels, _modeAllowRCS, _modeAllowGimbal;
 
-    // Exec draft payload (reserved; inactive V1)
+    // Exec draft payload
     private byte _execAttCmd;
     private Vector3 _execTau_B, _execRate_B;
     private Quaternion _execQ_BE;
@@ -127,19 +128,17 @@ public class GC_Core : UdonSharpBehaviour
     private byte _execActMode;
     private bool _execAllowWheels, _execAllowRCS, _execAllowGimbal;
 
-
-
     // Manual translation payload
     private bool _manualWritesXlat;
     private Vector3 _manTranslate_B;
     private byte _manRcsMode;
 
-    // Mode translation payload (unused for now)
+    // Mode translation payload
     private bool _modeWritesXlat;
     private Vector3 _modeTranslate_B;
     private byte _modeRcsMode;
 
-    // Exec translation payload (unused for now)
+    // Exec translation payload
     private bool _execWritesXlat;
     private Vector3 _execTranslate_B;
     private byte _execRcsMode;
@@ -157,31 +156,31 @@ public class GC_Core : UdonSharpBehaviour
     /// </summary>
     public void Tick()
     {
-        // Validate critical references (fail safe: do nothing but keep outputs safe).
         if (intent == null || nav == null || runtime == null || modeParams == null || manual == null) return;
         if (craft == null || craftAtt == null || bodies == null || ephem == null) return;
 
         // 1) Clear output register to safe baseline.
-        //    Ensures no stale commands persist if any early-out happens.
         intent.ClearToSafeDefaults(craftDefaults);
         intent.commandSource = 1;
 
-        // 2) Build nav snapshot (deterministic, once per tick).
+        // 2) Build nav snapshot.
         BuildNavCoreSnapshot();
+        UpdateSelectedNodeNavExport();
+        UpdateAlerts();
 
-        // 3) Acquire manual inputs (routed through guidance) -> manual draft.
+        // 3) Acquire manual inputs.
         BuildManualDraftFromManualState();
 
         ApplyManualAutoModeSwitch();
         ApplyManualTranslateAutoModeSwitch();
-        // 4) Step executor slot (reserved; inactive in V1).
-        // BuildExecutorDraft_None();
+
+        // 4) Step executor slot.
         BuildExecutorDraft_FromPlan();
 
-        // 5) Step active continuous mode -> mode draft.
+        // 5) Step active continuous mode.
         BuildModeDraft();
 
-        // 6) Two-channel arbitration + write final intent.
+        // 6) Two-channel arbitration + final intent.
         ArbitrateAndWriteIntent();
 
         UpdateActiveProgramIndicator();
@@ -204,11 +203,10 @@ public class GC_Core : UdonSharpBehaviour
                 orreryCraftDirectionMarkers.ApplyClipVolumeParams(clipCenterWorld, clipRadiusWorld);
             }
         }
-
     }
 
     // =====================================================================
-    // 2) NAV SNAPSHOT (uses OrbitHelpers from project)
+    // 2) NAV SNAPSHOT
     // =====================================================================
 
     private void BuildNavCoreSnapshot()
@@ -271,7 +269,7 @@ public class GC_Core : UdonSharpBehaviour
 
         nav.valid = (nav.muPrimary > 0.0 && nav.rMag > 0.0);
 
-        // RTN basis (OrbitHelpers)
+        // RTN basis
         Vector3 rHat, tHat, nHat;
         bool rtnOk = OrbitHelpers.TryBuildRTNBasis(
             nav.r_x, nav.r_y, nav.r_z,
@@ -293,7 +291,7 @@ public class GC_Core : UdonSharpBehaviour
             nav.valid = false;
         }
 
-        // Conic + invariants (OrbitHelpers)
+        // Conic + invariants
         double aMeters, eMag, iRad, raanRad, argpRad, nuRad;
         double hx, hy, hz;
         double ex, ey, ez;
@@ -322,6 +320,11 @@ public class GC_Core : UdonSharpBehaviour
             nav.eVec_E = new Vector3((float)ex, (float)ey, (float)ez);
 
             nav.p = (nav.muPrimary > 0.0) ? (nav.hMag * nav.hMag / nav.muPrimary) : 0.0;
+
+
+            nav.iInertialRad = iRad;
+            nav.raanInertialRad = raanRad;
+            nav.argpInertialRad = argpRad;
 
             // Convert (i, Ω, ω) into primary-equatorial reference plane (+Z north).
             double iEq, raanEq, argpEq;
@@ -359,8 +362,214 @@ public class GC_Core : UdonSharpBehaviour
         nav.lastBuildTime = nav.t;
     }
 
+    private void UpdateSelectedNodeNavExport()
+    {
+        nav.selectedNodeVectorValid = false;
+        nav.selectedNodeIndex = -1;
+        nav.selectedNodeDV_E = Vector3.zero;
+        nav.selectedNodeDir_E = Vector3.zero;
+        nav.selectedNodeDVmag_mps = 0f;
+        nav.selectedNodeRemainingDV_mps = 0f;
+
+        if (plan == null || modeParams == null) return;
+
+        int idx;
+        Vector3 dvE;
+        float dvMag;
+        float dvRemain;
+
+        if (!TryGetSelectedNodeVector(out idx, out dvE, out dvMag, out dvRemain))
+            return;
+
+        nav.selectedNodeVectorValid = true;
+        nav.selectedNodeIndex = idx;
+        nav.selectedNodeDV_E = dvE;
+        nav.selectedNodeDir_E = (dvMag > 1e-6f) ? (dvE / dvMag) : Vector3.zero;
+        nav.selectedNodeDVmag_mps = dvMag;
+        nav.selectedNodeRemainingDV_mps = dvRemain;
+    }
+
+    private void UpdateAlerts()
+    {
+        if (alerts == null) return;
+
+        alerts.ClearEvaluatedState();
+
+        UpdatePeriapsisAlerts();
+        UpdateSelectedTargetAlerts();
+        UpdateNodeAlerts();
+
+        // Auto-clear acknowledgement when underlying condition is gone.
+        if (!alerts.cond_periapsisWarn) alerts.ackPeriapsisWarn = false;
+        if (!alerts.cond_periapsisCritical) alerts.ackPeriapsisCritical = false;
+        if (!alerts.cond_selectedClosureHigh) alerts.ackSelectedClosureHigh = false;
+        if (!alerts.cond_nodeSoon) alerts.ackNodeSoon = false;
+        if (!alerts.cond_nodeAutoExecuteDisabled) alerts.ackNodeAutoExecuteDisabled = false;
+
+        alerts.RebuildOutputs();
+    }
+
+    private void UpdatePeriapsisAlerts()
+    {
+        if (alerts == null || nav == null) return;
+        if (!nav.valid) return;
+        if (nav.radiusPrimary <= 0.0) return;
+
+        double rp = 0.0;
+        bool haveRp = false;
+
+        // Prefer p / (1 + e) for general conic consistency if valid.
+        if (nav.p > 0.0 && nav.e >= 0.0)
+        {
+            double denom = 1.0 + nav.e;
+            if (denom > 1e-12)
+            {
+                rp = nav.p / denom;
+                haveRp = true;
+            }
+        }
+
+        // Fallback to a(1-e) if needed.
+        if (!haveRp && nav.a > 0.0 && nav.e >= 0.0)
+        {
+            rp = nav.a * (1.0 - nav.e);
+            haveRp = true;
+        }
+
+        if (!haveRp) return;
+
+        double alt = rp - nav.radiusPrimary;
+
+        alerts.periapsisRadiusMeters = rp;
+        alerts.periapsisAltitudeMeters = alt;
+
+        if (alt <= alerts.periapsisCriticalAltMeters)
+            alerts.cond_periapsisCritical = true;
+
+        if (alt <= alerts.periapsisWarnAltMeters)
+            alerts.cond_periapsisWarn = true;
+    }
+
+    private void UpdateSelectedTargetAlerts()
+    {
+        if (alerts == null || contacts == null) return;
+        if (!contacts.selValid) return;
+
+        double drx = contacts.sel_drx_E;
+        double dry = contacts.sel_dry_E;
+        double drz = contacts.sel_drz_E;
+
+        double dvx = contacts.sel_dvx_E;
+        double dvy = contacts.sel_dvy_E;
+        double dvz = contacts.sel_dvz_E;
+
+        double r2 = drx * drx + dry * dry + drz * drz;
+        double v2 = dvx * dvx + dvy * dvy + dvz * dvz;
+
+        if (r2 <= 1e-12) return;
+
+        double r = System.Math.Sqrt(r2);
+        double v = (v2 > 0.0) ? System.Math.Sqrt(v2) : 0.0;
+
+        // dr = target - craft, dv = target - craft
+        // Positive closure means approaching -> -(dv dot rhat)
+        double invR = 1.0 / r;
+        double closure = -((dvx * drx + dvy * dry + dvz * drz) * invR);
+
+        alerts.cond_selectedTargetValid = true;
+        alerts.selectedTargetRangeMeters = r;
+        alerts.selectedRelSpeedMps = v;
+        alerts.selectedClosureMps = closure;
+
+        if (r <= alerts.selectedClosureWarnRangeMeters &&
+            closure >= alerts.selectedClosureWarnMps)
+        {
+            alerts.cond_selectedClosureHigh = true;
+        }
+    }
+
+    private void UpdateNodeAlerts()
+    {
+        if (alerts == null) return;
+
+        // Selected node export from nav
+        if (nav != null && nav.selectedNodeVectorValid)
+        {
+            alerts.cond_nodeSelectedValid = true;
+            alerts.nodeSelectedIndex = nav.selectedNodeIndex;
+            alerts.nodeRemainingDV_mps = nav.selectedNodeRemainingDV_mps;
+        }
+
+        bool anyArmed = false;
+        if (plan != null && plan.status != null)
+        {
+            int n = plan.maxNodes;
+            if (plan.status.Length < n) n = plan.status.Length;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (plan.status[i] == NodePlanState.STATUS_ARMED)
+                {
+                    anyArmed = true;
+                    break;
+                }
+            }
+        }
+
+        alerts.cond_armedNodeExists = anyArmed;
+
+        if (anyArmed && runtime != null && !runtime.autoExecuteArmedNodes)
+            alerts.cond_nodeAutoExecuteDisabled = true;
+
+        double tGo;
+        if (TryGetNextArmedNodeTimeToGo(out tGo))
+        {
+            alerts.nodeTimeToGoSec = tGo;
+
+            if (tGo >= 0.0 && tGo <= alerts.nodeSoonLeadSec)
+                alerts.cond_nodeSoon = true;
+        }
+        else
+        {
+            alerts.nodeTimeToGoSec = 0.0;
+        }
+    }
+
+    private bool TryGetNextArmedNodeTimeToGo(out double tGoSec)
+    {
+        tGoSec = 0.0;
+
+        if (plan == null || nav == null) return false;
+        if (plan.status == null) return false;
+
+        int best = -1;
+        double bestT = 0.0;
+        double nowT = nav.t;
+
+        int n = plan.maxNodes;
+        if (plan.status.Length < n) n = plan.status.Length;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (plan.status[i] != NodePlanState.STATUS_ARMED) continue;
+
+            double t = ComputeNodeTriggerTime(i, nowT);
+
+            if (best < 0 || t < bestT)
+            {
+                best = i;
+                bestT = t;
+            }
+        }
+
+        if (best < 0) return false;
+
+        tGoSec = bestT - nowT;
+        return true;
+    }
+
     // =====================================================================
-    // 3) MANUAL INPUT ACQUISITION -> manual draft (human inputs only)
+    // 3) MANUAL INPUT ACQUISITION
     // =====================================================================
 
     private void BuildManualDraftFromManualState()
@@ -381,7 +590,6 @@ public class GC_Core : UdonSharpBehaviour
             _manRate_B = Vector3.zero;
         }
 
-        // Manual does not command these targets in V1; set safe defaults
         _manQ_BE = Quaternion.identity;
         _manPointDir_E = Vector3.forward;
         _manAxis = 2;
@@ -398,33 +606,6 @@ public class GC_Core : UdonSharpBehaviour
         _manualWritesXlat = true;
         _manTranslate_B = manual.translateCmd_B;
         _manRcsMode = manual.rcsMode;
-    
-    }
-
-    // =====================================================================
-    // 4) EXECUTOR SLOT (future) -> exec draft (inactive V1)
-    // =====================================================================
-
-    private void BuildExecutorDraft_None()
-    {
-        _execWritesAtt = false;
-        _execWritesThr = false;
-
-        _execAttCmd = 0;
-        _execTau_B = Vector3.zero;
-        _execRate_B = Vector3.zero;
-        _execQ_BE = Quaternion.identity;
-        _execPointDir_E = Vector3.forward;
-        _execAxis = 2;
-        _execBlend = true;
-
-        _execMainT = 0f;
-        _execHoverT = 0f;
-
-        _execActMode = CraftCommandState.ATT_ACT_AUTO;
-        _execAllowWheels = true;
-        _execAllowRCS = true;
-        _execAllowGimbal = true;
     }
 
     // =====================================================================
@@ -461,7 +642,6 @@ public class GC_Core : UdonSharpBehaviour
         {
             default:
             case GC_RuntimeState.MODE_MANUAL:
-                // Mode writes nothing; manual wins by arbitration.
                 break;
 
             case GC_RuntimeState.MODE_HOLD_QUAT:
@@ -497,6 +677,35 @@ public class GC_Core : UdonSharpBehaviour
                 _modeBlend = modeParams.blendDirectTorqueWithPD;
                 break;
 
+            case GC_RuntimeState.MODE_HOLD_HORIZON:
+            {
+                Quaternion qTarget;
+                if (!TryBuildHorizonHoldTarget(out qTarget))
+                    break;
+
+                _modeWritesAtt = true;
+                _modeAttCmd = CraftCommandState.ATT_CMD_ATTITUDE_TARGET;
+                _modeQ_BE = qTarget;
+                break;
+            }
+
+            case GC_RuntimeState.MODE_POINT_NODE_VECTOR:
+            {
+                int idx;
+                Vector3 dvE;
+                float dvMag;
+                float dvRemain;
+
+                if (!TryGetSelectedNodeVector(out idx, out dvE, out dvMag, out dvRemain))
+                    break;
+
+                _modeWritesAtt = true;
+                _modeAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
+                _modePointDir_E = dvE / dvMag;
+                _modeAxis = ClampAxis012(modeParams.bodyAxisToPoint);
+                break;
+            }
+
             case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
             {
                 if (contacts == null || !contacts.dockValid0) break;
@@ -508,8 +717,6 @@ public class GC_Core : UdonSharpBehaviour
                 if (err_B.sqrMagnitude < 1e-8f) break;
 
                 Vector3 los_E = (nav.qBE * err_B).normalized;
-
-                // ship +Z in E
                 Vector3 shipAxis_E = (nav.qBE * Vector3.forward).normalized;
 
                 Quaternion qErr_E = Quaternion.FromToRotation(shipAxis_E, los_E);
@@ -525,10 +732,10 @@ public class GC_Core : UdonSharpBehaviour
             {
                 if (contacts == null || !contacts.dockValid0) break;
 
-                Quaternion qTargetPort_E = contacts.qTargetPort_E0;  // port -> E
-                Quaternion qCraftPort_B  = contacts.qCraftPort_B0;   // port -> body
+                Quaternion qTargetPort_E = contacts.qTargetPort_E0;
+                Quaternion qCraftPort_B = contacts.qCraftPort_B0;
 
-                Quaternion qFlip = Quaternion.AngleAxis(180f, Vector3.up); // in port frame (+Y up)
+                Quaternion qFlip = Quaternion.AngleAxis(180f, Vector3.up);
                 Quaternion qDesired_BE = qTargetPort_E * qFlip * Quaternion.Inverse(qCraftPort_B);
 
                 _modeWritesAtt = true;
@@ -545,28 +752,19 @@ public class GC_Core : UdonSharpBehaviour
                 Vector3 dv_E = new Vector3((float)contacts.dvx_E0, (float)contacts.dvy_E0, (float)contacts.dvz_E0);
                 if (dv_E.sqrMagnitude < 1e-10f) break;
 
-                // Select direction: +dv or -dv
                 Vector3 dir_E = (runtime.activeModeId == GC_RuntimeState.MODE_RELVEL_RETROGRADE) ? (-dv_E) : dv_E;
                 dir_E.Normalize();
 
                 _modeWritesAtt = true;
                 _modeAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
-
                 _modePointDir_E = dir_E;
-
-                // Which craft axis points? Use modeParams.bodyAxisToPoint (so UI can choose +X/+Z etc.)
                 _modeAxis = ClampAxis012(modeParams.bodyAxisToPoint);
-
                 break;
             }
-
-
-
         }
 
-
         // --------------------
-        // Translation assist (independent of attitude)
+        // Translation assist
         // --------------------
         switch (runtime.activeTranslateModeId)
         {
@@ -578,17 +776,13 @@ public class GC_Core : UdonSharpBehaviour
             {
                 if (contacts == null || !contacts.fullValid0) break;
 
-                // dv_E is station - craft in E (root)
                 Vector3 dv_E = new Vector3((float)contacts.dvx_E0, (float)contacts.dvy_E0, (float)contacts.dvz_E0);
 
-                // E -> B
                 Quaternion qEB = Quaternion.Inverse(nav.qBE);
                 Vector3 dv_B = qEB * dv_E;
 
-                // deadband (component or magnitude; pick one)
                 if (dv_B.magnitude < rel_velDeadband) dv_B = Vector3.zero;
 
-                // optional position hold uses ROOT dr_B0 (not port error)
                 Vector3 dr_B = new Vector3((float)contacts.drx_B0, (float)contacts.dry_B0, (float)contacts.drz_B0);
                 if (rel_kPos > 0f && dr_B.magnitude < rel_posDeadband) dr_B = Vector3.zero;
 
@@ -609,9 +803,7 @@ public class GC_Core : UdonSharpBehaviour
                 _modeRcsMode = rel_rcsMode;
                 break;
             }
-        }     
-
-        // V1 choice: throttle is manual-owned unless an executor later overrides it.
+        }
     }
 
     private static Vector3 ResolveRtnDirection(GuidanceNavCoreState nav, byte rtnDir)
@@ -623,12 +815,12 @@ public class GC_Core : UdonSharpBehaviour
         switch (rtnDir)
         {
             default:
-            case GC_ModeParams.RTN_T_PLUS:  return T;   // prograde
-            case GC_ModeParams.RTN_T_MINUS: return -T;  // retrograde
-            case GC_ModeParams.RTN_R_PLUS:  return R;   // radial out
-            case GC_ModeParams.RTN_R_MINUS: return -R;  // radial in
-            case GC_ModeParams.RTN_N_PLUS:  return N;   // normal
-            case GC_ModeParams.RTN_N_MINUS: return -N;  // anti-normal
+            case GC_ModeParams.RTN_T_PLUS:  return T;
+            case GC_ModeParams.RTN_T_MINUS: return -T;
+            case GC_ModeParams.RTN_R_PLUS:  return R;
+            case GC_ModeParams.RTN_R_MINUS: return -R;
+            case GC_ModeParams.RTN_N_PLUS:  return N;
+            case GC_ModeParams.RTN_N_MINUS: return -N;
         }
     }
 
@@ -637,18 +829,73 @@ public class GC_Core : UdonSharpBehaviour
         return (axis > 2) ? (byte)2 : axis;
     }
 
+    private bool TryGetSelectedNodeVector(out int idx, out Vector3 dvE, out float dvMag, out float dvRemain)
+    {
+        idx = -1;
+        dvE = Vector3.zero;
+        dvMag = 0f;
+        dvRemain = 0f;
+
+        if (plan == null || modeParams == null) return false;
+
+        int i = (int)modeParams.selectedNodeIndex;
+        if (i < 0 || i >= plan.maxNodes) return false;
+
+        if (plan.status == null || i >= plan.status.Length) return false;
+        byte st = plan.status[i];
+        if (st == NodePlanState.STATUS_EMPTY) return false;
+
+        if (plan.dV_E == null || i >= plan.dV_E.Length) return false;
+        Vector3 v = plan.dV_E[i];
+        float mag = v.magnitude;
+        if (mag <= 1e-6f) return false;
+
+        float rem = mag;
+        if (plan.remainingDV_mps != null && i < plan.remainingDV_mps.Length)
+            rem = Mathf.Max(0f, plan.remainingDV_mps[i]);
+
+        idx = i;
+        dvE = v;
+        dvMag = mag;
+        dvRemain = rem;
+        return true;
+    }
+
+    private bool TryBuildHorizonHoldTarget(out Quaternion qTargetBE)
+    {
+        qTargetBE = Quaternion.identity;
+        if (nav == null || !nav.valid) return false;
+
+        Vector3 forward_E = nav.That_E;
+        Vector3 up_E = nav.Rhat_E;
+
+        if (forward_E.sqrMagnitude < 1e-8f || up_E.sqrMagnitude < 1e-8f)
+            return false;
+
+        forward_E.Normalize();
+        up_E.Normalize();
+
+        // Re-orthogonalize for safety
+        Vector3 right_E = Vector3.Cross(up_E, forward_E);
+        if (right_E.sqrMagnitude < 1e-8f)
+            return false;
+
+        right_E.Normalize();
+        up_E = Vector3.Cross(forward_E, right_E).normalized;
+
+        qTargetBE = Quaternion.LookRotation(forward_E, up_E);
+        return true;
+    }
+
     // =====================================================================
     // 6) ARBITRATION + FINAL INTENT WRITE
     // =====================================================================
 
     private void ArbitrateAndWriteIntent()
     {
-        // SAFETY hook (V1 minimal): fault => throttle cut
         bool safetyCutThrottle = (runtime.status == GC_RuntimeState.STATUS_FAULT);
 
-        // --------------------
-        // ATTITUDE CHANNEL: EXECUTOR > MODE > MANUAL
-        // --------------------
+        // ATTITUDE: EXECUTOR > MODE > MANUAL
         if (_execWritesAtt)
         {
             WriteAttitudeToIntent(
@@ -671,11 +918,7 @@ public class GC_Core : UdonSharpBehaviour
                 _manActMode, _manAllowWheels, _manAllowRCS, _manAllowGimbal);
         }
 
-
-
-        // --------------------
-        // TRANSLATION CHANNEL: EXECUTOR > MODE > MANUAL
-        // --------------------
+        // TRANSLATION: EXECUTOR > MODE > MANUAL
         Vector3 xlat = _manTranslate_B;
         byte rcsMode = _manRcsMode;
 
@@ -695,9 +938,7 @@ public class GC_Core : UdonSharpBehaviour
 
         ApplyActuatorOverrides();
 
-        // --------------------
-        // THROTTLE CHANNEL: SAFETY > EXECUTOR > MODE > MANUAL
-        // --------------------
+        // THROTTLE: SAFETY > EXECUTOR > MODE > MANUAL
         float mainT = _manMainT;
         float hoverT = _manHoverT;
 
@@ -756,31 +997,26 @@ public class GC_Core : UdonSharpBehaviour
     {
         if (overrides == null) return;
 
-        // allowWheels
         if (overrides.overrideAllowWheels == GC_ActuatorOverrideState.FORCE_DISABLE) intent.allowWheels = false;
         else if (overrides.overrideAllowWheels == GC_ActuatorOverrideState.FORCE_ENABLE) intent.allowWheels = true;
 
-        // allowRCS
         if (overrides.overrideAllowRCS == GC_ActuatorOverrideState.FORCE_DISABLE) intent.allowRCS = false;
         else if (overrides.overrideAllowRCS == GC_ActuatorOverrideState.FORCE_ENABLE) intent.allowRCS = true;
 
-        // allowGimbal
         if (overrides.overrideAllowGimbal == GC_ActuatorOverrideState.FORCE_DISABLE) intent.allowGimbal = false;
         else if (overrides.overrideAllowGimbal == GC_ActuatorOverrideState.FORCE_ENABLE) intent.allowGimbal = true;
 
-        // actuator selection mode override (0 means no override)
         if (overrides.overrideAttitudeActuatorMode != 0)
             intent.attitudeActuatorMode = overrides.overrideAttitudeActuatorMode;
 
-        // translation RCS mode override
         if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_TRANSLATE)
             intent.rcsMode = CraftCommandState.RCS_MODE_TRANSLATE;
         else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_ROTATE)
             intent.rcsMode = CraftCommandState.RCS_MODE_ROTATE;
         else if (overrides.overrideRcsMode == GC_ActuatorOverrideState.RCSMODE_FORCE_BLENDED)
             intent.rcsMode = CraftCommandState.RCS_MODE_BLENDED;
-
     }
+
     private bool ManualAttitudeIsActive()
     {
         float dz = runtime.manualTakeoverDeadzone;
@@ -797,8 +1033,6 @@ public class GC_Core : UdonSharpBehaviour
     {
         float dz = runtime.manualTakeoverDeadzone;
         if (manual == null) return false;
-
-        // Throttle "active" meaning non-trivial command (you can switch to "delta from last" later)
         return (manual.mainThrottle01 > dz) || (manual.hoverThrottle01 > dz);
     }
 
@@ -814,25 +1048,18 @@ public class GC_Core : UdonSharpBehaviour
         if (ManualAttitudeIsActive()) return true;
         if (ManualThrottleIsActive()) return true;
         if (ManualTranslateIsActive()) return true;
-        // later: translation activity
-        // if (manual.translateCmd_B.sqrMagnitude > dz*dz) return true;
         return false;
     }
-
 
     private void ApplyManualTranslateAutoModeSwitch()
     {
         if (!runtime.autoSwitchTranslateToManualOnInput) return;
 
-        // Don't change translation mode during executor burn phases if you want it protected (optional).
-        // If you DO want manual translation to always win even during exec, remove this guard.
         if (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_SLEW ||
             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST)
         {
-            // For docking translation assist, I'd still allow manual translation to kick you out,
-            // but keep this if you want consistency with attitude.
-            // return;
+            // intentionally allowed to fall through for now
         }
 
         bool active = ManualTranslateIsActive();
@@ -861,11 +1088,11 @@ public class GC_Core : UdonSharpBehaviour
             }
         }
     }
+
     private void ApplyManualAutoModeSwitch()
     {
         if (!runtime.autoSwitchToManualOnInput) return;
 
-        // Don't auto-switch modes while executor is actively steering (slew/burn/post)
         if (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_SLEW ||
             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST)
@@ -887,16 +1114,13 @@ public class GC_Core : UdonSharpBehaviour
             return;
         }
 
-        // If not active: in latched mode, do nothing.
         if (runtime.latchManualTakeover) return;
 
-        // Momentary mode: return to previous mode after timeout
         double dtSince = nav.t - runtime.lastManualInputTime;
         if (dtSince >= runtime.manualReleaseTimeoutSec)
         {
             if (runtime.activeModeId == GC_RuntimeState.MODE_MANUAL)
             {
-                // Restore only if we have something sensible to restore
                 byte prev = runtime.lastNonManualModeId;
                 if (prev != GC_RuntimeState.MODE_MANUAL)
                 {
@@ -937,11 +1161,20 @@ public class GC_Core : UdonSharpBehaviour
 
         double nowT = nav.t;
 
-        // Manual intervention during active phases (SLEW/BURN/POST)
+        // Hard gate: no automatic node execution when switch is off.
+        if (!runtime.autoExecuteArmedNodes)
+        {
+            runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
+            runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_WAIT;
+            runtime.executorNodeIndex = -1;
+            plan.activeIndex = -1;
+            return;
+        }
+
         if (runtime.abortExecOnManualInput &&
             (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_SLEW ||
-            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
-            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST))
+             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
+             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST))
         {
             if (ManualInputIsActive())
             {
@@ -950,7 +1183,6 @@ public class GC_Core : UdonSharpBehaviour
             }
         }
 
-        // If not running a node executor, ensure sensible idle
         if (runtime.activeExecutorId == GC_RuntimeState.EXEC_NONE ||
             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_NONE)
         {
@@ -960,7 +1192,7 @@ public class GC_Core : UdonSharpBehaviour
             plan.activeIndex = -1;
         }
 
-        // WAIT: find next armed node and decide when to start slewing (relative to burn start)
+        // WAIT: find next armed node and decide when to start slewing
         if (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_WAIT)
         {
             int next = FindBestNextNodeIndex(nowT);
@@ -972,19 +1204,15 @@ public class GC_Core : UdonSharpBehaviour
                 return;
             }
 
-            // Node "execution time" (center time)
             double tExec = ComputeNodeTriggerTime(next, nowT);
 
-            // Burn parameters (precomputed at creation)
             float tBurn = 0f;
             if (plan.burnDurationSec != null && next >= 0 && next < plan.burnDurationSec.Length)
                 tBurn = Mathf.Max(0f, plan.burnDurationSec[next]);
 
-            // Burn window (straddle around tExec)
             double tBurnStart = tExec - 0.5 * (double)tBurn;
-            double tBurnEnd   = tExec + 0.5 * (double)tBurn;
+            double tBurnEnd = tExec + 0.5 * (double)tBurn;
 
-            // Clamp: if burn start already passed, start now and keep full duration
             if (tBurn > 0f && tBurnStart < nowT)
             {
                 tBurnStart = nowT;
@@ -1000,7 +1228,6 @@ public class GC_Core : UdonSharpBehaviour
             }
             else
             {
-                // Not time yet; executor idle
                 runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
                 runtime.executorNodeIndex = -1;
                 plan.activeIndex = -1;
@@ -1018,7 +1245,6 @@ public class GC_Core : UdonSharpBehaviour
             return;
         }
 
-        // If node got edited/deleted/disarmed, bail
         if (plan.status[idx] != NodePlanState.STATUS_ACTIVE && plan.status[idx] != NodePlanState.STATUS_ARMED)
         {
             runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
@@ -1028,21 +1254,17 @@ public class GC_Core : UdonSharpBehaviour
             return;
         }
 
-        // Mark active
         plan.status[idx] = NodePlanState.STATUS_ACTIVE;
         plan.activeIndex = idx;
 
-        // Burn direction
         Vector3 dvE = plan.dV_E[idx];
         float dvMag = dvE.magnitude;
         Vector3 burnDirE = (dvMag > 1e-6f) ? (dvE / dvMag) : nav.That_E;
 
         byte axisToPoint = ClampAxis012(plan.bodyAxisToPoint[idx]);
 
-        // Node "execution time" (center time)
         double tExecNow = ComputeNodeTriggerTime(idx, nowT);
 
-        // Burn params
         float tBurnNow = 0f;
         float burnThrottle01 = 0f;
         if (plan.burnDurationSec != null && idx < plan.burnDurationSec.Length)
@@ -1050,11 +1272,9 @@ public class GC_Core : UdonSharpBehaviour
         if (plan.burnThrottle01 != null && idx < plan.burnThrottle01.Length)
             burnThrottle01 = Mathf.Clamp01(plan.burnThrottle01[idx]);
 
-        // Burn window (straddle)
         double tBurnStartNow = tExecNow - 0.5 * (double)tBurnNow;
-        double tBurnEndNow   = tExecNow + 0.5 * (double)tBurnNow;
+        double tBurnEndNow = tExecNow + 0.5 * (double)tBurnNow;
 
-        // Clamp: if burn start already passed, start now and keep full duration
         if (tBurnNow > 0f && tBurnStartNow < nowT)
         {
             tBurnStartNow = nowT;
@@ -1067,24 +1287,21 @@ public class GC_Core : UdonSharpBehaviour
         {
             case GC_RuntimeState.EXEC_PHASE_SLEW:
             {
-                // Point along burn direction
                 _execWritesAtt = true;
                 _execAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
                 _execPointDir_E = burnDirE;
                 _execAxis = axisToPoint;
 
-                // Enter BURN at burn start (if burn duration is nonzero), otherwise go straight to POST at exec time
                 if (tBurnNow > 0f)
                 {
                     if (nowT >= _exec_tBurnStart)
                     {
                         runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_BURN;
-                        runtime.executorStartTime = nowT; // used as phase timer if needed
+                        runtime.executorStartTime = nowT;
                     }
                 }
                 else
                 {
-                    // No burn -> treat as "attitude-only node": start POST at exec time
                     if (nowT >= _exec_tBurnStart)
                     {
                         runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_POST;
@@ -1096,17 +1313,14 @@ public class GC_Core : UdonSharpBehaviour
 
             case GC_RuntimeState.EXEC_PHASE_BURN:
             {
-                // Keep pointing during burn
                 _execWritesAtt = true;
                 _execAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
                 _execPointDir_E = burnDirE;
                 _execAxis = axisToPoint;
 
-                // Command mains throttle during burn
                 _execWritesThr = true;
                 _execMainT = burnThrottle01;
 
-                // Transition to POST at burn end
                 if (nowT >= _exec_tBurnEnd)
                 {
                     runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_POST;
@@ -1117,7 +1331,6 @@ public class GC_Core : UdonSharpBehaviour
 
             case GC_RuntimeState.EXEC_PHASE_POST:
             {
-                // Hold pointing through post window, throttle off
                 _execWritesAtt = true;
                 _execAttCmd = CraftCommandState.ATT_CMD_POINT_VECTOR;
                 _execPointDir_E = burnDirE;
@@ -1128,14 +1341,13 @@ public class GC_Core : UdonSharpBehaviour
 
                 if (postHold <= 0f || (nowT - runtime.executorStartTime) >= postHold)
                 {
-                    FinishExecutor(idx, nowT); // you'll modify FinishExecutor to delete node automatically
+                    FinishExecutor(idx, nowT);
                 }
                 break;
             }
 
             default:
             {
-                // Unexpected -> recover to WAIT
                 runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
                 runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_WAIT;
                 runtime.executorNodeIndex = -1;
@@ -1147,7 +1359,6 @@ public class GC_Core : UdonSharpBehaviour
 
     private int FindBestNextNodeIndex(double nowT)
     {
-        // Choose the ARMED node with the smallest computed trigger time.
         int best = -1;
         double bestT = 0.0;
 
@@ -1172,7 +1383,6 @@ public class GC_Core : UdonSharpBehaviour
         if (plan.trigType[idx] == NodePlanState.TRIG_TIME)
             return plan.triggerTime[idx];
 
-        // True anomaly scheduling: compute dt using OrbitHelpers helper.
         double dt;
         bool ok = OrbitHelpers.TryTimeToTrueAnomaly(
             nav.a, nav.e, nav.muPrimary,
@@ -1181,8 +1391,8 @@ public class GC_Core : UdonSharpBehaviour
             eTol,
             out dt);
 
-        if (!ok) return nowT;   // treat as "immediate" if we can't compute
-        if (dt < 0.0) dt = 0.0; // forward-only behavior
+        if (!ok) return nowT;
+        if (dt < 0.0) dt = 0.0;
         return nowT + dt;
     }
 
@@ -1193,41 +1403,35 @@ public class GC_Core : UdonSharpBehaviour
         runtime.executorStartTime = nowT;
         runtime.executorNodeIndex = idx;
 
-        // Cache continuous mode to resume afterward
         runtime.cachedModeBeforeExec = runtime.activeModeId;
 
-        // Freeze schedule for this execution
         _exec_tExec = tExec;
         _exec_tBurnStart = tBurnStart;
         _exec_tBurnEnd = tBurnEnd;
 
-        // Mark active
         plan.status[idx] = NodePlanState.STATUS_ACTIVE;
         plan.activeIndex = idx;
     }
 
     private void FinishExecutor(int idx, double nowT)
     {
-        // Mark done
         plan.status[idx] = NodePlanState.STATUS_DONE;
-        plan.API_DeleteNode(idx);   // frees slot immediately
+        plan.API_DeleteNode(idx);
 
         plan.activeIndex = -1;
 
-        // Clear executor
         runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
         runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_WAIT;
         runtime.executorStartTime = nowT;
         runtime.executorNodeIndex = -1;
 
-        // Resume previous continuous mode if configured
         if (runtime.resumeModeOnExecutorDone)
         {
             runtime.activeModeId = runtime.cachedModeBeforeExec;
             runtime.modeStartTime = nowT;
         }
-        if (nodeNet != null) nodeNet.ForcePublish();
 
+        if (nodeNet != null) nodeNet.ForcePublish();
     }
 
     private void AbortExecutor(double nowT)
@@ -1248,7 +1452,6 @@ public class GC_Core : UdonSharpBehaviour
         runtime.lastAbortTime = nowT;
         runtime.status = GC_RuntimeState.STATUS_ABORTED;
 
-        // Per earlier policy: abort -> MANUAL
         runtime.activeModeId = GC_RuntimeState.MODE_MANUAL;
         runtime.modeStartTime = nowT;
     }
@@ -1280,7 +1483,6 @@ public class GC_Core : UdonSharpBehaviour
 
         totalThrustN = sumT;
 
-        // If no Isp provided, we can’t compute proper duration; treat as failure
         if (sumTIsp <= 0f) return false;
 
         ispEffSec = sumTIsp / sumT;
@@ -1304,17 +1506,15 @@ public class GC_Core : UdonSharpBehaviour
         double ve = (double)IspSec * g0;
         if (ve <= 1e-6) return false;
 
-        // rocket eq
         double m1 = m0 / System.Math.Exp((double)dv_mps / ve);
         double mPropReq = m0 - m1;
         if (mPropReq < 0.0) mPropReq = 0.0;
 
-        // clamp to available prop
         double mpAvail = craft.propMassKg;
         if (mpAvail < 0.0) mpAvail = 0.0;
         if (mPropReq > mpAvail) mPropReq = mpAvail;
 
-        double mdot = (double)TmaxN / ve; // throttle=1
+        double mdot = (double)TmaxN / ve;
         if (mdot <= 1e-9) return false;
 
         double t = mPropReq / mdot;
@@ -1373,6 +1573,12 @@ public class GC_Core : UdonSharpBehaviour
         _modeTranslate_B = Vector3.zero;
         _modeRcsMode = CraftCommandState.RCS_MODE_BLENDED;
 
+        if (alerts != null)
+        {
+            alerts.ClearEvaluatedState();
+            alerts.API_ResetAllAlertControls();
+        }
+
         _execAttCmd = 0;
         _execTau_B = Vector3.zero;
         _execRate_B = Vector3.zero;
@@ -1407,23 +1613,21 @@ public class GC_Core : UdonSharpBehaviour
             modeParams.rateTarget_B = Vector3.zero;
             modeParams.tauDirect_B = Vector3.zero;
             modeParams.blendDirectTorqueWithPD = true;
+            modeParams.selectedNodeIndex = 0;
         }
     }
 
-
     private void UpdateActiveProgramIndicator()
     {
-        // Executor has priority for "what are we doing"
         if (runtime.activeExecutorId != GC_RuntimeState.EXEC_NONE &&
             (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_SLEW ||
-            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
-            runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST))
+             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_BURN ||
+             runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_POST))
         {
             runtime.activeProgramId = GC_RuntimeState.PROG_EXEC_NODE;
             return;
         }
 
-        // Otherwise reflect the continuous mode
         switch (runtime.activeModeId)
         {
             case GC_RuntimeState.MODE_MANUAL:
@@ -1439,11 +1643,7 @@ public class GC_Core : UdonSharpBehaviour
                 return;
 
             case GC_RuntimeState.MODE_RATE_TARGET:
-                // Optional: detect kill-rot specifically (zero target rate)
-                if (modeParams != null && modeParams.rateTarget_B.sqrMagnitude < 1e-10f)
-                    runtime.activeProgramId = GC_RuntimeState.PROG_KILL_ROT;
-                else
-                    runtime.activeProgramId = GC_RuntimeState.PROG_KILL_ROT; // or define PROG_RATE_HOLD
+                runtime.activeProgramId = GC_RuntimeState.PROG_KILL_ROT;
                 return;
 
             case GC_RuntimeState.MODE_HOLD_RTN_DIR:
@@ -1452,27 +1652,35 @@ public class GC_Core : UdonSharpBehaviour
                 switch (modeParams.rtnDir)
                 {
                     case GC_ModeParams.RTN_T_PLUS:  runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_PROGRADE; return;
-                    case GC_ModeParams.RTN_T_MINUS: runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RETRO;    return;
-                    case GC_ModeParams.RTN_R_PLUS:  runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RAD_OUT;  return;
-                    case GC_ModeParams.RTN_R_MINUS: runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RAD_IN;   return;
-                    case GC_ModeParams.RTN_N_PLUS:  runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_NORMAL;   return;
+                    case GC_ModeParams.RTN_T_MINUS: runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RETRO; return;
+                    case GC_ModeParams.RTN_R_PLUS:  runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RAD_OUT; return;
+                    case GC_ModeParams.RTN_R_MINUS: runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_RAD_IN; return;
+                    case GC_ModeParams.RTN_N_PLUS:  runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_NORMAL; return;
                     case GC_ModeParams.RTN_N_MINUS: runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_ANTINORM; return;
-                    default:                        runtime.activeProgramId = GC_RuntimeState.PROG_NONE;         return;
+                    default:                        runtime.activeProgramId = GC_RuntimeState.PROG_NONE; return;
                 }
             }
 
             case GC_RuntimeState.MODE_DIRECT_TORQUE:
-                runtime.activeProgramId = GC_RuntimeState.PROG_MANUAL; // or add PROG_DIRECT_TORQUE
+                runtime.activeProgramId = GC_RuntimeState.PROG_MANUAL;
+                return;
+
+            case GC_RuntimeState.MODE_HOLD_HORIZON:
+                runtime.activeProgramId = GC_RuntimeState.PROG_HOLD_HORIZON;
+                return;
+
+            case GC_RuntimeState.MODE_POINT_NODE_VECTOR:
+                runtime.activeProgramId = GC_RuntimeState.PROG_POINT_NODE_VECTOR;
                 return;
 
             case GC_RuntimeState.MODE_RELVEL_PROGRADE:
-                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_PRO;  // if you added it
+                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_PRO;
                 return;
 
             case GC_RuntimeState.MODE_RELVEL_RETROGRADE:
-                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_RETRO; // if you added it
+                runtime.activeProgramId = GC_RuntimeState.PROG_RELVEL_RETRO;
                 return;
-                
+
             case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
                 runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_POINT_PORT;
                 return;
@@ -1487,9 +1695,8 @@ public class GC_Core : UdonSharpBehaviour
         }
     }
 
-
     // =====================================================================
-    // Minimal API methods (optional convenience)
+    // Minimal API methods
     // =====================================================================
 
     public void API_SetModeManual()
@@ -1528,14 +1735,6 @@ public class GC_Core : UdonSharpBehaviour
         runtime.modeStartTime = nav.t;
     }
 
-
-
-    // =====================================================================
-    // Thin RTN convenience APIs (UI-friendly)
-    // - These do NOT change internals; they just set modeParams + runtime mode.
-    // - Default axis is +Z (2) unless you prefer +X (0) for "nose".
-    // =====================================================================
-
     [Header("API defaults")]
     public byte defaultBodyAxisToPoint = 2; // 0=+X, 1=+Y, 2=+Z
 
@@ -1569,26 +1768,19 @@ public class GC_Core : UdonSharpBehaviour
         API_Attitude_HoldRTN(GC_ModeParams.RTN_N_MINUS, defaultBodyAxisToPoint);
     }
 
-
-    // Hold whatever attitude the craft currently has (captures qBE and switches mode).
     public void API_Attitude_HoldCurrent()
     {
         if (craftAtt == null) return;
         API_Attitude_HoldQuaternion(craftAtt.qBE);
     }
 
-    // Optional: hold current attitude but also immediately command zero body rate (helps settle)
     public void API_Attitude_HoldCurrentAndKillRot()
     {
         if (craftAtt == null) return;
 
-        // Capture attitude target
         modeParams.qTarget_BE = craftAtt.qBE;
         runtime.activeModeId = GC_RuntimeState.MODE_HOLD_QUAT;
         runtime.modeStartTime = nav.t;
-
-        // Also set rate target to zero as a separate mode param for future use.
-        // (This does not change the selected mode; it just ensures any blending logic has a sane default.)
         modeParams.rateTarget_B = Vector3.zero;
     }
 
@@ -1597,8 +1789,49 @@ public class GC_Core : UdonSharpBehaviour
         API_Attitude_PointDirE(dirE, defaultBodyAxisToPoint);
     }
 
+    public void API_Attitude_HoldHorizon()
+    {
+        runtime.activeModeId = GC_RuntimeState.MODE_HOLD_HORIZON;
+        runtime.modeStartTime = nav.t;
+    }
 
-    public byte defaultNodeAxisToPoint = 2; // set in inspector if desired
+    public bool API_Attitude_PointSelectedNodeVector(byte axis012)
+    {
+        if (plan == null || modeParams == null) return false;
+
+        int idx;
+        Vector3 dvE;
+        float dvMag;
+        float dvRemain;
+
+        if (!TryGetSelectedNodeVector(out idx, out dvE, out dvMag, out dvRemain))
+            return false;
+
+        modeParams.bodyAxisToPoint = ClampAxis012(axis012);
+        runtime.activeModeId = GC_RuntimeState.MODE_POINT_NODE_VECTOR;
+        runtime.modeStartTime = nav.t;
+        return true;
+    }
+
+    public void API_Node_Select(byte nodeIndex)
+    {
+        if (modeParams == null) return;
+        modeParams.selectedNodeIndex = nodeIndex;
+    }
+
+    public void API_Node_SetAutoExecute(bool enabled)
+    {
+        if (runtime == null) return;
+        runtime.autoExecuteArmedNodes = enabled;
+    }
+
+    public void API_Node_ToggleAutoExecute()
+    {
+        if (runtime == null) return;
+        runtime.autoExecuteArmedNodes = !runtime.autoExecuteArmedNodes;
+    }
+
+    public byte defaultNodeAxisToPoint = 2;
 
     public int API_Node_CreateAtTime(Vector3 dvE, double execTime)
     {
@@ -1612,9 +1845,11 @@ public class GC_Core : UdonSharpBehaviour
         bool ok = TryComputeBurnDurationSec(dv, out tBurn);
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
-        plan.burnThrottle01[idx] = ok ? 1.0f : 0f; // if can’t compute, burn disabled
+        plan.burnThrottle01[idx] = ok ? 1.0f : 0f;
+
         if (nodeNet != null)
             nodeNet.ForcePublish();
+
         return idx;
     }
 
@@ -1631,8 +1866,10 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.burnDurationSec[idx] = ok ? tBurn : 0f;
         plan.burnThrottle01[idx] = ok ? 1.0f : 0f;
+
         if (nodeNet != null)
             nodeNet.ForcePublish();
+
         return idx;
     }
 
@@ -1641,7 +1878,7 @@ public class GC_Core : UdonSharpBehaviour
         if (plan == null) return;
         plan.ClearAll();
         if (nodeNet != null)
-            nodeNet.ForcePublish();        
+            nodeNet.ForcePublish();
     }
 
     public void API_Node_Delete(int i)
@@ -1650,13 +1887,11 @@ public class GC_Core : UdonSharpBehaviour
         plan.API_DeleteNode(i);
         if (nodeNet != null)
             nodeNet.ForcePublish();
-
     }
 
     // =====================================================================
-    // Docking Helper APIs (UI-friendly)
+    // Docking Helper APIs
     // =====================================================================
-
 
     public bool API_Dock_PointShipZAtTargetPort()
     {
@@ -1674,14 +1909,13 @@ public class GC_Core : UdonSharpBehaviour
         return true;
     }
 
-
     public bool API_Relative_KillVel_SelectedStation()
     {
         if (contacts == null) return false;
         if (!contacts.fullValid0) return false;
 
         runtime.activeTranslateModeId = GC_RuntimeState.XLAT_KILL_RELVEL;
-        runtime.lastNonManualTranslateModeId = runtime.activeTranslateModeId; // optional
+        runtime.lastNonManualTranslateModeId = runtime.activeTranslateModeId;
         return true;
     }
 
@@ -1717,6 +1951,4 @@ public class GC_Core : UdonSharpBehaviour
         runtime.modeStartTime = nav.t;
         return true;
     }
-
-
 }

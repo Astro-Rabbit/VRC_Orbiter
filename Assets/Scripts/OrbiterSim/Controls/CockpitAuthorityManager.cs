@@ -2,45 +2,11 @@
 using UnityEngine;
 using VRC.SDKBase;
 
-/// <summary>
-/// CockpitAuthorityManager
-///
-/// Purpose
-/// -------
-///— Maintains which cockpit seat is the ACTIVE control seat.
-/// - Copies the ACTIVE seat's local manual draft into the shared GC manual draft.
-/// - Copies the ACTIVE seat's local override state into the shared live override state.
-/// - Coordinates automatic seat handoff and sim-ownership requests.
-///
-/// Core policy
-/// -----------
-/// - Left and right seats each have their own local HandControls and their own single-seat visual net state.
-/// - A seat is considered "claimed" while its controls are actively being grabbed.
-/// - Only ONE seat is active at a time.
-/// - The currently active seat keeps control until it fully releases.
-/// - If the other seat is waiting, authority transfers after a short delay.
-/// - If the waiting seat belongs to a different player, that player's client requests sim ownership
-///   after the release delay, unless SimManager's hard ownership-transfer lock is enabled.
-/// - Only the LOCAL sim owner writes into the shared live GC states.
-///
-/// Notes
-/// -----
-/// - This manager is intentionally seat-wide, not per-control.
-/// - This script uses the owner of each CockpitControlsNetState object as the current seat holder.
-/// - Joystick status lights are LOCAL feedback:
-///     off   = joystick not grabbed locally
-///     green = joystick grabbed locally and this seat currently has authority
-///     red   = joystick grabbed locally but this seat does not currently have authority
-/// </summary>
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class CockpitAuthorityManager : UdonSharpBehaviour
 {
     public const byte SEAT_LEFT = 0;
     public const byte SEAT_RIGHT = 1;
-
-    // ---------------------------------------------------------------------
-    // References: sim + seat-local input sources
-    // ---------------------------------------------------------------------
 
     [Header("Sim / policy")]
     public SimManager simManager;
@@ -65,47 +31,27 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     public GC_ManualDraft sharedManualLive;
     public GC_ActuatorOverrideState sharedOverridesLive;
 
-    // ---------------------------------------------------------------------
-    // Authority state
-    // ---------------------------------------------------------------------
-
     [Header("Authority state")]
     [Tooltip("Which seat is currently the active control seat. 0=left, 1=right.")]
-    public byte activeSeat = SEAT_LEFT;
+    [UdonSynced] public byte activeSeat = SEAT_LEFT;
 
-    [Tooltip("If the currently active seat releases and the opposite seat is waiting, wait this long before handoff.")]
+    [UdonSynced] private ushort _authorityRev = 0;
+    private ushort _lastAppliedAuthorityRev = 0;
+
+    [Tooltip("If the active seat releases and the opposite seat is requesting, wait this long before handoff.")]
     public float seatTransferDelaySeconds = 0.5f;
 
     [Tooltip("Minimum time between repeated ownership-transfer requests.")]
     public float ownershipRetrySeconds = 0.75f;
 
-    // ---------------------------------------------------------------------
-    // Optional joystick status lights
-    // ---------------------------------------------------------------------
-
     [Header("Optional joystick status lights")]
-    [Tooltip("Renderer for left joystick-column light. Leave null to disable.")]
     public Renderer leftJoystickLightRenderer;
-
-    [Tooltip("Renderer for right joystick-column light. Leave null to disable.")]
     public Renderer rightJoystickLightRenderer;
-
-    [Tooltip("Material slot index on the light renderer.")]
     public int lightMaterialIndex = 0;
-
-    [Tooltip("Emission color when grabbed locally and authoritative.")]
     public Color lightAuthorityColor = Color.green;
-
-    [Tooltip("Emission color when grabbed locally but not authoritative.")]
     public Color lightBlockedColor = Color.red;
-
-    [Tooltip("Emission color when idle.")]
     public Color lightOffColor = Color.black;
-
-    [Tooltip("Shader emission property name. Most Unity shaders use _EmissionColor.")]
     public string emissionProperty = "_EmissionColor";
-
-
 
     [Header("Ownership handoff gating")]
     [Tooltip("After requesting sim ownership for a seat, block that seat from writing manual input until ownership is actually established.")]
@@ -114,38 +60,36 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
     [Tooltip("Optional short grace after ownership arrives before enabling input.")]
     public float ownershipAcquireGraceSeconds = 0.05f;
 
-    private bool _ownershipRequestPending = false;
-    private byte _pendingSeat = SEAT_LEFT;
-    private float _ownershipAcquireTime = -1f;
-    private bool _prevSimOwner = false;
-
-        // ---------------------------------------------------------------------
-    // Debug
-    // ---------------------------------------------------------------------
-
     [Header("Debug")]
     public bool applyContinuously = true;
     public bool logSeatChanges = false;
     public bool logOwnershipRequests = false;
 
     // ---------------------------------------------------------------------
-    // Internal timers/state
+    // Explicit local request state
     // ---------------------------------------------------------------------
 
-    // When the currently active seat first became fully released.
+    [Header("Local request mirrors (debug)")]
+    public bool leftSeatRequestLocal = false;
+    public bool rightSeatRequestLocal = false;
+
+    // ---------------------------------------------------------------------
+    // Internal
+    // ---------------------------------------------------------------------
+
+    private bool _ownershipRequestPending = false;
+    private byte _pendingSeat = SEAT_LEFT;
+    private float _ownershipAcquireTime = -1f;
+    private bool _prevSimOwner = false;
+
     private float _activeSeatReleaseStartTime = -1f;
-
-    // Last time this client requested sim ownership.
     private float _lastOwnershipRequestTime = -999f;
-
-    // Cache for change logging.
     private byte _lastLoggedActiveSeat = 255;
 
     void Start()
     {
         _prevSimOwner = (simManager != null && simManager.IsSimOwner());
-
-        // Push initial local seat flags and write shared state if we already own the sim.
+        _lastAppliedAuthorityRev = _authorityRev;
         UpdateSeatStateFlags();
         ApplyActiveSeatToSharedIfOwner();
         UpdateJoystickLights();
@@ -157,34 +101,92 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         TickAuthority();
     }
 
-    /// <summary>
-    /// Main authority tick. Safe to call every frame.
-    /// </summary>
+    // =====================================================================
+    // PUBLIC API - seat request / release
+    // =====================================================================
+
+    public void SetSeatRequesting(byte seat, bool requesting)
+    {
+        seat = ClampSeat(seat);
+
+        if (seat == SEAT_RIGHT) rightSeatRequestLocal = requesting;
+        else leftSeatRequestLocal = requesting;
+
+        // If this seat is already active and it just released, start the release timer now.
+        if (activeSeat == seat && !requesting)
+        {
+            if (_activeSeatReleaseStartTime < 0f)
+                _activeSeatReleaseStartTime = Time.time;
+        }
+    }
+
+    public void RequestTakeControl(byte seat)
+    {
+        SetSeatRequesting(seat, true);
+    }
+
+    public void ReleaseControl(byte seat)
+    {
+        SetSeatRequesting(seat, false);
+    }
+
+    public bool SeatHasControl(byte seat)
+    {
+        return activeSeat == ClampSeat(seat);
+    }
+
+    public bool SeatIsRequesting(byte seat)
+    {
+        return IsSeatRequestingObserved(ClampSeat(seat));
+    }
+
+    public bool SeatIsRequestingLocal(byte seat)
+    {
+        seat = ClampSeat(seat);
+        return (seat == SEAT_RIGHT) ? rightSeatRequestLocal : leftSeatRequestLocal;
+    }
+
+    public bool SeatIsContested(byte seat)
+    {
+        seat = ClampSeat(seat);
+        if (activeSeat != seat) return false;
+        return IsSeatRequestingObserved(OppositeSeat(seat));
+    }
+
+    public bool SeatCanTakeControl(byte seat)
+    {
+        seat = ClampSeat(seat);
+
+        if (activeSeat == seat) return false;
+
+        // "Can take now" = current active seat is no longer requesting.
+        // Actual handoff still respects delay / ownership rules.
+        return !IsSeatRequestingObserved(activeSeat);
+    }
+
+    // =====================================================================
+    // MAIN TICK
+    // =====================================================================
+
     public void TickAuthority()
     {
         UpdateOwnershipArrivalState();
-        // 1) Observe current seat state from local hand scripts + synced seat net objects.
-        bool leftClaimed = IsSeatClaimed(SEAT_LEFT);
-        bool rightClaimed = IsSeatClaimed(SEAT_RIGHT);
 
-        bool activeSeatStillClaimed = IsSeatClaimed(activeSeat);
+        bool activeSeatStillRequesting = IsSeatRequestingObserved(activeSeat);
         byte otherSeat = OppositeSeat(activeSeat);
-        bool otherSeatClaimed = IsSeatClaimed(otherSeat);
+        bool otherSeatRequesting = IsSeatRequestingObserved(otherSeat);
 
-        // 2) If the active seat is still claimed, it keeps authority and release timer resets.
-        if (activeSeatStillClaimed)
+        // Active seat keeps control while still requesting.
+        if (activeSeatStillRequesting)
         {
             _activeSeatReleaseStartTime = -1f;
         }
         else
         {
-            // Active seat has released.
-            // Start release timer the first frame we notice the release.
             if (_activeSeatReleaseStartTime < 0f)
                 _activeSeatReleaseStartTime = Time.time;
 
-            // If the other seat is waiting, and release delay has elapsed, try handoff.
-            if (otherSeatClaimed)
+            if (otherSeatRequesting)
             {
                 float dtReleased = Time.time - _activeSeatReleaseStartTime;
                 if (dtReleased >= seatTransferDelaySeconds)
@@ -194,19 +196,10 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
             }
         }
 
-        // 3) If nothing is currently claimed, just keep whichever seat was active last.
-        //    No automatic reversion is done here.
-
-        // 4) Push seat flags into the HandControls scripts.
         UpdateSeatStateFlags();
-
-        // 5) Only the local sim owner copies active-seat state into the shared GC live objects.
         ApplyActiveSeatToSharedIfOwner();
-
-        // 6) Update local joystick-column status lights.
         UpdateJoystickLights();
 
-        // 7) Optional logging of seat changes.
         if (_lastLoggedActiveSeat != activeSeat)
         {
             if (logSeatChanges)
@@ -216,87 +209,56 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Seat claim / holder observation
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // REQUEST OBSERVATION
+    // =====================================================================
 
     /// <summary>
-    /// Returns true if the given seat is currently claimed by anyone.
+    /// Final observed request state for a seat.
     ///
-    /// Policy:
-    /// - Local grab counts immediately.
-    /// - Otherwise fall back to the seat's synced visual-net grabbing flag.
+    /// Sources:
+    /// - explicit local request flag (desktop toggle / future explicit VR request)
+    /// - immediate local VR grab fallback
+    /// - synced seat visual-net claimed flag (for remote observers / remote request visibility)
     /// </summary>
-    private bool IsSeatClaimed(byte seat)
+    private bool IsSeatRequestingObserved(byte seat)
     {
-        if (seat == SEAT_RIGHT)
-        {
-            if (rightHandControls != null && rightHandControls.IsAnyPrimaryControlGrabbed()) return true;
-            if (rightControlsNet != null && rightControlsNet.IsGrabbingAny()) return true;
-            return false;
-        }
+        seat = ClampSeat(seat);
 
-        if (leftHandControls != null && leftHandControls.IsAnyPrimaryControlGrabbed()) return true;
-        if (leftControlsNet != null && leftControlsNet.IsGrabbingAny()) return true;
+        // Explicit local request state.
+        bool localRequest = (seat == SEAT_RIGHT) ? rightSeatRequestLocal : leftSeatRequestLocal;
+        if (localRequest) return true;
+
+        // Immediate local VR fallback so grabs count instantly even before other scripts are updated.
+        HandControls hc = GetSeatHandControls(seat);
+        if (hc != null && hc.IsAnyPrimaryControlGrabbed()) return true;
+
+        // Remote / network-observed request state.
+        CockpitControlsNetState net = GetSeatControlsNet(seat);
+        if (net != null && net.IsClaimed()) return true;
+
         return false;
     }
 
-    /// <summary>
-    /// Returns the player who currently appears to hold the seat.
-    ///
-    /// We use ownership of the seat's single-seat visual net object as the holder identity.
-    /// This is the best current proxy for "who is manipulating that seat".
-    /// </summary>
-    private VRCPlayerApi GetSeatHolder(byte seat)
+    private CockpitControlsNetState GetSeatControlsNet(byte seat)
     {
-        CockpitControlsNetState net = (seat == SEAT_RIGHT) ? rightControlsNet : leftControlsNet;
-        if (net == null) return null;
-        return Networking.GetOwner(net.gameObject);
+        return (seat == SEAT_RIGHT) ? rightControlsNet : leftControlsNet;
     }
 
-    /// <summary>
-    /// True if the local player appears to be the current holder of the seat.
-    /// </summary>
-    private bool IsLocalSeatHolder(byte seat)
-    {
-        // Immediate truth: if this client is actively grabbing that seat's controls locally,
-        // then this client is the seat holder, even before the visual-net owner updates.
-        HandControls hc = GetSeatHandControls(seat);
-        if (hc != null && hc.IsAnyPrimaryControlGrabbed())
-            return true;
+    // =====================================================================
+    // HANDOFF
+    // =====================================================================
 
-        VRCPlayerApi local = Networking.LocalPlayer;
-        if (local == null) return false;
-
-        VRCPlayerApi holder = GetSeatHolder(seat);
-        if (holder == null) return false;
-
-        return holder.playerId == local.playerId;
-    }
-
-    // ---------------------------------------------------------------------
-    // Handoff logic
-    // ---------------------------------------------------------------------
-
-    /// <summary>
-    /// Attempt to hand active control to the requested seat.
-    ///
-    /// Cases:
-    /// - If local player is already sim owner and also holds that seat -> switch immediately.
-    /// - If local player holds that seat but is NOT sim owner -> request sim ownership (if allowed).
-    /// - If local player does not hold that seat -> do nothing locally; the holder's own client should request.
-    /// </summary>
     private void TryHandoffToSeat(byte seat)
     {
         seat = ClampSeat(seat);
 
-        // Only the actual local holder of the waiting seat initiates the request.
-        if (!IsLocalSeatHolder(seat))
+        // Only the local requester should initiate ownership handoff for its seat.
+        if (!SeatIsRequestingLocal(seat))
             return;
 
         bool simOwner = (simManager != null && simManager.IsSimOwner());
 
-        // Already sim owner -> just switch active seat locally.
         if (simOwner)
         {
             SetActiveSeatInternal(seat);
@@ -326,24 +288,24 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
             nameof(SimManager.Evt_RequestHandoff),
             local.playerId
         );
-
-        // Do NOT switch activeSeat yet.
-        // Wait until sim ownership actually arrives.
     }
 
-    /// <summary>
-    /// Direct internal active-seat switch.
-    /// Use only once policy has already decided the handoff is valid.
-    /// </summary>
     private void SetActiveSeatInternal(byte seat)
     {
         seat = ClampSeat(seat);
         if (activeSeat == seat) return;
 
-        activeSeat = seat;
-        _activeSeatReleaseStartTime = -1f;
-    }
+        bool simOwner = (simManager != null && simManager.IsSimOwner());
+        if (!simOwner) return;
 
+        EnsureLocalOwnershipOfAuthority();
+
+        activeSeat = seat;
+        _authorityRev++;
+        _activeSeatReleaseStartTime = -1f;
+
+        RequestSerialization();
+    }
     public void SetActiveSeatLeft()
     {
         SetActiveSeatInternal(SEAT_LEFT);
@@ -354,55 +316,40 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         SetActiveSeatInternal(SEAT_RIGHT);
     }
 
-    // ---------------------------------------------------------------------
-    // Push seat flags into HandControls
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // SEAT FLAGS -> INPUT SOURCES / VISUALS
+    // =====================================================================
 
-    /// <summary>
-    /// Updates each HandControls instance with:
-    /// - whether the seat is currently claimed
-    /// - whether the seat is currently the active seat
-    /// - whether this local client is allowed to write manual input from that seat
-    ///
-    /// seatHasAuthority is intentionally stricter than activeSeat:
-    /// the local seat only has authority if THIS client is also the sim owner.
-    /// </summary>
     private void UpdateSeatStateFlags()
     {
         bool simOwner = (simManager != null && simManager.IsSimOwner());
         bool inputBlocked = IsOwnershipInputBlocked();
 
-        bool leftClaimed = IsSeatClaimed(SEAT_LEFT);
-        bool rightClaimed = IsSeatClaimed(SEAT_RIGHT);
+        bool leftRequested = IsSeatRequestingObserved(SEAT_LEFT);
+        bool rightRequested = IsSeatRequestingObserved(SEAT_RIGHT);
 
         bool leftActive = (activeSeat == SEAT_LEFT);
         bool rightActive = (activeSeat == SEAT_RIGHT);
 
         if (leftHandControls != null)
         {
-            leftHandControls.SetSeatClaimed(leftClaimed);
+            leftHandControls.SetSeatClaimed(leftRequested);
             leftHandControls.SetSeatActiveForVisuals(leftActive);
             leftHandControls.SetSeatAuthority(simOwner && leftActive && !inputBlocked);
         }
 
         if (rightHandControls != null)
         {
-            rightHandControls.SetSeatClaimed(rightClaimed);
+            rightHandControls.SetSeatClaimed(rightRequested);
             rightHandControls.SetSeatActiveForVisuals(rightActive);
             rightHandControls.SetSeatAuthority(simOwner && rightActive && !inputBlocked);
         }
     }
 
-    // ---------------------------------------------------------------------
-    // Shared GC live-state write path
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // LIVE SHARED GC WRITE
+    // =====================================================================
 
-    /// <summary>
-    /// Copies the current ACTIVE seat's local manual/override state into the shared live GC state,
-    /// but ONLY if this local client is currently the sim owner.
-    ///
-    /// This prevents non-owners from writing stale local state into the live flight computer inputs.
-    /// </summary>
     private void ApplyActiveSeatToSharedIfOwner()
     {
         if (sharedManualLive == null || sharedOverridesLive == null)
@@ -438,21 +385,10 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         return (activeSeat == SEAT_RIGHT) ? rightOverrideLocal : leftOverrideLocal;
     }
 
-    // ---------------------------------------------------------------------
-    // Joystick status lights
-    // ---------------------------------------------------------------------
+    // =====================================================================
+    // JOYSTICK LIGHTS
+    // =====================================================================
 
-    /// <summary>
-    /// Updates local joystick-column light emission.
-    ///
-    /// LOCAL feedback policy:
-    /// - off   = local joystick not grabbed
-    /// - green = local joystick grabbed and this seat currently has authority
-    /// - red   = local joystick grabbed but this seat does not currently have authority
-    ///
-    /// This is intentionally based on local joystick grab state, because the light is meant to tell
-    /// the current local player whether their attempted control input is live or blocked.
-    /// </summary>
     private void UpdateJoystickLights()
     {
         UpdateSingleJoystickLight(leftJoystickLightRenderer, leftHandControls);
@@ -477,39 +413,13 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
 
         m.SetColor(emissionProperty, c);
 
-        // Standard Unity emission toggle pattern.
         if (c.maxColorComponent > 0.0001f) m.EnableKeyword("_EMISSION");
         else m.DisableKeyword("_EMISSION");
     }
 
-    // ---------------------------------------------------------------------
-    // Utility / copy helpers
-    // ---------------------------------------------------------------------
-
-    public bool IsLeftSeatActive()
-    {
-        return activeSeat == SEAT_LEFT;
-    }
-
-    public bool IsRightSeatActive()
-    {
-        return activeSeat == SEAT_RIGHT;
-    }
-
-    private static byte ClampSeat(byte seat)
-    {
-        return (seat == SEAT_RIGHT) ? SEAT_RIGHT : SEAT_LEFT;
-    }
-
-    private static byte OppositeSeat(byte seat)
-    {
-        return (seat == SEAT_RIGHT) ? SEAT_LEFT : SEAT_RIGHT;
-    }
-
-    private static string SeatName(byte seat)
-    {
-        return (seat == SEAT_RIGHT) ? "RIGHT" : "LEFT";
-    }
+    // =====================================================================
+    // COPY HELPERS
+    // =====================================================================
 
     private void CopyManual(GC_ManualDraft src, GC_ManualDraft dst)
     {
@@ -546,16 +456,18 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         dst.overrideRcsMode = src.overrideRcsMode;
     }
 
+    // =====================================================================
+    // OWNERSHIP ARRIVAL / BLOCKING
+    // =====================================================================
+
     private void UpdateOwnershipArrivalState()
     {
         bool simOwner = (simManager != null && simManager.IsSimOwner());
 
-        // Rising edge: we just became sim owner.
         if (simOwner && !_prevSimOwner)
         {
             _ownershipAcquireTime = Time.time;
 
-            // If we requested ownership for a specific seat, snap authority there immediately.
             if (_ownershipRequestPending)
             {
                 SetActiveSeatInternal(_pendingSeat);
@@ -563,36 +475,29 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
             }
             else
             {
-                // Fallback: if exactly one seat is currently grabbed locally, snap to it.
-                bool leftLocal = (leftHandControls != null && leftHandControls.IsAnyPrimaryControlGrabbed());
-                bool rightLocal = (rightHandControls != null && rightHandControls.IsAnyPrimaryControlGrabbed());
+                bool leftLocal = SeatIsRequestingLocal(SEAT_LEFT);
+                bool rightLocal = SeatIsRequestingLocal(SEAT_RIGHT);
 
                 if (leftLocal && !rightLocal) SetActiveSeatInternal(SEAT_LEFT);
                 else if (rightLocal && !leftLocal) SetActiveSeatInternal(SEAT_RIGHT);
             }
         }
 
-        // If we lost sim ownership, clear the settle timer.
         if (!simOwner)
             _ownershipAcquireTime = -1f;
 
         _prevSimOwner = simOwner;
     }
-    private HandControls GetSeatHandControls(byte seat)
-    {
-        return (seat == SEAT_RIGHT) ? rightHandControls : leftHandControls;
-    }
+
     private bool IsOwnershipInputBlocked()
     {
         if (!blockInputWhileOwnershipPending) return false;
 
         bool simOwner = (simManager != null && simManager.IsSimOwner());
 
-        // While we are waiting to become owner, stay blocked.
         if (_ownershipRequestPending && !simOwner)
             return true;
 
-        // Optional tiny settle window right after ownership lands.
         if (simOwner && _ownershipAcquireTime >= 0f)
         {
             if ((Time.time - _ownershipAcquireTime) < ownershipAcquireGraceSeconds)
@@ -602,5 +507,58 @@ public class CockpitAuthorityManager : UdonSharpBehaviour
         return false;
     }
 
+    private void EnsureLocalOwnershipOfAuthority()
+    {
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return;
 
+        if (!Networking.IsOwner(local, gameObject))
+            Networking.SetOwner(local, gameObject);
+    }
+
+    public override void OnDeserialization()
+    {
+        if (_authorityRev == _lastAppliedAuthorityRev) return;
+        _lastAppliedAuthorityRev = _authorityRev;
+
+        _activeSeatReleaseStartTime = -1f;
+
+        // Refresh local derived state immediately.
+        UpdateSeatStateFlags();
+        UpdateJoystickLights();
+    }
+
+    // =====================================================================
+    // UTILITY
+    // =====================================================================
+
+    private HandControls GetSeatHandControls(byte seat)
+    {
+        return (seat == SEAT_RIGHT) ? rightHandControls : leftHandControls;
+    }
+
+    public bool IsLeftSeatActive()
+    {
+        return activeSeat == SEAT_LEFT;
+    }
+
+    public bool IsRightSeatActive()
+    {
+        return activeSeat == SEAT_RIGHT;
+    }
+
+    private static byte ClampSeat(byte seat)
+    {
+        return (seat == SEAT_RIGHT) ? SEAT_RIGHT : SEAT_LEFT;
+    }
+
+    private static byte OppositeSeat(byte seat)
+    {
+        return (seat == SEAT_RIGHT) ? SEAT_LEFT : SEAT_RIGHT;
+    }
+
+    private static string SeatName(byte seat)
+    {
+        return (seat == SEAT_RIGHT) ? "RIGHT" : "LEFT";
+    }
 }

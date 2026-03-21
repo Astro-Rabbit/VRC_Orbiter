@@ -82,6 +82,133 @@ public class EphemerisSystem : UdonSharpBehaviour
     }
 
 
+    public double MissionTimeToJD(double t)
+    {
+        return jd0 + t / 86400.0;
+    }
+
+    public void EvaluateAtTime(double t,
+        out double jd,
+        out double sun_rx, out double sun_ry, out double sun_rz,
+        out double sun_vx, out double sun_vy, out double sun_vz,
+        out double earth_rx, out double earth_ry, out double earth_rz,
+        out double earth_vx, out double earth_vy, out double earth_vz,
+        out double moon_rx, out double moon_ry, out double moon_rz,
+        out double moon_vx, out double moon_vy, out double moon_vz,
+        out double earth_omega_x, out double earth_omega_y, out double earth_omega_z,
+        out float earth_qx, out float earth_qy, out float earth_qz, out float earth_qw,
+        out double moon_omega_x, out double moon_omega_y, out double moon_omega_z,
+        out float moon_qx, out float moon_qy, out float moon_qz, out float moon_qw)
+    {
+        jd = MissionTimeToJD(t);
+
+        if (posModel != null)
+        {
+            posModel.Evaluate(jd,
+                out sun_rx, out sun_ry, out sun_rz,
+                out sun_vx, out sun_vy, out sun_vz,
+                out earth_rx, out earth_ry, out earth_rz,
+                out earth_vx, out earth_vy, out earth_vz,
+                out moon_rx, out moon_ry, out moon_rz,
+                out moon_vx, out moon_vy, out moon_vz);
+        }
+        else
+        {
+            sun_rx = sun_ry = sun_rz = 0.0;
+            sun_vx = sun_vy = sun_vz = 0.0;
+
+            earth_rx = earth_ry = earth_rz = 0.0;
+            earth_vx = earth_vy = earth_vz = 0.0;
+
+            moon_rx = moon_ry = moon_rz = 0.0;
+            moon_vx = moon_vy = moon_vz = 0.0;
+        }
+
+        if (rotModel != null)
+        {
+            rotModel.Evaluate(jd,
+                earth_rx, earth_ry, earth_rz,
+                earth_vx, earth_vy, earth_vz,
+                moon_rx, moon_ry, moon_rz,
+                moon_vx, moon_vy, moon_vz,
+                out earth_omega_x, out earth_omega_y, out earth_omega_z,
+                out earth_qx, out earth_qy, out earth_qz, out earth_qw,
+                out moon_omega_x, out moon_omega_y, out moon_omega_z,
+                out moon_qx, out moon_qy, out moon_qz, out moon_qw);
+        }
+        else
+        {
+            earth_omega_x = earth_omega_y = earth_omega_z = 0.0;
+            earth_qx = 0f; earth_qy = 0f; earth_qz = 0f; earth_qw = 1f;
+
+            moon_omega_x = moon_omega_y = moon_omega_z = 0.0;
+            moon_qx = 0f; moon_qy = 0f; moon_qz = 0f; moon_qw = 1f;
+        }
+    }
+
+    public void SampleBodyStateAtTime(byte bodyId, double t,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz,
+        out double ox, out double oy, out double oz,
+        out Quaternion qPF2E)
+    {
+        rx = ry = rz = 0.0;
+        vx = vy = vz = 0.0;
+        ox = oy = oz = 0.0;
+        qPF2E = Quaternion.identity;
+
+        double jd;
+
+        double sun_rx, sun_ry, sun_rz;
+        double sun_vx, sun_vy, sun_vz;
+        double earth_rx, earth_ry, earth_rz;
+        double earth_vx, earth_vy, earth_vz;
+        double moon_rx, moon_ry, moon_rz;
+        double moon_vx, moon_vy, moon_vz;
+        double earth_omega_x, earth_omega_y, earth_omega_z;
+        float earth_qx, earth_qy, earth_qz, earth_qw;
+        double moon_omega_x, moon_omega_y, moon_omega_z;
+        float moon_qx, moon_qy, moon_qz, moon_qw;
+
+        EvaluateAtTime(t,
+            out jd,
+            out sun_rx, out sun_ry, out sun_rz,
+            out sun_vx, out sun_vy, out sun_vz,
+            out earth_rx, out earth_ry, out earth_rz,
+            out earth_vx, out earth_vy, out earth_vz,
+            out moon_rx, out moon_ry, out moon_rz,
+            out moon_vx, out moon_vy, out moon_vz,
+            out earth_omega_x, out earth_omega_y, out earth_omega_z,
+            out earth_qx, out earth_qy, out earth_qz, out earth_qw,
+            out moon_omega_x, out moon_omega_y, out moon_omega_z,
+            out moon_qx, out moon_qy, out moon_qz, out moon_qw);
+
+        if (bodyId == 0)
+        {
+            rx = sun_rx; ry = sun_ry; rz = sun_rz;
+            vx = sun_vx; vy = sun_vy; vz = sun_vz;
+            qPF2E = Quaternion.identity;
+            return;
+        }
+
+        if (bodyId == 1)
+        {
+            rx = earth_rx; ry = earth_ry; rz = earth_rz;
+            vx = earth_vx; vy = earth_vy; vz = earth_vz;
+            ox = earth_omega_x; oy = earth_omega_y; oz = earth_omega_z;
+            qPF2E = new Quaternion(earth_qx, earth_qy, earth_qz, earth_qw);
+            return;
+        }
+
+        if (bodyId == 2)
+        {
+            rx = moon_rx; ry = moon_ry; rz = moon_rz;
+            vx = moon_vx; vy = moon_vy; vz = moon_vz;
+            ox = moon_omega_x; oy = moon_omega_y; oz = moon_omega_z;
+            qPF2E = new Quaternion(moon_qx, moon_qy, moon_qz, moon_qw);
+            return;
+        }
+    }
 
     
 }

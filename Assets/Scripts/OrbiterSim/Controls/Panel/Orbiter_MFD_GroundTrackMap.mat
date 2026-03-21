@@ -1,0 +1,65 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Orbiter_MFD_GroundTrackMap
+  m_Shader: {fileID: 4800000, guid: 7d8b15113fc4de84098c98a978e0d26e, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: 526c02e1e4fda614ba768aaed8747252, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SegTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _HasCurrentPoint: 1
+    - _MarkerRadius: 0.01
+    - _MarkerSoftness: 0.002
+    - _SegCount: 64
+    - _SegTexWidth: 64
+    - _TrackSegCount: 8
+    - _TrackSoftness: 0.0015
+    - _TrackWidth: 0.004
+    m_Colors:
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _CurrentPoint: {r: 0.674911, g: 0.8150173, b: 0, a: 0}
+    - _MarkerColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
+    - _Seg0: {r: 0.4804317, g: 0.15986016, b: 0.6170368, a: 0.34307662}
+    - _Seg1: {r: 0.6170368, g: 0.34307662, b: 0.64786196, a: 0.47950056}
+    - _Seg10: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg11: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg12: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg13: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg14: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg15: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg2: {r: 0.64786196, g: 0.47950056, b: 0.66107315, a: 0.56203204}
+    - _Seg3: {r: 0.66107315, g: 0.56203204, b: 0.6682699, a: 0.61648715}
+    - _Seg4: {r: 0.6682699, g: 0.61648715, b: 0.6725753, a: 0.6554467}
+    - _Seg5: {r: 0.6725753, g: 0.6554467, b: 0.67522806, a: 0.6850145}
+    - _Seg6: {r: 0.67522806, g: 0.6850145, b: 0.6768372, a: 0.7084309}
+    - _Seg7: {r: 0.6768372, g: 0.7084309, b: 0.67762804, a: 0.7244895}
+    - _Seg8: {r: 0, g: 0, b: 0, a: 0}
+    - _Seg9: {r: 0, g: 0, b: 0, a: 0}
+    - _TrackColor: {r: 0, g: 1, b: 0, a: 1}
+  m_BuildTextureStacks: []

@@ -7,7 +7,8 @@ using VRC.Udon.Common;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class HandControls : UdonSharpBehaviour
 {
-
+    [Tooltip("Seat authority manager.")]
+    public CockpitAuthorityManager authorityManager;
 
     [Header("Seat / Visual Net")]
     [Tooltip("0=left, 1=right. Seat identity for higher-level authority logic.")]
@@ -40,6 +41,11 @@ public class HandControls : UdonSharpBehaviour
     [Header("Joystick Limits")]
     public float maxTiltAngle = 30f;
     public float maxTwistAngle = 45f;
+
+    [Header("Joystick Input Inversion")]
+    public bool invertJoyPitch = false;
+    public bool invertJoyYaw = false;
+    public bool invertJoyRoll = false;
 
     [Header("Joystick Mode Selector")]
     public float joystickModeKnobValue = 90f; // 0 = torque, 90 = rate
@@ -204,11 +210,27 @@ public class HandControls : UdonSharpBehaviour
         UpdateHandGrab(true, LeftGripValue, ref LeftGrabbed, ref LeftGrabbedOld, ref LeftBusy, ref LeftObject);
         UpdateHandGrab(false, RightGripValue, ref RightGrabbed, ref RightGrabbedOld, ref RightBusy, ref RightObject);
 
-        UpdateJoystickInput(dt);
-        UpdateThrottleInput(dt);
-        UpdateTranslationInput(dt);
+        bool localIsVR = Networking.LocalPlayer != null && Networking.LocalPlayer.IsUserInVR();
 
-        WriteManualDraft();
+        if (localIsVR)
+        {
+            UpdateJoystickInput(dt);
+            UpdateThrottleInput(dt);
+            UpdateTranslationInput(dt);
+            WriteManualDraft();
+        }
+        else
+        {
+            // Desktop path owns manualDraft for this seat.
+            // HandControls should only do visual playback on non-VR clients.
+            inputX = 0f;
+            inputY = 0f;
+            inputZ = 0f;
+            transX = 0f;
+            transY = 0f;
+            transZ = 0f;
+        }
+
         PublishOrApplyVisualState();
         JoystickGrabbingOld = JoystickGrabbing;
         ThrottleGrabbingOld = ThrottleGrabbing;
@@ -239,6 +261,10 @@ public class HandControls : UdonSharpBehaviour
                 JoystickGrabbing = true;
                 objName = JoyString;
                 busy = true;
+
+                if (authorityManager != null)
+                    authorityManager.RequestTakeControl(seatId);
+
                 if (busy)
                 {
                     EnsureLocalOwnershipOfVisualNet();
@@ -256,13 +282,15 @@ public class HandControls : UdonSharpBehaviour
                         controlsNet.ForcePublish();
                     }
                 }
-
             }
             else if (CheckDist(hand.position, ThrottleCol))
             {
                 ThrottleGrabbing = true;
                 objName = ThrotString;
                 busy = true;
+
+                if (authorityManager != null)
+                    authorityManager.RequestTakeControl(seatId);
 
                 if (busy)
                 {
@@ -288,6 +316,9 @@ public class HandControls : UdonSharpBehaviour
                 TransGrabbing = true;
                 objName = TransString;
                 busy = true;
+
+                if (authorityManager != null)
+                    authorityManager.RequestTakeControl(seatId);
 
                 if (busy)
                 {
@@ -318,6 +349,12 @@ public class HandControls : UdonSharpBehaviour
 
             objName = "";
             busy = false;
+
+            if (!IsAnyPrimaryControlGrabbed())
+            {
+                if (authorityManager != null)
+                    authorityManager.ReleaseControl(seatId);
+            }
         }
 
         if (busy)
@@ -409,6 +446,12 @@ public class HandControls : UdonSharpBehaviour
         Vector3 localForward = diff * Vector3.forward;
         float twistAngle = Mathf.Atan2(localForward.x, localForward.z) * Mathf.Rad2Deg;
         inputY = Mathf.Clamp(twistAngle / maxTwistAngle, -1.0f, 1.0f);
+
+
+        if (invertJoyPitch) inputZ = -inputZ;
+        if (invertJoyYaw)   inputY = -inputY;
+        if (invertJoyRoll)  inputX = -inputX;
+
 
         if (joystickHandle != null)
         {

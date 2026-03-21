@@ -17,56 +17,63 @@ Shader "Skybox/SkySunMoonEarth"
         _SkyboxTex ("Milky Way", CUBE) = "" {}
         _MWbright ("MW brightness Scale", float) = 1
 
-        // Quaternion (x,y,z,w): BODY -> EQUATORIAL (RA/Dec bake frame)
+        // Quaternion (x,y,z,w): BODY -> EQUATORIAL
         _CraftBodyToEq ("Craft BodyToEq quat (xyzw)", Vector) = (0,0,0,1)
 
         // Obliquity epsilon in degrees (equatorial -> ecliptic)
         _ObliquityDeg ("Obliquity (deg)", Float) = 23.439281
 
-
-        // --- Sun (vacuum, space-view) ---
+        // --- Sun ---
         _SunDirEcl   ("Sun Dir (ECL, unit)", Vector) = (1,0,0,0)
-        _SunAngRad   ("Sun Angular Radius (rad)", Float) = 0.00463    // ~0.265 deg at 1 AU
-        _SunColor    ("Sun Color (HDR)", Color) = (8,8,7.5,1)         // HDR-ish, tweak later
-        _SunEdgeSoft ("Sun Edge Softness", Float) = 0.00015           // radians; small
+        _SunAngRad   ("Sun Angular Radius (rad)", Float) = 0.00463
+        _SunColor    ("Sun Color (HDR)", Color) = (8,8,7.5,1)
+        _SunEdgeSoft ("Sun Edge Softness", Float) = 0.00015
 
-        // --- Sun lens artifacts (stylized) ---
-        _SunIntensity   ("Sun Intensity (HDR scalar)", Float) = 25.0
+        _SunIntensity      ("Sun Intensity (HDR scalar)", Float) = 25.0
+        _SunCoreFalloff    ("Sun Core Falloff", Float) = 2.2
+        _SunGlowIntensity  ("Sun Glow Intensity", Float) = 2.0
+        _SunGlowRadiusMul  ("Sun Glow Radius Multiplier", Float) = 3.0
+        _SunGlowFalloff    ("Sun Glow Falloff", Float) = 3.5
 
-        _SpikeStrength  ("Spike Strength", Float) = 0.6
-        _SpikeSharpness ("Spike Sharpness", Float) = 80.0
-        _SpikeWidth     ("Spike Width (rad)", Float) = 0.0006
-        _SpikeLength    ("Spike Length (rad)", Float) = 0.02
-        _SpikeRotateDeg ("Spike Rotation (deg)", Float) = 0.0
-
-        // --- Moon (focus: sphere intersection in ECL frame) ---
+        // --- Moon (primary body in this shader) ---
         _MoonPosEcl   ("Moon Pos (craft->moon, ECL, meters)", Vector) = (0,0,0,0)
         _MoonRadiusM  ("Moon Radius (m)", Float) = 1737400.0
-        _MoonColor    ("Moon Base Color", Color) = (0.75,0.75,0.75,1)
         _MoonAmbient  ("Moon Ambient", Range(0,1)) = 0.02
         _MoonShadowPow("Moon Terminator Power", Float) = 1.0
-        // --- Moon textures (Stage C) ---
+
         _MoonAlbedo ("Moon Albedo (equirect)", 2D) = "gray" {}
         _MoonBodyToEcl ("Moon BodyToEcl quat (xyzw)", Vector) = (0,0,0,1)
-
-        // Optional: quick art controls
         _MoonAlbedoTint ("Moon Albedo Tint", Color) = (1,1,1,1)
         _MoonGamma ("Moon Albedo Gamma", Float) = 1.0
 
         _MoonLonOffsetDeg ("Moon Lon Offset (deg)", Float) = 180
         _MoonFlipU ("Moon Flip U (0/1)", Float) = 0
         _MoonFlipV ("Moon Flip V (0/1)", Float) = 1
-        
 
-        // --- Earth (secondary body for moon-dominant shader) ---
+        // --- Earth (secondary body; distant-view optimized) ---
         _EarthPosEcl   ("Earth Pos (craft->earth, ECL, meters)", Vector) = (0,0,0,0)
         _EarthRadiusM  ("Earth Radius (m)", Float) = 6371000.0
+        _EarthScatterHeightM ("Earth Scatter Height (m)", Float) = 100000.0
         _EarthAmbient  ("Earth Ambient", Range(0,1)) = 0.03
         _EarthShadowPow("Earth Terminator Power", Float) = 1.0
 
-        _EarthAlbedo ("Earth Albedo (equirect)", 2D) = "white" {}
-        _EarthBodyToEcl ("Earth BodyToEcl quat (xyzw)", Vector) = (0,0,0,1)
+        _RayleighAmount ("Rayleigh Scattering Coefficients", Vector) = (0.0000055, 0.000013, 0.0000224, 0)
+        _RayleighScale ("Rayleigh Scattering Scale Height", Float) = 8000
+        _MieAmount ("Mie Scattering Coefficient", Float) = 0.000021
+        _MieScale ("Mie Scattering Scale Height", Float) = 1200
+        _MieG ("Mie Scattering Direction Coefficient", Float) = -0.78
 
+        _EarthAirglowColor ("Earth Airglow Color", Color) = (0.10, 0.22, 0.18, 1)
+        _EarthAirglowIntensity ("Earth Airglow Intensity", Float) = 0.08
+        _EarthAirglowHeightM ("Earth Airglow Height (m)", Float) = 95000.0
+        _EarthAirglowThicknessM ("Earth Airglow Thickness (m)", Float) = 30000.0
+        _EarthAirglowNightBias ("Earth Airglow Night Bias", Float) = 1.0
+
+        _EarthAlbedo ("Earth Albedo (equirect)", 2D) = "white" {}
+        _EarthMask ("Earth Mask (A=land/water, RGB=night lights)", 2D) = "black" {}
+        _EarthClouds ("Earth Clouds (RGB/A)", 2D) = "white" {}
+
+        _EarthBodyToEcl ("Earth BodyToEcl quat (xyzw)", Vector) = (0,0,0,1)
         _EarthAlbedoTint ("Earth Albedo Tint", Color) = (1,1,1,1)
         _EarthGamma ("Earth Albedo Gamma", Float) = 1.0
 
@@ -74,6 +81,32 @@ Shader "Skybox/SkySunMoonEarth"
         _EarthFlipU ("Earth Flip U (0/1)", Float) = 0
         _EarthFlipV ("Earth Flip V (0/1)", Float) = 1
 
+        _EarthWaterSpecIntensity ("Earth Water Spec Intensity", Float) = 2.4
+        _EarthWaterFresnel ("Earth Water Fresnel Strength", Float) = 1.0
+        _EarthNightLightIntensity ("Earth Night Light Intensity", Float) = 1.5
+        _EarthNightLightThreshold ("Earth Night Light Threshold", Float) = 0.15
+
+        _EarthWaterDeepColor ("Earth Water Deep Color", Color) = (0.015, 0.05, 0.10, 1)
+        _EarthWaterShallowColor ("Earth Water Shallow/Facing Color", Color) = (0.03, 0.09, 0.16, 1)
+        _EarthWaterReflectColor ("Earth Water Reflection Tint", Color) = (0.12, 0.20, 0.28, 1)
+
+        _EarthWaterSpecSharpPower ("Earth Water Sharp Spec Power", Float) = 300.0
+        _EarthWaterSpecBroadPower ("Earth Water Broad Spec Power", Float) = 18.0
+        _EarthWaterSpecBroadStrength ("Earth Water Broad Spec Strength", Float) = 0.65
+        _EarthWaterSpecSharpStrength ("Earth Water Sharp Spec Strength", Float) = 0.4
+
+        _EarthWaterEdgeReflect ("Earth Water Edge Reflectivity", Float) = 0.25
+        _EarthWaterBaseReflect ("Earth Water Base Reflectivity", Float) = 0.015
+
+        _EarthCloudHeightM ("Earth Cloud Height (m)", Float) = 12000.0
+        _EarthCloudTint ("Earth Cloud Tint", Color) = (1,1,1,1)
+        _EarthCloudAmbient ("Earth Cloud Ambient", Range(0,1)) = 0.01
+        _EarthCloudShadowPow ("Earth Cloud Terminator Power", Float) = 1.2
+        _EarthCloudOpacity ("Earth Cloud Opacity", Range(0,2)) = 1.0
+        _EarthCloudLimbBrightening ("Earth Cloud Limb Brightening", Float) = 0.12
+        _EarthCloudLimbPower ("Earth Cloud Limb Power", Float) = 3.5
+
+        _StarClamp ("Star Clamp Max", Float) = 1.0
     }
 
     SubShader
@@ -115,43 +148,52 @@ Shader "Skybox/SkySunMoonEarth"
             samplerCUBE _SkyboxTex;
             float _MWbright;
 
-            float4 _CraftBodyToEq; // xyzw
+            float4 _CraftBodyToEq;
             float  _ObliquityDeg;
 
-            float4 _SunDirEcl;   // xyz unit vector, ecliptic
-            float  _SunAngRad;   // radians
-            float4 _SunColor;    // HDR
-            float  _SunEdgeSoft; // radians
-            float _SunIntensity;
+            float4 _SunDirEcl;
+            float  _SunAngRad;
+            float4 _SunColor;
+            float  _SunEdgeSoft;
+            float  _SunIntensity;
+            float  _SunCoreFalloff;
+            float  _SunGlowIntensity;
+            float  _SunGlowRadiusMul;
+            float  _SunGlowFalloff;
 
-            float _SpikeStrength;
-            float _SpikeSharpness;
-            float _SpikeWidth;
-            float _SpikeLength;
-            float _SpikeRotateDeg;
-
-
-            float4 _MoonPosEcl;   // xyz meters, craft->moon
-            float  _MoonRadiusM;  // meters
-            float4 _MoonColor;
+            float4 _MoonPosEcl;
+            float  _MoonRadiusM;
             float  _MoonAmbient;
             float  _MoonShadowPow;
-
             sampler2D _MoonAlbedo;
-            float4 _MoonBodyToEcl;   // xyzw, body-fixed -> ecl inertial
+            float4 _MoonBodyToEcl;
             float4 _MoonAlbedoTint;
             float  _MoonGamma;
-
             float _MoonLonOffsetDeg;
             float _MoonFlipU;
             float _MoonFlipV;
 
             float4 _EarthPosEcl;
             float  _EarthRadiusM;
+            float  _EarthScatterHeightM;
             float  _EarthAmbient;
             float  _EarthShadowPow;
 
+            float3 _RayleighAmount;
+            float  _RayleighScale;
+            float  _MieAmount;
+            float  _MieScale;
+            float  _MieG;
+
+            float4 _EarthAirglowColor;
+            float  _EarthAirglowIntensity;
+            float  _EarthAirglowHeightM;
+            float  _EarthAirglowThicknessM;
+            float  _EarthAirglowNightBias;
+
             sampler2D _EarthAlbedo;
+            sampler2D _EarthMask;
+            sampler2D _EarthClouds;
             float4 _EarthBodyToEcl;
             float4 _EarthAlbedoTint;
             float  _EarthGamma;
@@ -160,6 +202,31 @@ Shader "Skybox/SkySunMoonEarth"
             float _EarthFlipU;
             float _EarthFlipV;
 
+            float  _EarthWaterSpecIntensity;
+            float  _EarthWaterFresnel;
+            float  _EarthNightLightIntensity;
+            float  _EarthNightLightThreshold;
+
+            float4 _EarthWaterDeepColor;
+            float4 _EarthWaterShallowColor;
+            float4 _EarthWaterReflectColor;
+
+            float  _EarthWaterSpecSharpPower;
+            float  _EarthWaterSpecBroadPower;
+            float  _EarthWaterSpecBroadStrength;
+            float  _EarthWaterSpecSharpStrength;
+            float  _EarthWaterEdgeReflect;
+            float  _EarthWaterBaseReflect;
+
+            float  _EarthCloudHeightM;
+            float4 _EarthCloudTint;
+            float  _EarthCloudAmbient;
+            float  _EarthCloudShadowPow;
+            float  _EarthCloudOpacity;
+            float  _EarthCloudLimbBrightening;
+            float  _EarthCloudLimbPower;
+
+            float _StarClamp;
 
             v2f vert(appdata v)
             {
@@ -179,23 +246,8 @@ Shader "Skybox/SkySunMoonEarth"
             float4 QuatConjugate(float4 q)
             {
                 return float4(-q.x, -q.y, -q.z, q.w);
-            }            
-
-
-            float2 MoonUV_Equirect(float3 nB)
-            {
-                // nB is unit normal in moon body-fixed frame:
-                //  +Z = north pole.
-                //  Longitude 0 at +Y (by choice here), increasing toward +X (right-handed).
-                float lon = atan2(nB.x, nB.y);      // [-pi, pi]
-                float lat = asin(clamp(nB.z, -1.0, 1.0)); // [-pi/2, pi/2]
-
-                float u = lon * (0.15915494309189535) + 0.5; // 1/(2pi)
-                float v = lat * (0.3183098861837907) + 0.5;  // 1/pi
-
-                return float2(u, v);
             }
-            // Active quaternion rotation: q=(x,y,z,w)
+
             float3 RotateByQuat(float3 v, float4 q)
             {
                 float3 u = q.xyz;
@@ -205,27 +257,19 @@ Shader "Skybox/SkySunMoonEarth"
                 return v + 2.0 * (s * uv + uuv);
             }
 
-
-            float3 EclToMoonBody(float3 vEcl)
-            {
-                // _MoonBodyToEcl is body->ecl, so inverse maps ecl->body
-                float4 qE2B = QuatConjugate(_MoonBodyToEcl);
-                return SafeNormalize(RotateByQuat(vEcl, qE2B));
-            }
-
-
-
-
-
-            float2 EarthUV_Equirect(float3 nB)
+            float2 BodyUV_Equirect(float3 nB)
             {
                 float lon = atan2(nB.x, nB.y);
                 float lat = asin(clamp(nB.z, -1.0, 1.0));
-
-                float u = lon * (0.15915494309189535) + 0.5;
-                float v = lat * (0.3183098861837907) + 0.5;
-
+                float u = lon * 0.15915494309189535 + 0.5;
+                float v = lat * 0.3183098861837907 + 0.5;
                 return float2(u, v);
+            }
+
+            float3 EclToMoonBody(float3 vEcl)
+            {
+                float4 qE2B = QuatConjugate(_MoonBodyToEcl);
+                return SafeNormalize(RotateByQuat(vEcl, qE2B));
             }
 
             float3 EclToEarthBody(float3 vEcl)
@@ -234,10 +278,9 @@ Shader "Skybox/SkySunMoonEarth"
                 return SafeNormalize(RotateByQuat(vEcl, qE2B));
             }
 
-            // Equatorial -> Ecliptic rotation about +X by +epsilon
             float3 EqToEcl(float3 dEq, float obliquityDeg)
             {
-                float eps = obliquityDeg * 0.017453292519943295; // pi/180
+                float eps = obliquityDeg * 0.017453292519943295;
                 float c = cos(eps);
                 float s = sin(eps);
                 return float3(
@@ -247,15 +290,12 @@ Shader "Skybox/SkySunMoonEarth"
                 );
             }
 
-            // Ecliptic -> your octa/star texture frame convention
-            // Want RA0 = +X_ecl (vernal). Encoding uses RA0 = -Y_tex.
-            // So: X_tex=+Y_ecl, Y_tex=-X_ecl, Z_tex=+Z_ecl.
             float3 EclToStarTexFrame(float3 eclDir)
             {
                 float3 dTex;
-                dTex.x = eclDir.y;
+                dTex.x = -eclDir.y;
                 dTex.y = -eclDir.x;
-                dTex.z = eclDir.z;
+                dTex.z =  eclDir.z;
                 return SafeNormalize(dTex);
             }
 
@@ -300,7 +340,7 @@ Shader "Skybox/SkySunMoonEarth"
                 baseTexel = floor(pixelSpace);
             }
 
-            float4 RetreivePixInfo(float3 dFlip, float2 baseTexel, float2 pixelOff)
+            float3 RetrievePixInfo(float3 dFlip, float2 baseTexel, float2 pixelOff)
             {
                 float2 pixelCenter = baseTexel + 0.5 + pixelOff;
                 float2 uvCenter = pixelCenter / _PixelSize;
@@ -335,8 +375,7 @@ Shader "Skybox/SkySunMoonEarth"
                 float vecDistArcsec = length(pDir - baseDir) * 206265.0;
 
                 float intensity = drawStar(vecDistArcsec, _sigma);
-
-                return float4(tempR, 1.0) * (starBrightness * intensity);
+                return tempR * (starBrightness * intensity);
             }
 
             fixed4 Desaturate(fixed4 color, float amount)
@@ -346,110 +385,56 @@ Shader "Skybox/SkySunMoonEarth"
                 return fixed4(d, color.a);
             }
 
-            void BuildSunBasis(float3 sunDirEq, out float3 t1, out float3 t2)
+            float4x4 RotationMatrix(float y, float x, float z)
             {
-                // Pick a stable reference not parallel to sunDir
-                float3 ref = (abs(sunDirEq.z) < 0.9) ? float3(0,0,1) : float3(0,1,0);
-                t1 = SafeNormalize(cross(ref, sunDirEq));
-                t2 = SafeNormalize(cross(sunDirEq, t1));
-            }
-            void RotateBasis(inout float3 t1, inout float3 t2, float deg)
-            {
-                float a = radians(deg);
-                float s = sin(a);
-                float c = cos(a);
-                float3 u = t1;
-                float3 v = t2;
-                t1 = u * c + v * s;
-                t2 = -u * s + v * c;
-            }
-            float EvalSpikes(float3 rayEq, float3 sunDirEq)
-            {
-                rayEq = SafeNormalize(rayEq);
-                sunDirEq = SafeNormalize(sunDirEq);
-
-                // Angular separation proxy via dot
-                float cosAng = dot(rayEq, sunDirEq);
-
-                // We want spikes mainly close to the sun direction:
-                // Use a soft angular gate around the sun (in cos-space, stable).
-                float cosGate = cos(_SunAngRad + _SpikeLength); // larger than disk
-                float gate = saturate((cosAng - cosGate) / max(1e-5, (1.0 - cosGate)));
-
-                // Tangent basis around sunDir
-                float3 t1, t2;
-                BuildSunBasis(sunDirEq, t1, t2);
-                RotateBasis(t1, t2, _SpikeRotateDeg);
-
-                // Project ray into tangent plane coordinates
-                float u = dot(rayEq, t1);
-                float v = dot(rayEq, t2);
-
-                // "Width" controls how thin the spikes are (in radians-ish)
-                // Use an exponential falloff from the axes lines (u=0 or v=0).
-                float w = max(1e-6, _SpikeWidth);
-                float spikeU = exp(-abs(v) / w); // bright along t1 axis (v ~ 0)
-                float spikeV = exp(-abs(u) / w); // bright along t2 axis (u ~ 0)
-
-                // Sharpen
-                spikeU = pow(saturate(spikeU), _SpikeSharpness);
-                spikeV = pow(saturate(spikeV), _SpikeSharpness);
-
-                float spikes = (spikeU + spikeV);
-
-                // Gate by proximity to sun so it doesn't affect the whole screen
-                return spikes * gate * _SpikeStrength;
-            }
-
-            float4x4 RotationMatrix(float y, float x, float z) {
-                // Convert angles from degrees to radians
                 x = radians(x);
                 y = radians(y);
                 z = radians(z);
-            
-                // Precompute sine and cosine
+
                 float sinX = sin(x);
                 float cosX = cos(x);
                 float sinY = sin(y);
                 float cosY = cos(y);
                 float sinZ = sin(z);
                 float cosZ = cos(z);
-            
-                // Construct the rotation matrix
-                float4x4 rotMatrix  = float4x4(
+
+                return float4x4(
                     cosY * cosZ, cosZ * sinX * sinY - cosX * sinZ, cosX * cosZ * sinY + sinX * sinZ, 0,
                     cosY * sinZ, cosX * cosZ + sinX * sinY * sinZ, -cosZ * sinX + cosX * sinY * sinZ, 0,
                     -sinY,      cosY * sinX,                      cosX * cosY,                      0,
                     0,          0,                                0,                                1
                 );
-            
-                return rotMatrix ;
-            }            
+            }
 
             float3 EvalSun(float3 rayEq, float3 sunDirEq)
             {
-                float cosAng = dot(SafeNormalize(rayEq), SafeNormalize(sunDirEq));
-                float cosLim = cos(_SunAngRad);
-                float soft   = max(1e-6, _SunEdgeSoft);
+                rayEq = SafeNormalize(rayEq);
+                sunDirEq = SafeNormalize(sunDirEq);
 
-                float disk = smoothstep(cosLim - soft, cosLim + soft, cosAng);
+                float cosAng = clamp(dot(rayEq, sunDirEq), -1.0, 1.0);
+                float ang = acos(cosAng);
 
-                float spikes = EvalSpikes(rayEq, sunDirEq);
+                float sunR = max(1e-6, _SunAngRad);
+                float soft = max(1e-6, _SunEdgeSoft);
 
-                // Bloom hook: push HDR intensity
-                float3 col = _SunColor.rgb * _SunIntensity * disk;
+                float disk = 1.0 - smoothstep(sunR - soft, sunR + soft, ang);
 
-                // Spikes are also bright but usually less than the disk
-                col += _SunColor.rgb * _SunIntensity * spikes;
+                float coreT = saturate(1.0 - ang / sunR);
+                float core = pow(coreT, max(1.0, _SunCoreFalloff));
 
-                return col;
+                float glowR = sunR * max(1.0, _SunGlowRadiusMul);
+                float glowT = saturate(1.0 - ang / glowR);
+                float glow = pow(glowT, max(1.0, _SunGlowFalloff));
+                glow *= (1.0 - disk * 0.85);
+
+                float3 diskCol = _SunColor.rgb * _SunIntensity * disk * lerp(0.92, 1.08, core);
+                float3 glowCol = _SunColor.rgb * (_SunIntensity * _SunGlowIntensity) * glow;
+
+                return diskCol + glowCol;
             }
 
             bool RaySphereHit(float3 D_unit, float3 C, float R, out float tHit)
             {
-                // Ray: P(t) = t * D, origin at (0,0,0)
-                // Sphere: |P - C|^2 = R^2
-
                 float b = dot(D_unit, C);
                 float c = dot(C, C) - R * R;
                 float h = b * b - c;
@@ -461,77 +446,240 @@ Shader "Skybox/SkySunMoonEarth"
                 }
 
                 float s = sqrt(h);
+                float t0 = b - s;
+                float t1 = b + s;
+                tHit = (t0 > 0.0) ? t0 : ((t1 > 0.0) ? t1 : 0.0);
+                return (tHit > 0.0);
+            }
 
-                // nearest positive hit
+            bool RaySphereHit2(float3 D_unit, float3 C, float R, out float t0, out float t1)
+            {
+                float b = dot(D_unit, C);
+                float c = dot(C, C) - R * R;
+                float h = b * b - c;
+
+                if (h < 0.0)
+                {
+                    t0 = 0.0;
+                    t1 = 0.0;
+                    return false;
+                }
+
+                float s = sqrt(h);
+                t0 = b - s;
+                t1 = b + s;
+
+                return t0 >= 0.0 && t1 >= 0.0;
+            }
+
+            float ScatterDensity(float3 pos, float scale)
+            {
+                return exp(-max(0.0, (length(pos) - _EarthRadiusM) / scale));
+            }
+
+            #define PI 3.14159265
+
+            float MiePhase(float c)
+            {
+                float g2 = _MieG * _MieG;
+                float c2 = c * c;
+
+                float num = 3.0 / 8.0 / PI * (1.0 - g2) * (1.0 - c2);
+                float inner = 1.0 + g2 - 2.0 * _MieG * c;
+                float denom = inner * sqrt(inner) * (2.0 + g2);
+                return num / denom;
+            }
+
+            float RayleighPhase(float c)
+            {
+                return 3.0 / 16.0 / PI * (1.0 + c * c);
+            }
+
+            float ScatterSun(float3 origin, float dist, float scale)
+            {
+                const int SUN_SCATTER_STEPS = 6;
+
+                float stepLen = dist / SUN_SCATTER_STEPS;
+                float total = 0.0;
+
+                for (int i = 0; i < SUN_SCATTER_STEPS; i++)
+                {
+                    float3 pos = origin + (0.5 + i) * stepLen;
+                    total += stepLen * ScatterDensity(pos, scale);
+                }
+
+                return total;
+            }
+
+            bool PointSeesSun(float3 posFromEarthCenter, float3 sunDir_unit, float earthRadius)
+            {
+                float b = dot(sunDir_unit, -posFromEarthCenter);
+                float c = dot(posFromEarthCenter, posFromEarthCenter) - earthRadius * earthRadius;
+                float h = b * b - c;
+
+                if (h < 0.0)
+                    return true;
+
+                float s = sqrt(h);
                 float t0 = b - s;
                 float t1 = b + s;
 
-                // Choose the smallest positive t
-                tHit = (t0 > 0.0) ? t0 : ((t1 > 0.0) ? t1 : 0.0);
+                return !(t0 > 0.0 || t1 > 0.0);
+            }
 
-                return (tHit > 0.0);
+            float3 EvalScattering(float3 dir, float dist, float3 background)
+            {
+                // Lower-cost distant-Earth version
+                const int SCATTER_STEPS = 16;
+
+                float nearT;
+                float farT;
+                float rAtmo = _EarthRadiusM + _EarthScatterHeightM;
+                if (!RaySphereHit2(dir, _EarthPosEcl.xyz, rAtmo, nearT, farT))
+                    return background;
+
+                if (dist >= 0.0 && farT > dist)
+                    farT = dist;
+
+                if (farT <= nearT)
+                    return background;
+
+                float stepLen = (farT - nearT) / SCATTER_STEPS;
+
+                float3 rayleighCam = 0.0;
+                float mieCam = 0.0;
+                float3 rayleighTotal = 0.0;
+                float3 mieTotal = 0.0;
+
+                float3 sunDir = SafeNormalize(_SunDirEcl.xyz);
+
+                for (int i = 0; i < SCATTER_STEPS; i++)
+                {
+                    float t = nearT + (i + 0.5) * stepLen;
+                    float3 pos = t * dir - _EarthPosEcl.xyz;
+
+                    float3 rayleighLocal = _RayleighAmount * stepLen * ScatterDensity(pos, _RayleighScale);
+                    float mieLocal = _MieAmount * stepLen * ScatterDensity(pos, _MieScale);
+
+                    rayleighCam += rayleighLocal;
+                    mieCam += mieLocal;
+
+                    float sunVisible = 0.0;
+                    float3 rayleighSun = 0.0;
+                    float mieSun = 0.0;
+
+                    if (PointSeesSun(pos, sunDir, _EarthRadiusM))
+                    {
+                        float lightNear, lightFar;
+                        if (RaySphereHit2(sunDir, -pos, rAtmo, lightNear, lightFar))
+                        {
+                            rayleighSun = _RayleighAmount * ScatterSun(pos, lightFar, _RayleighScale);
+                            mieSun = _MieAmount * ScatterSun(pos, lightFar, _MieScale);
+                            sunVisible = 1.0;
+                        }
+                    }
+
+                    float3 transmission = exp(-(rayleighCam + rayleighSun + mieCam + mieSun));
+
+                    rayleighTotal += rayleighLocal * transmission * sunVisible;
+                    mieTotal += mieLocal * transmission * sunVisible;
+                }
+
+                float3 groundTransmission = exp(-(rayleighCam + mieCam));
+                float c = dot(dir, -sunDir);
+
+                return rayleighTotal * RayleighPhase(c)
+                     + mieTotal * MiePhase(c)
+                     + background * groundTransmission;
+            }
+
+            float3 EvalAtmosphereTransmissionToDist(float3 dir, float dist)
+            {
+                const int SCATTER_STEPS = 12;
+
+                float nearT;
+                float farT;
+                float r = _EarthRadiusM + _EarthScatterHeightM;
+                if (!RaySphereHit2(dir, _EarthPosEcl.xyz, r, nearT, farT))
+                    return float3(1.0, 1.0, 1.0);
+
+                if (dist >= 0.0 && farT > dist)
+                    farT = dist;
+
+                if (farT <= nearT)
+                    return float3(1.0, 1.0, 1.0);
+
+                float stepLen = (farT - nearT) / SCATTER_STEPS;
+
+                float3 rayleighCam = 0.0;
+                float mieCam = 0.0;
+
+                for (int i = 0; i < SCATTER_STEPS; i++)
+                {
+                    float t = nearT + (i + 0.5) * stepLen;
+                    float3 pos = t * dir - _EarthPosEcl.xyz;
+
+                    rayleighCam += _RayleighAmount * stepLen * ScatterDensity(pos, _RayleighScale);
+                    mieCam += _MieAmount * stepLen * ScatterDensity(pos, _MieScale);
+                }
+
+                return exp(-(rayleighCam + mieCam));
             }
 
             float4 EvalMoon(float3 rayEcl_unit, float3 sunDirEcl_unit)
             {
-                float3 C = _MoonPosEcl.xyz;   // meters
+                float3 C = _MoonPosEcl.xyz;
                 float  R = _MoonRadiusM;
 
                 float t;
                 if (!RaySphereHit(rayEcl_unit, C, R, t))
                     return float4(0,0,0,0);
 
-                // Hit point and normal in ECL space
                 float3 P = rayEcl_unit * t;
                 float3 N = SafeNormalize(P - C);
 
-                // Simple Lambert (vacuum)
                 float nl = saturate(dot(N, sunDirEcl_unit));
-                nl = pow(nl, max(1e-3, _MoonShadowPow)); // =1 for true Lambert
-
+                nl = pow(nl, max(1e-3, _MoonShadowPow));
                 float shade = max(_MoonAmbient, nl);
 
-
-                // Convert ECL normal to moon body-fixed for texturing
                 float3 nB = EclToMoonBody(N);
-                float2 uv = MoonUV_Equirect(nB);
+                float2 uv = BodyUV_Equirect(nB);
 
                 uv.x = frac(uv.x + (_MoonLonOffsetDeg / 360.0));
                 if (_MoonFlipU > 0.5) uv.x = 1.0 - uv.x;
                 if (_MoonFlipV > 0.5) uv.y = 1.0 - uv.y;
 
-                // Sample albedo
                 float3 albedo = tex2D(_MoonAlbedo, uv).rgb;
-
-                // Optional gamma/tint (leave gamma=1 unless needed)
                 albedo = pow(max(albedo, 0.0), _MoonGamma);
                 albedo *= _MoonAlbedoTint.rgb;
 
-                float3 col = albedo * shade;
-
-                return float4(col, 1.0);
+                return float4(albedo * shade, 1.0);
             }
 
-
-            float4 EvalEarth(float3 rayEcl_unit, float3 sunDirEcl_unit)
+            float4 EvalEarthSurface(float3 rayEcl_unit, float3 sunDirEcl_unit, out float dist)
             {
                 float3 C = _EarthPosEcl.xyz;
                 float  R = _EarthRadiusM;
 
                 float t;
                 if (!RaySphereHit(rayEcl_unit, C, R, t))
+                {
+                    dist = 0.0;
                     return float4(0,0,0,0);
+                }
+
+                dist = t;
 
                 float3 P = rayEcl_unit * t;
                 float3 N = SafeNormalize(P - C);
 
-                float nl = saturate(dot(N, sunDirEcl_unit));
+                float nl_raw = dot(N, sunDirEcl_unit);
+                float nl = saturate(nl_raw);
                 nl = pow(nl, max(1e-3, _EarthShadowPow));
-
                 float shade = max(_EarthAmbient, nl);
 
                 float3 nB = EclToEarthBody(N);
-                float2 uv = EarthUV_Equirect(nB);
+                float2 uv = BodyUV_Equirect(nB);
 
                 uv.x = frac(uv.x + (_EarthLonOffsetDeg / 360.0));
                 if (_EarthFlipU > 0.5) uv.x = 1.0 - uv.x;
@@ -541,67 +689,203 @@ Shader "Skybox/SkySunMoonEarth"
                 albedo = pow(max(albedo, 0.0), _EarthGamma);
                 albedo *= _EarthAlbedoTint.rgb;
 
-                float3 col = albedo * shade;
-                return float4(col, 1.0);
+                float4 maskSample = tex2D(_EarthMask, uv);
+
+                float landMask = saturate(maskSample.a);
+                float waterMask = 1.0 - landMask;
+                float3 nightLightsTex = maskSample.rgb;
+
+                float3 V = SafeNormalize(-rayEcl_unit);
+                float3 L = SafeNormalize(sunDirEcl_unit);
+                float3 H = SafeNormalize(V + L);
+
+                float NdotL = saturate(dot(N, L));
+                float NdotV = saturate(dot(N, V));
+                float NdotH = saturate(dot(N, H));
+
+                float3 landCol = albedo * shade;
+
+                float waterFacing = saturate(NdotL * 0.65 + NdotV * 0.35);
+                float3 waterBase = lerp(_EarthWaterDeepColor.rgb, _EarthWaterShallowColor.rgb, waterFacing);
+
+                float fresnel = pow(1.0 - NdotV, 5.0);
+                float reflectivity = lerp(_EarthWaterBaseReflect, _EarthWaterEdgeReflect, saturate(fresnel * _EarthWaterFresnel));
+
+                float specSharp = pow(NdotH, max(1.0, _EarthWaterSpecSharpPower)) * _EarthWaterSpecSharpStrength;
+                float specBroad = pow(NdotH, max(1.0, _EarthWaterSpecBroadPower)) * _EarthWaterSpecBroadStrength;
+                float waterSpec = (specSharp + specBroad) * NdotL;
+
+                float3 reflectedTint = _EarthWaterReflectColor.rgb * reflectivity;
+                float3 waterLit = waterBase * lerp(_EarthAmbient, 1.0, NdotL);
+
+                float3 waterCol = waterLit;
+                waterCol += reflectedTint;
+                waterCol += _SunColor.rgb * (_EarthWaterSpecIntensity * waterSpec);
+
+                float3 surfaceCol = landCol * landMask + waterCol * waterMask;
+
+                float nightFactor = saturate((-nl_raw - _EarthNightLightThreshold) / (1.0 - _EarthNightLightThreshold));
+                float3 nightLightCol = nightLightsTex * (_EarthNightLightIntensity * nightFactor) * landMask;
+
+                return float4(surfaceCol + nightLightCol, 1.0);
             }
 
+            float4 EvalEarthClouds(float3 rayEcl_unit, float3 sunDirEcl_unit, out float dist)
+            {
+                float3 C = _EarthPosEcl.xyz;
+                float  R = _EarthRadiusM + _EarthCloudHeightM;
 
+                float t;
+                if (!RaySphereHit(rayEcl_unit, C, R, t))
+                {
+                    dist = 0.0;
+                    return float4(0,0,0,0);
+                }
 
+                dist = t;
+
+                float3 P = rayEcl_unit * t;
+                float3 N = SafeNormalize(P - C);
+
+                float nlRaw = dot(N, sunDirEcl_unit);
+                float nl = saturate(nlRaw);
+                nl = pow(nl, max(1e-3, _EarthCloudShadowPow));
+
+                float twilight = saturate((nlRaw + 0.08) / 0.16);
+                float ambient = _EarthCloudAmbient * twilight;
+                float shade = max(ambient, nl);
+
+                float3 V = SafeNormalize(-rayEcl_unit);
+                float NdotV = saturate(dot(N, V));
+                float limb = pow(1.0 - NdotV, max(1.0, _EarthCloudLimbPower));
+                float limbBright = limb * nl * _EarthCloudLimbBrightening;
+
+                float3 nB = EclToEarthBody(N);
+                float2 uv = BodyUV_Equirect(nB);
+
+                uv.x = frac(uv.x + (_EarthLonOffsetDeg / 360.0));
+                if (_EarthFlipU > 0.5) uv.x = 1.0 - uv.x;
+                if (_EarthFlipV > 0.5) uv.y = 1.0 - uv.y;
+
+                float4 cloudTex = tex2D(_EarthClouds, uv);
+                float alpha = cloudTex.a * _EarthCloudOpacity;
+                alpha = saturate(alpha);
+
+                float3 cloudRgb = cloudTex.rgb * _EarthCloudTint.rgb;
+                float3 col = cloudRgb * (shade + limbBright);
+
+                return float4(col, alpha);
+            }
+
+            float3 EvalEarthAirglow(float3 rayEcl_unit, float3 sunDirEcl_unit)
+            {
+                float3 C = _EarthPosEcl.xyz;
+
+                float innerR = _EarthRadiusM + _EarthAirglowHeightM;
+                float outerR = innerR + max(1.0, _EarthAirglowThicknessM);
+
+                float t0o, t1o;
+                if (!RaySphereHit2(rayEcl_unit, C, outerR, t0o, t1o))
+                    return 0.0;
+
+                float t0i, t1i;
+                bool hitInner = RaySphereHit2(rayEcl_unit, C, innerR, t0i, t1i);
+
+                float shellLen = 0.0;
+                if (hitInner)
+                    shellLen = max(0.0, (t1o - t0o) - (t1i - t0i));
+                else
+                    shellLen = max(0.0, t1o - t0o);
+
+                if (shellLen <= 0.0)
+                    return 0.0;
+
+                float shellNorm = shellLen / max(1.0, _EarthAirglowThicknessM);
+                float limbBoost = 1.0 - exp(-shellNorm * 0.35);
+
+                float tMid = 0.5 * (t0o + t1o);
+                float3 P = rayEcl_unit * tMid;
+                float3 N = SafeNormalize(P - C);
+
+                float nlRaw = dot(N, sunDirEcl_unit);
+                float nightFactor = saturate((-nlRaw * 0.5 + 0.5) * _EarthAirglowNightBias);
+                nightFactor = pow(nightFactor, 1.5);
+
+                return _EarthAirglowColor.rgb * (_EarthAirglowIntensity * limbBoost * nightFactor);
+            }
 
             fixed4 frag(v2f i) : SV_Target
             {
                 float3 dirB = SafeNormalize(float3(-i.dir.x, i.dir.y, i.dir.z));
-
-                // Body -> Equatorial (RA/Dec-baked frame)
                 float3 dirEq = SafeNormalize(RotateByQuat(dirB, _CraftBodyToEq));
-
-                // --- Sun ---
                 float3 sunDirEcl = SafeNormalize(_SunDirEcl.xyz);
-                float4 moonCol   = EvalMoon(dirEq, sunDirEcl);
-                float4 earthCol = EvalEarth(dirEq, sunDirEcl);
 
-                float3 sunCol = EvalSun(dirEq, sunDirEcl);
-
-                // Moon-dominant shader policy:
-                // moon wins first, earth is secondary fallback
+                // Primary body: Moon
+                float4 moonCol = EvalMoon(dirEq, sunDirEcl);
                 if (moonCol.a > 0.5)
                     return float4(moonCol.rgb, 1.0);
 
-                if (earthCol.a > 0.5)
-                    return float4(earthCol.rgb, 1.0);
+                // Secondary body: Earth with distant-view effects
+                float cloudDist;
+                float4 earthCloudCol = EvalEarthClouds(dirEq, sunDirEcl, cloudDist);
 
-                // Equatorial -> Ecliptic (sim frame)
+                float earthDist;
+                float4 earthSurfCol = EvalEarthSurface(dirEq, sunDirEcl, earthDist);
+
+                bool earthVisible = (earthSurfCol.a > 0.5);
+                bool cloudInFront = (earthCloudCol.a > 0.0 && (earthDist <= 0.0 || cloudDist < earthDist));
+
+                if (earthVisible || cloudInFront)
+                {
+                    float3 earthCol = earthSurfCol.rgb;
+                    float scatterDist = earthDist;
+
+                    if (earthVisible)
+                    {
+                        earthCol = EvalScattering(dirEq, earthDist, earthCol);
+                    }
+
+                    earthCol += EvalEarthAirglow(dirEq, sunDirEcl);
+
+                    if (cloudInFront)
+                    {
+                        float3 cloudTrans = EvalAtmosphereTransmissionToDist(dirEq, cloudDist);
+                        float3 cloudRgbScattered = earthCloudCol.rgb * cloudTrans;
+                        earthCol = lerp(earthCol, cloudRgbScattered, earthCloudCol.a);
+                    }
+
+                    return float4(earthCol, 1.0);
+                }
+
+                float3 sunCol = EvalSun(dirEq, sunDirEcl);
 
                 float3 dirEcl = SafeNormalize(EqToEcl(dirEq, _ObliquityDeg));
-
-                // Ecliptic -> texture frame expected by your octa encoding
                 float3 ndir = EclToStarTexFrame(dirEcl);
 
                 float3 dFlip;
                 float2 baseTexel;
                 OctaBaseFromDir(ndir, dFlip, baseTexel);
 
-                float4 s0 = RetreivePixInfo(dFlip, baseTexel, float2(0,0));
-                float4 s1 = RetreivePixInfo(dFlip, baseTexel, float2(1,0));
-                float4 s2 = RetreivePixInfo(dFlip, baseTexel, float2(1,1));
-                float4 s3 = RetreivePixInfo(dFlip, baseTexel, float2(0,1));
-                float4 s4 = RetreivePixInfo(dFlip, baseTexel, float2(-1,1));
-                float4 s5 = RetreivePixInfo(dFlip, baseTexel, float2(-1,0));
-                float4 s6 = RetreivePixInfo(dFlip, baseTexel, float2(-1,-1));
-                float4 s7 = RetreivePixInfo(dFlip, baseTexel, float2(0,-1));
-                float4 s8 = RetreivePixInfo(dFlip, baseTexel, float2(1,-1));
+                float3 s0 = RetrievePixInfo(dFlip, baseTexel, float2(0,0));
+                float3 s1 = RetrievePixInfo(dFlip, baseTexel, float2(1,0));
+                float3 s2 = RetrievePixInfo(dFlip, baseTexel, float2(1,1));
+                float3 s3 = RetrievePixInfo(dFlip, baseTexel, float2(0,1));
+                float3 s4 = RetrievePixInfo(dFlip, baseTexel, float2(-1,1));
+                float3 s5 = RetrievePixInfo(dFlip, baseTexel, float2(-1,0));
+                float3 s6 = RetrievePixInfo(dFlip, baseTexel, float2(-1,-1));
+                float3 s7 = RetrievePixInfo(dFlip, baseTexel, float2(0,-1));
+                float3 s8 = RetrievePixInfo(dFlip, baseTexel, float2(1,-1));
 
+                float3 starsCol = s0+s1+s2+s3+s4+s5+s6+s7+s8;
+                float starPeak = max(starsCol.r, max(starsCol.g, starsCol.b));
+                if (starPeak > _StarClamp)
+                    starsCol *= (_StarClamp / max(1e-6, starPeak));
 
                 float4x4 rotMatrix = RotationMatrix(300, 171, 156);
-
                 float3 rotatedDir = mul(rotMatrix, float4(ndir, 1.0)).xyz;
-                fixed4 mw = Desaturate(texCUBE(_SkyboxTex, rotatedDir)*_MWbright,0.6);
+                fixed4 mw = Desaturate(texCUBE(_SkyboxTex, rotatedDir) * _MWbright, 0.6);
 
-
-
-                // fixed4 mw = Desaturate(texCUBE(_SkyboxTex, ndir) * _MWbright, 0.6);
-
-                return mw + (s0+s1+s2+s3+s4+s5+s6+s7+s8)+ float4(sunCol, 0);
+                return float4(mw.rgb + starsCol + sunCol, 1.0);
             }
             ENDCG
         }

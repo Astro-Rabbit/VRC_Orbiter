@@ -5,12 +5,12 @@ using UnityEngine;
 /// GuidanceNavCoreState
 /// Per-tick navigation snapshot for guidance programs + UI planners.
 /// Data-only container: GuidanceComputerCore is responsible for populating all fields.
-/// 
+///
 /// Frame conventions:
 /// - E: solver inertial frame (your heliocentric/SSB ecliptic inertial frame)
 /// - B: craft body frame
 /// - Primary body-fixed: uses +Z as north/pole axis (as per project convention)
-/// 
+///
 /// Notes:
 /// - rC/vC are craft heliocentric (in E).
 /// - r/v are craft relative to primary body, still expressed in E basis (primary-centered inertial in E coords).
@@ -60,14 +60,14 @@ public class GuidanceNavCoreState : UdonSharpBehaviour
     public double vP_x, vP_y, vP_z;  // m/s
 
     [Header("Primary rotation in inertial (E)")]
-    public double omegaP_x, omegaP_y, omegaP_z;  // rad/s in E
+    public double omegaP_x, omegaP_y, omegaP_z;   // rad/s in E
     public Quaternion qPF2E = Quaternion.identity; // primary body-fixed -> E
 
     // Primary equator basis in E (derived from qPF2E; +Z is north)
     [Header("Primary equator basis (E)")]
-    public Vector3 Ieq_E = Vector3.right; // primary-fixed +X expressed in E
-    public Vector3 Jeq_E = Vector3.up;    // primary-fixed +Y expressed in E
-    public Vector3 Keq_E = Vector3.forward; // primary-fixed +Z (north) expressed in E
+    public Vector3 Ieq_E = Vector3.right;     // primary-fixed +X expressed in E
+    public Vector3 Jeq_E = Vector3.up;        // primary-fixed +Y expressed in E
+    public Vector3 Keq_E = Vector3.forward;   // primary-fixed +Z (north) expressed in E
 
     // --------------------
     // Primary-relative craft state (still in E basis)
@@ -75,8 +75,8 @@ public class GuidanceNavCoreState : UdonSharpBehaviour
     [Header("Craft relative to primary (E basis)")]
     public double r_x, r_y, r_z;     // meters
     public double v_x, v_y, v_z;     // m/s
-    public double rMag;             // meters
-    public double vMag;             // m/s
+    public double rMag;              // meters
+    public double vMag;              // m/s
 
     // --------------------
     // RTN basis (E)
@@ -90,15 +90,15 @@ public class GuidanceNavCoreState : UdonSharpBehaviour
     // Orbit invariants / conic scalars (primary-relative)
     // --------------------
     [Header("Orbit invariants (primary-relative, in E basis)")]
-    public Vector3 h_E = Vector3.forward;     // specific angular momentum vector (direction in E)
-    public double hMag;                       // |h| (units: m^2/s)
-    public Vector3 eVec_E = Vector3.zero;     // eccentricity vector (dimensionless)
-    public double e;                          // eccentricity magnitude
+    public Vector3 h_E = Vector3.forward; // specific angular momentum vector (direction in E)
+    public double hMag;                   // |h| (units: m^2/s)
+    public Vector3 eVec_E = Vector3.zero; // eccentricity vector (dimensionless)
+    public double e;                      // eccentricity magnitude
 
     [Header("Conic scalars (primary-relative)")]
-    public double a;                          // semi-major axis (m) (may be negative for hyperbolic)
-    public double p;                          // semi-latus rectum (m)
-    public double energy;                     // specific orbital energy (J/kg = m^2/s^2)
+    public double a;                      // semi-major axis (m) (may be negative for hyperbolic)
+    public double p;                      // semi-latus rectum (m)
+    public double energy;                 // specific orbital energy (J/kg = m^2/s^2)
 
     // --------------------
     // Elements in primary equatorial reference plane
@@ -108,6 +108,23 @@ public class GuidanceNavCoreState : UdonSharpBehaviour
     public double raanRad;
     public double argpRad;
     public double nuRad;
+
+
+    [Header("Elements in solver inertial reference plane (radians)")]
+    public double iInertialRad;
+    public double raanInertialRad;
+    public double argpInertialRad;
+
+    // --------------------
+    // Selected maneuver node export (for HUD / displays)
+    // --------------------
+    [Header("Selected maneuver node")]
+    public bool selectedNodeVectorValid;
+    public int selectedNodeIndex = -1;
+    public Vector3 selectedNodeDV_E = Vector3.zero;
+    public Vector3 selectedNodeDir_E = Vector3.zero;
+    public float selectedNodeDVmag_mps = 0f;
+    public float selectedNodeRemainingDV_mps = 0f;
 
     // --------------------
     // Optional: quick UI/debug fields
