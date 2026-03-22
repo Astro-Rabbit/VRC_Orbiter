@@ -78,7 +78,7 @@ public class TabletPen : UdonSharpBehaviour
     [Header("Pointer Mode")]
     public bool usePointerMode;
     public GameObject PointerMesh;
-    public GameObject PointerBase;
+    //public GameObject PointerBase;
     public GameObject PointerTipArrow;
     public GameObject PointerTipHand;
     // public LineRenderer PointerLine;
@@ -88,6 +88,7 @@ public class TabletPen : UdonSharpBehaviour
     public Color PointerDefaultColor = Color.white;
     public Color PointerHoverColor = Color.cyan;
     public Color PointerClickColor = Color.green;
+    public Color PointerPickupColor = Color.yellow;
 
     void Start()
     {
@@ -100,15 +101,19 @@ public class TabletPen : UdonSharpBehaviour
         if (!Networking.LocalPlayer.IsUserInVR())
         {
             TriggerRequiredForTablet = true;
-
+            
 
         }
         else
         {
-            if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
-            if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);
+            //if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
+            //if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);//
         }
+        if (PenMesh != null) PenMesh.SetActive(false);
+        if (PointerMesh != null) PointerMesh.SetActive(false);
+        //RefreshMeshVisibility();
         isVR = Networking.LocalPlayer.IsUserInVR();
+        CapsuleCol = gameObject.GetComponent<CapsuleCollider>();
     }
 
     void Update()
@@ -191,14 +196,29 @@ public class TabletPen : UdonSharpBehaviour
         // Update Pointer Color
         if (PointerMat != null)
         {
+            //Color targetColor = PointerDefaultColor;
+            //if (isInteractiveHit)
+            //{
+            //    targetColor = triggerHeld ? PointerClickColor : PointerHoverColor;
+            //}
+            //PointerMat.SetColor("_Color", targetColor); // Standard/Mobile shaders
+            //PointerMat.SetColor("_EmissionColor", targetColor); // Standard/Mobile shaders
+            //                                                    // PointerMat.color = targetColor; // Alternative if not using SetColor
             Color targetColor = PointerDefaultColor;
+
             if (isInteractiveHit)
             {
                 targetColor = triggerHeld ? PointerClickColor : PointerHoverColor;
             }
-            PointerMat.SetColor("_Color", targetColor); // Standard/Mobile shaders
-            PointerMat.SetColor("_EmissionColor", targetColor); // Standard/Mobile shaders
-                                                                // PointerMat.color = targetColor; // Alternative if not using SetColor
+            // If the TRIGGER system says we are hovering over a pickup...
+            else if (_hoveredPickup != null)
+            {
+                // Use ClickColor if gripping, otherwise use the new PickupColor
+                targetColor = PointerPickupColor;
+            }
+
+            PointerMat.SetColor("_Color", targetColor);
+            PointerMat.SetColor("_EmissionColor", targetColor);
         }
 
         if (!usePointerMode)
@@ -334,7 +354,7 @@ public class TabletPen : UdonSharpBehaviour
                 else
                 {
                     _focusedMFDBtn = mfdBtn; _focusedMFDBtn.OnDown(penID, this);
-                    Debug.Log("[TabletPen] MFD hit");
+                    //Debug.Log("[TabletPen] MFD hit");
                 }
                 _isLocked = true;
                 ClearTabletInteraction(); // Ensure tablet state is reset if we switch to physical
@@ -425,7 +445,7 @@ public class TabletPen : UdonSharpBehaviour
                 if (_activeScrollbar != null)
                 {
                     _activeScrollbar.OnDown(penID, worldPoint);
-                    Debug.Log("[TabletPen] ScrollDown");
+                    //Debug.Log("[TabletPen] ScrollDown");
                 }
             }
             else
@@ -619,12 +639,35 @@ public class TabletPen : UdonSharpBehaviour
     //    _zoneCount = OverRideMeshBool ? 1000 : 0;
     //   // RefreshMeshVisibility();
     //}
-
-    private void RefreshMeshVisibility()
+    public CapsuleCollider CapsuleCol;
+    public void RefreshMeshVisibility()
     {
+        if (!usePointerMode)
+        {
+           // PenMesh.SetActive(show && !usePointerMode);
+            CapsuleCol.radius = 0.5f;
+            CapsuleCol.height = 2f;
+        }
+        else
+        {
+            CapsuleCol.radius = 0.9f;
+            CapsuleCol.height = 0.5f;
+        }
+
+
         bool show = _zoneCount > 0;
-        if (PenMesh != null) PenMesh.SetActive(show && !usePointerMode);
-        if (PointerMesh != null) PointerMesh.SetActive(show && usePointerMode);
+        if (PenMesh != null)
+        {
+            PenMesh.SetActive(show && !usePointerMode);
+            //CapsuleCol.radius = 0.5f;
+            //CapsuleCol.height = 2f;
+        }
+        if (PointerMesh != null)
+        {
+            PointerMesh.SetActive(show && usePointerMode);
+            //CapsuleCol.radius = 0.9f;
+            //CapsuleCol.height = 0.5f;
+        }
     }
 
     public void TriggerHaptic(float duration = 0.05f, float amplitude = 0.2f, float frequency = 0.8f)
@@ -760,7 +803,7 @@ public class TabletPen : UdonSharpBehaviour
 
                     //TriggerHaptic(0.05f, 0.3f);
                     TriggerHapticEvent();
-                    Debug.Log("[TabletPen] Successful Grab");
+                    //Debug.Log("[TabletPen] Successful Grab");
                 }
             }
 

@@ -3,7 +3,7 @@ using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
+[UdonBehaviourSyncMode(BehaviourSyncMode.Continuous)]
 public class DualHandPickup : UdonSharpBehaviour
 {
     private TabletPen pen1;
@@ -39,6 +39,9 @@ public class DualHandPickup : UdonSharpBehaviour
     private bool isTransitioningToOneHand = false;
     private bool isTransitioningToDock = false;
 
+    [UdonSynced(UdonSyncMode.None)]
+    public bool VRPickuped;
+
     private void Start()
     {
         
@@ -65,6 +68,9 @@ public class DualHandPickup : UdonSharpBehaviour
 
     public void OnGrab(TabletPen pen)
     {
+        if (!Networking.IsOwner(gameObject)) Networking.SetOwner(Networking.LocalPlayer, gameObject);
+        VRPickuped = true;
+
         isDocked = false; // Release from dock immediately on grab
         isTransitioningToOneHand = false; // Reset flag so it snaps to hand
         isTransitioningToDock = false;
@@ -95,6 +101,11 @@ public class DualHandPickup : UdonSharpBehaviour
 
     public void OnRelease(TabletPen pen)
     {
+        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        {
+            VRPickuped = false;
+        }
+        
         if (pen1 == pen)
         {
             if (pen2 != null)
@@ -160,7 +171,7 @@ public class DualHandPickup : UdonSharpBehaviour
     //void LateUpdate()
     public override void PostLateUpdate()
     {
-        if (pickup.pickupable) return;
+        if (pickup.pickupable|| Networking.GetOwner(gameObject) != Networking.LocalPlayer) return;
 
         if (isDocked && targetDockTransform != null)
         {
@@ -184,7 +195,7 @@ public class DualHandPickup : UdonSharpBehaviour
             return; // Skip hand logic while docked
         }
 
-        if (pen1 != null && pen2 != null)
+        if (pen1 != null && pen2 != null )
         {
             HandleTwoHanded();
         }
@@ -331,7 +342,7 @@ public class DualHandPickup : UdonSharpBehaviour
         }
 
         // NEW: Only look for a dock if the tablet is currently being held
-        if (pen1 != null && other.name == "TabletDockTrigger")
+        if (pen1 != null && other.name == "TabletDockTrigger" &&!isDocked)
         {
             targetDockTransform = other.transform;
         }
@@ -358,5 +369,16 @@ public class DualHandPickup : UdonSharpBehaviour
         }
     }
 
+    public override void OnDeserialization()
+    {
+        if (VRPickuped)
+        {
+            TabletPickupCol.enabled = false;
+        }
+        else
+        {
+            TabletPickupCol.enabled = true;
+        }
+    }
 
 }

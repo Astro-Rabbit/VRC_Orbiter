@@ -49,14 +49,14 @@ public class TabletPenPickup : UdonSharpBehaviour
     /// Standard single-hand movement logic. 
     /// Overridden in DualHandPickup for multi-hand logic.
     /// </summary>
-    public virtual void LateUpdate()
-    {
-        if (isBeingHeld && currentPen != null)
-        {
-            transform.position = currentPen.transform.TransformPoint(heldPosOffset);
-            transform.rotation = currentPen.transform.rotation * heldRotOffset;
-        }
-    }
+    //public virtual void LateUpdate()
+    //{
+    //    if (isBeingHeld && currentPen != null)
+    //    {
+    //        transform.position = currentPen.transform.TransformPoint(heldPosOffset);
+    //        transform.rotation = currentPen.transform.rotation * heldRotOffset;
+    //    }
+    //}
 
     // --- TRIGGER SYSTEM ---
     // This tells the pen "I am a pickup you can interact with" 

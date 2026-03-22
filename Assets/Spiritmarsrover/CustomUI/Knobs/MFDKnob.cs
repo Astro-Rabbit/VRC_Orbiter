@@ -23,15 +23,18 @@ public class MFDKnob : UdonSharpBehaviour
 
     [Header("Interaction Settings")]
     public bool isDiscrete = false;
+    public bool isContinuous = false;
+    public float hapticInterval = .1f;
     public float stepSize = 1f;
     public float desktopSensitivity = 2.0f;
 
-    [UdonSynced] private float _currentValue;
+    [UdonSynced] public float _currentValue;
     private float _startValue;
     private int _activePenID = -1;
 
     private Quaternion _grabRot;
     private TabletPen _activePen;
+
 
     void Start()
     {
@@ -87,25 +90,71 @@ public class MFDKnob : UdonSharpBehaviour
     //    ApplyDelta(angleDelta);
     //}
 
+    //old apply detla
+    //private void ApplyDelta(float angleDelta)
+    //{
+    //    float percentDelta = angleDelta / totalRotationAngle;
+    //    float valueDelta = percentDelta * (maxValue - minValue);
+
+    //    float newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+
+    //    if (isDiscrete)
+    //        newValue = Mathf.Round(newValue / stepSize) * stepSize;
+
+    //    if (Mathf.Approximately(newValue, _currentValue)) return;
+
+
+    //    if (isDiscrete && _activePen != null) _activePen.PlayKnobClip();
+    //    _activePen.TriggerHapticEvent();
+
+    //    _currentValue = newValue;
+    //    UpdateVisuals();
+    //    NotifyTarget();
+    //}
+    private float _lastHapticValue;
     private void ApplyDelta(float angleDelta)
     {
-        float percentDelta = angleDelta / totalRotationAngle;
-        float valueDelta = percentDelta * (maxValue - minValue);
+        float newValue;
 
-        float newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+        if (isContinuous)
+        {
+            // Value is cumulative degrees (or degrees * a multiplier)
+            newValue = _startValue + angleDelta;
+        }
+        else
+        {
+            // Existing ranged logic
+            float percentDelta = angleDelta / totalRotationAngle;
+            float valueDelta = percentDelta * (maxValue - minValue);
+            newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+        }
 
         if (isDiscrete)
             newValue = Mathf.Round(newValue / stepSize) * stepSize;
 
         if (Mathf.Approximately(newValue, _currentValue)) return;
 
-
-        if (isDiscrete && _activePen != null) _activePen.PlayKnobClip();
-        _activePen.TriggerHapticEvent();
+        // Haptics and ownership
+        if (isDiscrete && _activePen != null)
+        {
+            _activePen.PlayKnobClip();
+            _activePen.TriggerHapticEvent();
+        }
+        else
+        {
+            if(Mathf.Abs(newValue - _lastHapticValue) >= hapticInterval)
+            {
+                // Trigger only after moving 'hapticInterval' amount
+                _activePen.TriggerHapticEvent();
+                _lastHapticValue = newValue;
+            }
+        }
+        
+        EnsureLocalOwnership();
 
         _currentValue = newValue;
-        UpdateVisuals();
-        NotifyTarget();
+        ApplyValue();
+        //RequestSerialization();
     }
 
     //public void OnStayDesktop(int id, Quaternion currentCameraRotation)
@@ -171,14 +220,31 @@ public class MFDKnob : UdonSharpBehaviour
         NotifyTarget();
     }
 
+    //private void UpdateVisuals()
+    //{
+    //    if (knobMesh == null) return;
+
+    //    float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
+    //    float currentDegrees = percent * totalRotationAngle;
+
+    //    knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+    //}
     private void UpdateVisuals()
     {
         if (knobMesh == null) return;
 
-        float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
-        float currentDegrees = percent * totalRotationAngle;
-
-        knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+        if (isContinuous)
+        {
+            // Just spin based on the raw value
+            knobMesh.localRotation = Quaternion.AngleAxis(_currentValue, rotationAxis);
+        }
+        else
+        {
+            // Existing 0-300 degree limit logic
+            float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
+            float currentDegrees = percent * totalRotationAngle;
+            knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+        }
     }
 
     private void NotifyTarget()
