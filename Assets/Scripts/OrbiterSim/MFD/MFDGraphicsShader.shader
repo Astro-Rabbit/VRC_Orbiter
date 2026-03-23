@@ -1,5 +1,12 @@
 Shader "Unlit/MFDGraphicsShader"
 {
+    Properties 
+    {
+        _FontAtlas ("Font Atlas", 2D) = "white" {}
+        _FontSdfEdge ("Font SDF Edge", Float) = 0.5
+        _FontSdfSoftness ("Font SDF Softness", Float) = 0.06
+    }
+
     SubShader
     {
         Tags { "RenderType"="Opaque" }
@@ -15,9 +22,19 @@ Shader "Unlit/MFDGraphicsShader"
 
             #include "UnityCG.cginc"
 
-            // Must match value in MFD.cs
+            // Must match values in MFD.cs
+            #define TEXT_ROWS 24
+            #define TEXT_COLUMNS 48
             #define MAX_SHAPES 256
 
+            sampler2D _FontAtlas;
+            float _FontSdfEdge;
+            float _FontSdfSoftness;
+
+            float4 fontUvs[127 - 32];
+
+            uniform int charGrid[24 * 48];
+            uniform float3 charColors[24 * 48];
             uniform int shapeCount;
             uniform float3 shapeColors[MAX_SHAPES];
             uniform float shapeData1[MAX_SHAPES];
@@ -172,20 +189,57 @@ Shader "Unlit/MFDGraphicsShader"
                 }
             }
 
-            fixed4 frag (v2f i) : SV_Target
+            float SampleFontSdf(float2 atlasUv)
+            {
+                return tex2D(_FontAtlas, atlasUv).a;
+            }
+
+            float DrawGlyph(int c, float gx, float gy)
+            {
+                float4 uvRect = fontUvs[c - 32];
+
+                gy -= 0.1;
+                gy *= 1.2;
+
+                float2 atlasUv;
+                atlasUv.x = lerp(uvRect.x, uvRect.z, gx);
+                atlasUv.y = lerp(uvRect.y, uvRect.w, gy);
+
+                float sdf = SampleFontSdf(atlasUv);
+
+                return smoothstep(_FontSdfEdge - _FontSdfSoftness, _FontSdfEdge + _FontSdfSoftness, sdf);
+            }
+
+            fixed4 frag (v2f input) : SV_Target
             {
                 const float lineWidth = .005;
 
-                float2 p = 2*(i.uv - .5);
+                float2 p = 2*(input.uv - .5);
 
-                float3 col = float3(0, 0, 0);
+                float3 color = float3(0, 0, 0);
                 for (int i = 0; i < shapeCount; i++) {
                     if (abs(shape(p, i)) < lineWidth) {
-                        col = shapeColors[i];
+                        color = shapeColors[i];
                     }
                 }
 
-                fixed4 res = fixed4(col, 0);
+                int row = (int)((1.0 - input.uv.y) * TEXT_ROWS);
+                int col = (int)(input.uv.x * TEXT_COLUMNS);
+
+                int index = row*TEXT_COLUMNS + col;
+                int c = (int)charGrid[index];
+                float gx = input.uv.x*TEXT_COLUMNS - col;
+                float gy = (1.0 - input.uv.y)*TEXT_ROWS - row;
+
+                float glyph = DrawGlyph(c, gx, 1.0 - gy);
+                if (glyph > 0.0) {
+                    color = charColors[index] * glyph;
+                }
+
+                //float sdf = SampleFontSdf(input.uv);
+                //color = smoothstep(_FontSdfEdge - _FontSdfSoftness, _FontSdfEdge + _FontSdfSoftness, sdf);
+
+                fixed4 res = fixed4(color, 1.0);
                 // apply fog
                 UNITY_APPLY_FOG(i.fogCoord, res);
                 return res;

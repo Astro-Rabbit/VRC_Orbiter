@@ -20,7 +20,7 @@ public class MFD : UdonSharpBehaviour
 {
     public MFDCore core;
     public Canvas canvas;
-    public TMP_Text text;
+    public MFDFontData fontData;
     public Material graphicsMaterial;
 
     public MFDPage currentPage;
@@ -29,8 +29,8 @@ public class MFD : UdonSharpBehaviour
     public const int TEXT_ROWS = 24;
     public const int TEXT_COLUMNS = 48;
 
-    private char[][] charGrid;
-    private Color[][] charColors;
+    private float[] charGrid; // Unity materials don't support uploading int arrays for some reason
+    private Color[] charColors;
 
     // Must match value in MFDGraphicsShader.shader
     const int MAX_SHAPES = 256;
@@ -66,13 +66,11 @@ public class MFD : UdonSharpBehaviour
 
     public void Start()
     {
-        charGrid = new char[TEXT_ROWS][];
-        charColors = new Color[TEXT_ROWS][];
-        for (int i = 0; i < TEXT_ROWS; i++) {
-            charGrid[i] = new char[TEXT_COLUMNS];
-            charColors[i] = new Color[TEXT_COLUMNS];
-        }
+        charGrid = new float[TEXT_ROWS * TEXT_COLUMNS];
+        charColors = new Color[TEXT_ROWS * TEXT_COLUMNS];
         ClearText();
+
+        graphicsMaterial.SetVectorArray("fontUvs", fontData.uvs);
 
         shapeColors = new Color[MAX_SHAPES];
         shapeData1 = new float[MAX_SHAPES];
@@ -118,7 +116,7 @@ public class MFD : UdonSharpBehaviour
     {
         for (int i = 0; i < TEXT_ROWS; i++) {
             for (int j = 0; j < TEXT_COLUMNS; j++) {
-                charGrid[i][j] = ' ';
+                charGrid[i*TEXT_COLUMNS + j] = (float)' ';
             }
         }
     }
@@ -132,8 +130,8 @@ public class MFD : UdonSharpBehaviour
     {
         int len = text.Length;
         for (int i = 0; i < len && i + col < TEXT_COLUMNS; i++) {
-            charGrid[row][i + col] = text[i];
-            charColors[row][i + col] = color;
+            charGrid[row*TEXT_COLUMNS + i + col] = (float)text[i];
+            charColors[row*TEXT_COLUMNS + i + col] = color;
         }
     }
 
@@ -141,8 +139,8 @@ public class MFD : UdonSharpBehaviour
     {
         int len = text.Length;
         for (int i = 0; i < len && i + row < TEXT_ROWS; i++) {
-            charGrid[i + row][col] = text[i];
-            charColors[i + row][col] = color;
+            charGrid[(i + row)*TEXT_COLUMNS + col] = (float)text[i];
+            charColors[(i + row)*TEXT_COLUMNS + col] = color;
         }
     }
 
@@ -181,30 +179,9 @@ public class MFD : UdonSharpBehaviour
 
     private void FlushDrawCommands()
     {
-        // Concatenate text grid into a string with markup for TextMeshPro
-        StringBuilder builder = new StringBuilder("<mspace=0.6em>");
-        Color lastColor = Color.white;
-        for (int i = 0; i < TEXT_ROWS; i++) {
-            for (int j = 0; j < TEXT_COLUMNS; j++) {
-                char next = charGrid[i][j];
-                Color current = charColors[i][j];
-
-                if (next != ' ' && current != lastColor) {
-                    builder.Append("<color=#");
-                    builder.Append(((int)Math.Round(current.r * 255)).ToString("X2"));
-                    builder.Append(((int)Math.Round(current.g * 255)).ToString("X2"));
-                    builder.Append(((int)Math.Round(current.b * 255)).ToString("X2"));
-                    builder.Append(">");
-
-                    lastColor = current;
-                }
-
-                builder.Append(next);
-            }
-            builder.Append('\n');
-        }
-
-        text.text = builder.ToString();
+        // Upload text data to screen material
+        graphicsMaterial.SetFloatArray("charGrid", charGrid);
+        graphicsMaterial.SetColorArray("charColors", charColors);
 
         // Upload graphics shape data to screen material
         graphicsMaterial.SetColorArray("shapeColors", shapeColors);
@@ -231,7 +208,7 @@ public class MFD : UdonSharpBehaviour
             num /= 1000.0;
         }
 
-        // FIXME: Is there a better way to fall back?
+        // 999.9 Teranumbers of RAM oughta be enough for anyone, eh?
         if (i == 5) {
             return "";
         }
