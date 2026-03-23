@@ -109,7 +109,7 @@ public class MFDAlignPage : MFDPage
         display.DrawConic(Vector2.zero, orbitSize, 0f, 0f, Color.green);
 
         display.ClearText();
-        display.DrawText(MFD.FormatNumber("INC", inclination * Mathf.Rad2Deg), 2, 4, Color.green);
+        display.DrawText(MFD.FormatAngle("Inc", inclination), 2, 4, Color.green);
         display.DrawText(MFD.FormatNumber("ANT", ascTime), 2, 19, Color.green);
         display.DrawText(MFD.FormatNumber("DNT", descTime), 2, 34, Color.green);
 

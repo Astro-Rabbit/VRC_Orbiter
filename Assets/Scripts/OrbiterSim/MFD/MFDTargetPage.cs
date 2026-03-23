@@ -86,9 +86,9 @@ public class MFDTargetPage : MFDPage
             }
         }
 
-        display.DrawVerticalText(" Λ| ", 5, 0, Color.white);
+        display.DrawVerticalText(" ^| ", 5, 0, Color.white);
         display.DrawVerticalText(" |V ", 15, 0, Color.white);
-        display.DrawVerticalText(" Λ| ", 5, MFD.TEXT_COLUMNS - 1, Color.white);
+        display.DrawVerticalText(" ^| ", 5, MFD.TEXT_COLUMNS - 1, Color.white);
         display.DrawVerticalText(" |V ", 15, MFD.TEXT_COLUMNS - 1, Color.white);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
