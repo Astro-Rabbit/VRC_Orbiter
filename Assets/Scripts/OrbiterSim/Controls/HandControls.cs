@@ -263,7 +263,7 @@ public class HandControls : UdonSharpBehaviour
                 busy = true;
 
                 if (authorityManager != null)
-                    authorityManager.RequestTakeControl(seatId);
+                    authorityManager.NotifySeatManipulationStarted(seatId);
 
                 if (busy)
                 {
@@ -290,7 +290,7 @@ public class HandControls : UdonSharpBehaviour
                 busy = true;
 
                 if (authorityManager != null)
-                    authorityManager.RequestTakeControl(seatId);
+                    authorityManager.NotifySeatManipulationStarted(seatId);
 
                 if (busy)
                 {
@@ -318,7 +318,7 @@ public class HandControls : UdonSharpBehaviour
                 busy = true;
 
                 if (authorityManager != null)
-                    authorityManager.RequestTakeControl(seatId);
+                    authorityManager.NotifySeatManipulationStarted(seatId);
 
                 if (busy)
                 {
@@ -349,11 +349,10 @@ public class HandControls : UdonSharpBehaviour
 
             objName = "";
             busy = false;
-
             if (!IsAnyPrimaryControlGrabbed())
             {
                 if (authorityManager != null)
-                    authorityManager.ReleaseControl(seatId);
+                    authorityManager.NotifySeatManipulationEnded(seatId);
             }
         }
 
@@ -942,7 +941,7 @@ public class HandControls : UdonSharpBehaviour
             joystickHandle.localRotation = Quaternion.Euler(
                 -z * maxTiltAngle,
                 0f,
-                y * maxTiltAngle
+                -y * maxTiltAngle
             );
         }
 
@@ -950,7 +949,7 @@ public class HandControls : UdonSharpBehaviour
         {
             twistGrip.localRotation = Quaternion.Euler(
                 0f,
-                -x * maxTwistAngle,
+                x * maxTwistAngle,
                 0f
             );
         }

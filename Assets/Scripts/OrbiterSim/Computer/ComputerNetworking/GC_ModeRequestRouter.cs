@@ -28,7 +28,8 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
     public Renderer[] lampRadialIn;
     public Renderer[] lampNormal;
     public Renderer[] lampAntiNormal;
-
+    public Renderer[] lampHoldHorizon;        // NEW
+    public Renderer[] lampPointNodeVector;
     public Renderer[] lampDockPointShipZAtPort;
     public Renderer[] lampDockAlignPorts;
 
@@ -116,6 +117,8 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
         SetLamp(lampRadialIn, false);
         SetLamp(lampNormal, false);
         SetLamp(lampAntiNormal, false);
+        SetLamp(lampHoldHorizon, false);      // NEW
+        SetLamp(lampPointNodeVector, false);  // NEW
 
         SetLamp(lampDockPointShipZAtPort, false);
         SetLamp(lampDockAlignPorts, false);
@@ -174,6 +177,16 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
             case GC_RuntimeState.PROG_RELVEL_RETRO:
                 SetLamp(lampPointAgainstRelVel, true);
                 break;
+
+            case GC_RuntimeState.PROG_HOLD_HORIZON:       // NEW
+                SetLamp(lampHoldHorizon, true);
+                break;
+
+            case GC_RuntimeState.PROG_POINT_NODE_VECTOR:  // NEW
+                SetLamp(lampPointNodeVector, true);
+                break;
+
+
         }
 
         // Docking modes use activeModeId directly
@@ -228,6 +241,8 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
     public void RequestHoldRadialIn()             { RouteToOwner(nameof(Owner_HoldRadialIn)); }
     public void RequestHoldNormal()               { RouteToOwner(nameof(Owner_HoldNormal)); }
     public void RequestHoldAntiNormal()           { RouteToOwner(nameof(Owner_HoldAntiNormal)); }
+    public void RequestHoldHorizon()               { RouteToOwner(nameof(Owner_HoldHorizon)); }       // NEW
+    public void RequestPointNodeVector()           { RouteToOwner(nameof(Owner_PointNodeVector)); }   // NEW
 
     public void RequestDockPointShipZAtPort()     { RouteToOwner(nameof(Owner_DockPointShipZAtPort)); }
     public void RequestDockAlignPorts()           { RouteToOwner(nameof(Owner_DockAlignPorts)); }
@@ -378,4 +393,23 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
         gc.API_Relative_ToggleKillVel();
         AfterStateChange();
     }
+
+
+    [NetworkCallable]
+    public void Owner_HoldHorizon()   // NEW
+    {
+        if (!HasAuthority() || gc == null) return;
+        gc.API_Attitude_HoldHorizon();
+        AfterStateChange();
+    }
+
+    [NetworkCallable]
+    public void Owner_PointNodeVector()   // NEW
+    {
+        if (!HasAuthority() || gc == null) return;
+        gc.API_Attitude_PointSelectedNodeVector(gc.defaultBodyAxisToPoint);
+        AfterStateChange();
+    }
+
+
 }

@@ -18,48 +18,98 @@ public class SOISwitchSystem : UdonSharpBehaviour
     public bool log = false;
 
     // returns true if a switch is requested this tick
-    public bool Evaluate(out byte newPrimaryId, out double distToMoon, out double rSOI)
+    public bool Evaluate(out byte newPrimaryId, out double triggerDistance, out double triggerSOI)
     {
         newPrimaryId = 0;
-        distToMoon = 0.0;
-        rSOI = 0.0;
+        triggerDistance = 0.0;
+        triggerSOI = 0.0;
 
         if (!enableSwitching) return false;
         if (bodies == null || craft == null) return false;
 
+        byte sunId   = bodies.sunId;
         byte earthId = bodies.earthId;
         byte moonId  = bodies.moonId;
 
-        // Moon position (heliocentric inertial)
-        double mx, my, mz;
-        bodies.GetBodyPos(moonId, out mx, out my, out mz);
-
-        // Craft distance to Moon
-        double dx = craft.rx - mx;
-        double dy = craft.ry - my;
-        double dz = craft.rz - mz;
-        distToMoon = Math.Sqrt(dx*dx + dy*dy + dz*dz);
-
-        rSOI = bodies.GetSOIRadius(moonId);
-        if (rSOI <= 0.0) return false;
-
-        double enter = rSOI - hysteresisM;
-        double exit  = rSOI + hysteresisM;
-
         byte currentPrimary = craft.primaryBodyId;
 
-        if (currentPrimary != moonId && distToMoon < enter)
+        double dEarth = bodies.GetCraftDistanceToBody(earthId, craft);
+        double dMoon  = bodies.GetCraftDistanceToBody(moonId, craft);
+
+        double rEarthSOI = bodies.GetSOIRadius(earthId);
+        double rMoonSOI  = bodies.GetSOIRadius(moonId);
+
+        double earthEnter = rEarthSOI - hysteresisM;
+        double earthExit  = rEarthSOI + hysteresisM;
+
+        double moonEnter = rMoonSOI - hysteresisM;
+        double moonExit  = rMoonSOI + hysteresisM;
+
+        // ---------------------------------------------------------
+        // Priority 1: enter Moon if close enough and not already Moon
+        // This should win over Earth because Moon SOI is nested inside Earth SOI.
+        // ---------------------------------------------------------
+        if (currentPrimary != moonId && rMoonSOI > 0.0 && dMoon < moonEnter)
         {
             newPrimaryId = moonId;
-            if (log) Debug.Log($"[SOI] Request Earth->Moon dMoon={distToMoon:F0} enter={enter:F0}");
+            triggerDistance = dMoon;
+            triggerSOI = rMoonSOI;
+
+            if (log) Debug.Log($"[SOI] Request -> Moon dMoon={dMoon:F0} enter={moonEnter:F0}");
             return true;
         }
 
-        if (currentPrimary == moonId && distToMoon > exit)
+        // ---------------------------------------------------------
+        // If currently Moon, check Moon exit first.
+        // On exit from Moon, go to Earth.
+        // ---------------------------------------------------------
+        if (currentPrimary == moonId)
         {
-            newPrimaryId = earthId;
-            if (log) Debug.Log($"[SOI] Request Moon->Earth dMoon={distToMoon:F0} exit={exit:F0}");
-            return true;
+            if (rMoonSOI > 0.0 && dMoon > moonExit)
+            {
+                newPrimaryId = earthId;
+                triggerDistance = dMoon;
+                triggerSOI = rMoonSOI;
+
+                if (log) Debug.Log($"[SOI] Request Moon->Earth dMoon={dMoon:F0} exit={moonExit:F0}");
+                return true;
+            }
+
+            return false;
+        }
+
+        // ---------------------------------------------------------
+        // Sun/Earth switching
+        // ---------------------------------------------------------
+        if (currentPrimary == sunId)
+        {
+            if (rEarthSOI > 0.0 && dEarth < earthEnter)
+            {
+                newPrimaryId = earthId;
+                triggerDistance = dEarth;
+                triggerSOI = rEarthSOI;
+
+                if (log) Debug.Log($"[SOI] Request Sun->Earth dEarth={dEarth:F0} enter={earthEnter:F0}");
+                return true;
+            }
+
+            return false;
+        }
+
+        if (currentPrimary == earthId)
+        {
+            // Moon entry already handled above.
+            if (rEarthSOI > 0.0 && dEarth > earthExit)
+            {
+                newPrimaryId = sunId;
+                triggerDistance = dEarth;
+                triggerSOI = rEarthSOI;
+
+                if (log) Debug.Log($"[SOI] Request Earth->Sun dEarth={dEarth:F0} exit={earthExit:F0}");
+                return true;
+            }
+
+            return false;
         }
 
         return false;

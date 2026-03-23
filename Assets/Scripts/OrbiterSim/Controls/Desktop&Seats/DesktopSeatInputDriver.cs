@@ -21,9 +21,6 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
     [Tooltip("Set true while the local desktop user is seated in this seat.")]
     public bool seatSessionActive = false;
 
-    [Tooltip("True while desktop controls are armed/engaged for this seat.")]
-    public bool controlsEngaged = false;
-
     [Header("Desktop Input Inversion")]
     public bool invertPitch = false;
     public bool invertYaw = false;
@@ -86,6 +83,8 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
     [HideInInspector] public float transY;
     [HideInInspector] public float transZ;
 
+    [HideInInspector] public bool desktopManipulating = false;
+
     private bool _wasDrivingVisuals = false;
     private bool _lastPublishedClaimed = false;
     private bool _lastPublishedActiveSeat = false;
@@ -103,39 +102,30 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
 
         if (local.IsUserInVR())
         {
-            if (controlsEngaged || _wasDrivingVisuals)
-            {
-                InternalReleaseControls();
-            }
+            ForceStopDesktopManipulation();
             return;
         }
 
         if (!seatSessionActive)
         {
-            if (controlsEngaged || _wasDrivingVisuals)
-            {
-                InternalReleaseControls();
-            }
-            else if (manualDraft != null)
-            {
-                manualDraft.Clear();
-            }
-            return;
-        }
-
-        if (!controlsEngaged)
-        {
-            ClearTransientInputsOnly();
-
-            if (manualDraft != null)
-                manualDraft.Clear();
-
-            PublishOrReleaseVisualState();
+            ForceStopDesktopManipulation();
             return;
         }
 
         ReadDesktopInputs();
-        WriteManualDraft();
+
+        bool anyInputActive = ComputeAnyInputActive();
+        UpdateManipulationState(anyInputActive);
+
+        bool canWrite =
+            authorityManager != null &&
+            authorityManager.SeatCanWriteInput(seatId);
+
+        if (canWrite)
+            WriteManualDraft();
+        else if (manualDraft != null)
+            manualDraft.Clear();
+
         PublishOrReleaseVisualState();
     }
 
@@ -150,75 +140,17 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
         seatSessionActive = active;
 
         if (!seatSessionActive)
-        {
-            InternalReleaseControls();
-        }
-    }
-
-    // ---------------------------------------------------------------------
-    // Control engagement
-    // ---------------------------------------------------------------------
-
-    public void ToggleControlsEngaged()
-    {
-        if (controlsEngaged)
-        {
-            InternalReleaseControls();
-            return;
-        }
-
-        if (!CanEngageDesktopControls()) return;
-
-        controlsEngaged = true;
-
-        if (authorityManager != null)
-            authorityManager.RequestTakeControl(seatId);
-    }
-
-    public void EngageControls()
-    {
-        if (!CanEngageDesktopControls()) return;
-        if (controlsEngaged) return;
-
-        controlsEngaged = true;
-
-        if (authorityManager != null)
-            authorityManager.RequestTakeControl(seatId);
-    }
-
-    public void ReleaseControls()
-    {
-        InternalReleaseControls();
-    }
-
-    private void InternalReleaseControls()
-    {
-        controlsEngaged = false;
-
-        if (authorityManager != null)
-            authorityManager.ReleaseControl(seatId);
-
-        ClearAllLocalInputs();
-        PublishOrReleaseVisualState();
-    }
-
-    public bool CanEngageDesktopControls()
-    {
-        VRCPlayerApi local = Networking.LocalPlayer;
-        if (local == null) return false;
-        if (local.IsUserInVR()) return false;
-        if (!seatSessionActive) return false;
-        return true;
+            ForceStopDesktopManipulation();
     }
 
     public bool IsDrivingSeatVisuals()
     {
-        return seatSessionActive && controlsEngaged;
+        return seatSessionActive && desktopManipulating;
     }
 
-    public bool IsControlsEngaged()
+    public bool IsManipulating()
     {
-        return controlsEngaged;
+        return desktopManipulating;
     }
 
     // ---------------------------------------------------------------------
@@ -282,8 +214,66 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
         ThrottleValue = Mathf.Clamp01(ThrottleValue);
     }
 
+    private bool ComputeAnyInputActive()
+    {
+        bool attitudeActive =
+            Mathf.Abs(inputX) > manualDeadzone ||
+            Mathf.Abs(inputY) > manualDeadzone ||
+            Mathf.Abs(inputZ) > manualDeadzone;
+
+        bool translationActive =
+            Mathf.Abs(transX) > translateDeadzone ||
+            Mathf.Abs(transY) > translateDeadzone ||
+            Mathf.Abs(transZ) > translateDeadzone;
+
+        bool throttleKeyActive =
+            Input.GetKey(throttleUpKey) ||
+            Input.GetKey(throttleDownKey) ||
+            Input.GetKeyDown(throttleFullKey) ||
+            Input.GetKeyDown(throttleCutKey);
+
+        return attitudeActive || translationActive || throttleKeyActive;
+    }
+
+    private void UpdateManipulationState(bool anyInputActive)
+    {
+        if (anyInputActive && !desktopManipulating)
+        {
+            desktopManipulating = true;
+
+            if (authorityManager != null)
+                authorityManager.NotifySeatManipulationStarted(seatId);
+        }
+        else if (!anyInputActive && desktopManipulating)
+        {
+            desktopManipulating = false;
+
+            if (authorityManager != null)
+                authorityManager.NotifySeatManipulationEnded(seatId);
+        }
+    }
+
+    private void ForceStopDesktopManipulation()
+    {
+        bool hadVisuals = _wasDrivingVisuals;
+        bool wasManipulating = desktopManipulating;
+
+        desktopManipulating = false;
+
+        if (wasManipulating && authorityManager != null)
+            authorityManager.NotifySeatManipulationEnded(seatId);
+
+        ClearAllLocalInputs();
+
+        if (manualDraft != null)
+            manualDraft.Clear();
+
+        if (hadVisuals || wasManipulating)
+            PublishOrReleaseVisualState();
+    }
+
     // ---------------------------------------------------------------------
-    // Manual draft write
+    // Output -> seat-local manual draft
     // ---------------------------------------------------------------------
 
     private void WriteManualDraft()
@@ -300,11 +290,15 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
             Mathf.Abs(transY) > translateDeadzone ||
             Mathf.Abs(transZ) > translateDeadzone;
 
-        bool thrActive = ThrottleValue > manualDeadzone;
+        bool thrActive =
+            Input.GetKey(throttleUpKey) ||
+            Input.GetKey(throttleDownKey) ||
+            Input.GetKeyDown(throttleFullKey) ||
+            Input.GetKeyDown(throttleCutKey) ||
+            ThrottleValue > manualDeadzone;
 
         manualDraft.manualAttitudeActive = attActive;
         manualDraft.manualThrottleActive = (thrActive || transActive);
-
         manualDraft.useRateControl = true;
 
         if (!attActive)
@@ -326,10 +320,12 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
             manualDraft.tauCmd_B = Vector3.zero;
         }
 
-        manualDraft.mainThrottle01 = thrActive ? ThrottleValue : 0f;
+        manualDraft.mainThrottle01 = thrActive ? Mathf.Clamp01(ThrottleValue) : 0f;
         manualDraft.hoverThrottle01 = 0f;
 
-        Vector3 tCmd01 = transActive ? new Vector3(transX, transY, transZ) : Vector3.zero;
+        Vector3 tCmd01 = new Vector3(transX, transY, transZ);
+        if (!transActive) tCmd01 = Vector3.zero;
+
         manualDraft.translateCmd_B = new Vector3(
             tCmd01.x * maxTranslateForce_B.x,
             tCmd01.y * maxTranslateForce_B.y,
@@ -341,7 +337,27 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
     }
 
     // ---------------------------------------------------------------------
-    // Visual net publish
+    // Local cleanup
+    // ---------------------------------------------------------------------
+
+    private void ClearTransientInputsOnly()
+    {
+        inputX = 0f;
+        inputY = 0f;
+        inputZ = 0f;
+        transX = 0f;
+        transY = 0f;
+        transZ = 0f;
+    }
+
+    private void ClearAllLocalInputs()
+    {
+        ClearTransientInputsOnly();
+        ThrottleValue = 0f;
+    }
+
+    // ---------------------------------------------------------------------
+    // Visual state
     // ---------------------------------------------------------------------
 
     private void PublishOrReleaseVisualState()
@@ -350,71 +366,59 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
 
         if (localDrivingVisuals)
         {
+            EnsureLocalOwnershipOfVisualNet();
+
             if (controlsNet != null)
             {
-                EnsureLocalOwnershipOfVisualNet();
-
-                bool activeSeatForVisuals = false;
-                if (authorityManager != null)
-                    activeSeatForVisuals = authorityManager.SeatHasControl(seatId);
-
-                bool claimed = controlsEngaged;
+                bool activeSeat = (authorityManager != null && authorityManager.SeatHasControl(seatId));
 
                 controlsNet.SetLocalVisualState(
                     inputX, inputY, inputZ,
                     ThrottleValue,
                     transX, transY, transZ,
-                    claimed,
                     true,
-                    activeSeatForVisuals
+                    true,
+                    activeSeat
                 );
 
-                bool forceNow = false;
+                bool claimChanged = (_lastPublishedClaimed != true);
+                bool activeChanged = (_lastPublishedActiveSeat != activeSeat);
+                bool drivingEdge = !_wasDrivingVisuals;
 
-                if (!_wasDrivingVisuals)
-                    forceNow = true;
-
-                if (_lastPublishedClaimed != claimed)
-                    forceNow = true;
-
-                if (_lastPublishedActiveSeat != activeSeatForVisuals)
-                    forceNow = true;
-
-                if (forceNow)
+                if (drivingEdge || claimChanged || activeChanged || controlsNet.HasPendingVisualChange())
                     controlsNet.ForcePublish();
 
-                _lastPublishedClaimed = claimed;
-                _lastPublishedActiveSeat = activeSeatForVisuals;
+                _lastPublishedClaimed = true;
+                _lastPublishedActiveSeat = activeSeat;
             }
-
-            _wasDrivingVisuals = true;
-            return;
         }
-
-        if (_wasDrivingVisuals && controlsNet != null)
+        else
         {
-            EnsureLocalOwnershipOfVisualNet();
+            if (_wasDrivingVisuals)
+            {
+                EnsureLocalOwnershipOfVisualNet();
 
-            bool activeSeatForVisuals = false;
-            if (authorityManager != null)
-                activeSeatForVisuals = authorityManager.SeatHasControl(seatId);
+                if (controlsNet != null)
+                {
+                    bool activeSeat = (authorityManager != null && authorityManager.SeatHasControl(seatId));
 
-            controlsNet.SetLocalVisualState(
-                0f, 0f, 0f,
-                ThrottleValue,
-                0f, 0f, 0f,
-                false,
-                false,
-                activeSeatForVisuals
-            );
+                    controlsNet.SetLocalVisualState(
+                        0f, 0f, 0f,
+                        0f,
+                        0f, 0f, 0f,
+                        false,
+                        false,
+                        activeSeat
+                    );
+                    controlsNet.ForcePublish();
 
-            controlsNet.ForcePublish();
-
-            _lastPublishedClaimed = false;
-            _lastPublishedActiveSeat = activeSeatForVisuals;
+                    _lastPublishedClaimed = false;
+                    _lastPublishedActiveSeat = activeSeat;
+                }
+            }
         }
 
-        _wasDrivingVisuals = false;
+        _wasDrivingVisuals = localDrivingVisuals;
     }
 
     private void EnsureLocalOwnershipOfVisualNet()
@@ -424,35 +428,7 @@ public class DesktopSeatInputDriver : UdonSharpBehaviour
         VRCPlayerApi local = Networking.LocalPlayer;
         if (local == null) return;
 
-        if (!Networking.IsOwner(local, controlsNet.gameObject))
+        if (!Networking.IsOwner(controlsNet.gameObject))
             Networking.SetOwner(local, controlsNet.gameObject);
-    }
-
-    // ---------------------------------------------------------------------
-    // Clear helpers
-    // ---------------------------------------------------------------------
-
-    public void ForceReleaseAllControls()
-    {
-        InternalReleaseControls();
-    }
-
-    private void ClearTransientInputsOnly()
-    {
-        inputX = 0f;
-        inputY = 0f;
-        inputZ = 0f;
-
-        transX = 0f;
-        transY = 0f;
-        transZ = 0f;
-    }
-
-    private void ClearAllLocalInputs()
-    {
-        ClearTransientInputsOnly();
-
-        if (manualDraft != null)
-            manualDraft.Clear();
     }
 }

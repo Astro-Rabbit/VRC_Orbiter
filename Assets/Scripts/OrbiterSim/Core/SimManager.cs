@@ -532,12 +532,12 @@ public class SimManager : UdonSharpBehaviour
             // Propellant bookkeeping
             if (craft != null && actuation != null)
             {
-                double dProp = actuation.mainMdot_kgps * h;
-                if (dProp > 0.0)
-                {
-                    craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
-                    craft.RecomputeMass();
-                }
+                // double dProp = actuation.mainMdot_kgps * h;
+                // if (dProp > 0.0)
+                // {
+                //     craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
+                //     craft.RecomputeMass();
+                // }
             }
 
             // Owner translation integration
