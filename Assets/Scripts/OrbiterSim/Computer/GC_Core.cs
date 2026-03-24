@@ -1,7 +1,10 @@
 ﻿using UdonSharp;
 using UnityEngine;
 using System;
+using VRC.SDKBase;
 
+using VRC.SDK3.UdonNetworkCalling;
+using VRC.Udon.Common.Interfaces;
 /// <summary>
 /// GC_Core
 /// Guidance Computer core loop (V1):
@@ -36,6 +39,7 @@ public class GC_Core : UdonSharpBehaviour
     [Header("State Containers (owned by GC_Core)")]
     public GuidanceNavCoreState nav;
     public GC_RuntimeState runtime;
+    public GC_RuntimeNetState runtimeNet;
     public GC_ModeParams modeParams;
     public GC_ManualDraft manual;
     public GC_ActuatorOverrideState overrides;
@@ -1321,8 +1325,17 @@ public class GC_Core : UdonSharpBehaviour
                 _execWritesThr = true;
                 _execMainT = burnThrottle01;
 
+                float dvDelivered;
+                if (TryComputeDvDeliveredThisTick(_execMainT, out dvDelivered))
+                {
+                    ConsumeNodeRemainingDv(idx, dvDelivered);
+                }
+
                 if (nowT >= _exec_tBurnEnd)
                 {
+                    if (plan.remainingDV_mps != null && idx >= 0 && idx < plan.remainingDV_mps.Length)
+                        plan.remainingDV_mps[idx] = 0f;
+
                     runtime.executorPhase = GC_RuntimeState.EXEC_PHASE_POST;
                     runtime.executorStartTime = nowT;
                 }
@@ -1411,6 +1424,13 @@ public class GC_Core : UdonSharpBehaviour
 
         plan.status[idx] = NodePlanState.STATUS_ACTIVE;
         plan.activeIndex = idx;
+
+        if (plan.remainingDV_mps != null && idx >= 0 && idx < plan.remainingDV_mps.Length &&
+            plan.dVmag_mps != null && idx >= 0 && idx < plan.dVmag_mps.Length)
+        {
+            plan.remainingDV_mps[idx] = plan.dVmag_mps[idx];
+        }
+
     }
 
     private void FinishExecutor(int idx, double nowT)
@@ -1695,6 +1715,132 @@ public class GC_Core : UdonSharpBehaviour
         }
     }
 
+
+    public bool API_Node_TryGetTimeToGo(int i, out double tGoSec)
+    {
+        tGoSec = 0.0;
+
+        if (plan == null || nav == null) return false;
+        if (i < 0 || i >= plan.maxNodes) return false;
+
+        if (plan.status == null || i >= plan.status.Length) return false;
+        if (plan.status[i] == NodePlanState.STATUS_EMPTY) return false;
+
+        double nowT = nav.t;
+
+        if (plan.trigType[i] == NodePlanState.TRIG_TIME)
+        {
+            tGoSec = plan.triggerTime[i] - nowT;
+            return true;
+        }
+
+        if (plan.trigType[i] == NodePlanState.TRIG_TRUE_ANOMALY)
+        {
+            double dt;
+            bool ok = OrbitHelpers.TryTimeToTrueAnomaly(
+                nav.a,
+                nav.e,
+                nav.muPrimary,
+                nav.nuRad,
+                plan.triggerNuRad[i],
+                eTol,
+                out dt
+            );
+
+            if (!ok) return false;
+
+            tGoSec = dt;
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool TryComputeDvDeliveredThisTick(float throttle01, out float dvDelivered_mps)
+    {
+        dvDelivered_mps = 0f;
+
+        if (throttle01 <= 1e-4f) return true;
+        if (nav == null) return false;
+        if (nav.dt <= 0.0) return true;
+        if (craft == null) return false;
+
+        float TmaxN, IspSec;
+        if (!TryGetMainCapability(out TmaxN, out IspSec)) return false;
+
+        double m0 = craft.massKg;
+        if (m0 <= 1.0) return false;
+
+        const double g0 = 9.80665;
+        double ve = (double)IspSec * g0;
+        if (ve <= 1e-6) return false;
+
+        double thrustN = (double)TmaxN * Mathf.Clamp01(throttle01);
+        if (thrustN <= 1e-6) return true;
+
+        double mdot = thrustN / ve;
+        if (mdot <= 1e-9) return false;
+
+        double dt = nav.dt;
+        double propUsed = mdot * dt;
+
+        double mpAvail = craft.propMassKg;
+        if (mpAvail < 0.0) mpAvail = 0.0;
+        if (propUsed > mpAvail) propUsed = mpAvail;
+
+        // Prevent invalid log if mass gets too low.
+        double m1 = m0 - propUsed;
+        if (m1 < 1.0) m1 = 1.0;
+
+        if (m1 >= m0) return true;
+
+        double dv = ve * System.Math.Log(m0 / m1);
+        if (dv < 0.0) dv = 0.0;
+
+        dvDelivered_mps = (float)dv;
+        return true;
+    }
+
+    private void ConsumeNodeRemainingDv(int idx, float dvDelivered_mps)
+    {
+        if (plan == null) return;
+        if (idx < 0 || idx >= plan.maxNodes) return;
+        if (plan.remainingDV_mps == null || idx >= plan.remainingDV_mps.Length) return;
+
+        float rem = plan.remainingDV_mps[idx];
+        rem -= Mathf.Max(0f, dvDelivered_mps);
+        if (rem < 0f) rem = 0f;
+        plan.remainingDV_mps[idx] = rem;
+    }
+    private bool IsValidNodeIndex(int i)
+    {
+        if (plan == null) return false;
+        if (i < 0 || i >= plan.maxNodes) return false;
+        if (plan.status == null || i >= plan.status.Length) return false;
+        return plan.status[i] != NodePlanState.STATUS_EMPTY;
+    }
+
+    private int FindFirstValidNodeIndex()
+    {
+        if (plan == null || plan.status == null) return -1;
+
+        int n = plan.maxNodes;
+        if (plan.status.Length < n) n = plan.status.Length;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (plan.status[i] != NodePlanState.STATUS_EMPTY)
+                return i;
+        }
+
+        return -1;
+    }
+
+    private bool HasGcAuthority()
+    {
+        return Networking.IsOwner(gameObject);
+    }
+
     // =====================================================================
     // Minimal API methods
     // =====================================================================
@@ -1816,7 +1962,14 @@ public class GC_Core : UdonSharpBehaviour
     public void API_Node_Select(byte nodeIndex)
     {
         if (modeParams == null) return;
-        modeParams.selectedNodeIndex = nodeIndex;
+
+        int idx = (int)nodeIndex;
+        if (!IsValidNodeIndex(idx)) return;
+
+        modeParams.selectedNodeIndex = (byte)idx;
+
+        if (runtimeNet != null)
+            runtimeNet.ForcePublish();
     }
 
     public void API_Node_SetAutoExecute(bool enabled)
@@ -1884,11 +2037,46 @@ public class GC_Core : UdonSharpBehaviour
     public void API_Node_Delete(int i)
     {
         if (plan == null) return;
+        if (!IsValidNodeIndex(i)) return;
+
+        bool wasSelected = false;
+        if (modeParams != null)
+            wasSelected = ((int)modeParams.selectedNodeIndex == i);
+
         plan.API_DeleteNode(i);
+
+        if (wasSelected && modeParams != null)
+        {
+            int fallback = FindFirstValidNodeIndex();
+            modeParams.selectedNodeIndex = (byte)((fallback >= 0) ? fallback : 0);
+
+            if (runtimeNet != null)
+                runtimeNet.ForcePublish();
+        }
+
         if (nodeNet != null)
             nodeNet.ForcePublish();
     }
 
+
+    [NetworkCallable]
+    public void Net_RequestSelectNode(int nodeIndex)
+    {
+        if (!HasGcAuthority()) return;
+        if (!IsValidNodeIndex(nodeIndex)) return;
+
+        API_Node_Select((byte)nodeIndex);
+    }
+
+    [NetworkCallable]
+    public void Net_RequestDeleteNode(int nodeIndex)
+    {
+        if (!HasGcAuthority()) return;
+        if (!IsValidNodeIndex(nodeIndex)) return;
+
+        API_Node_Delete(nodeIndex);
+    }
+        
     // =====================================================================
     // Docking Helper APIs
     // =====================================================================

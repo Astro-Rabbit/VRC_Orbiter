@@ -31,7 +31,8 @@ Shader "Unlit/MFDGraphicsShader"
             float _FontSdfEdge;
             float _FontSdfSoftness;
 
-            float4 fontUvs[127 - 32];
+            float4 atlasRects[127 - 32];
+            float4 charRects[127 - 32];
 
             uniform int charGrid[24 * 48];
             uniform float3 charColors[24 * 48];
@@ -196,14 +197,27 @@ Shader "Unlit/MFDGraphicsShader"
 
             float DrawGlyph(int c, float gx, float gy)
             {
-                float4 uvRect = fontUvs[c - 32];
+                // special case hack to be able to make ^ look like an upside down V for drawing arrows
+                if (c == 0x5E) {
+                    c = 0x56;
+                    gy = 1.0 - gy;
+                }
+
+                float4 atlasRect = atlasRects[c - 32];
+                float4 charRect = charRects[c - 32];
 
                 gy -= 0.1;
                 gy *= 1.2;
 
+                float cx = (gx - charRect.x) / charRect.z;
+                float cy = 1.0 - (charRect.y - gy)/charRect.w;
+                if (cx < 0 || cx > 1 || cy < 0 || cy > 1) {
+                    return 0.0;
+                }
+
                 float2 atlasUv;
-                atlasUv.x = lerp(uvRect.x, uvRect.z, gx);
-                atlasUv.y = lerp(uvRect.y, uvRect.w, gy);
+                atlasUv.x = lerp(atlasRect.x, atlasRect.z, cx);
+                atlasUv.y = lerp(atlasRect.y, atlasRect.w, cy);
 
                 float sdf = SampleFontSdf(atlasUv);
 
@@ -228,6 +242,10 @@ Shader "Unlit/MFDGraphicsShader"
 
                 int index = row*TEXT_COLUMNS + col;
                 int c = (int)charGrid[index];
+                if (c == 0) {
+                    c = 0x20; // space
+                }
+
                 float gx = input.uv.x*TEXT_COLUMNS - col;
                 float gy = (1.0 - input.uv.y)*TEXT_ROWS - row;
 
@@ -235,9 +253,6 @@ Shader "Unlit/MFDGraphicsShader"
                 if (glyph > 0.0) {
                     color = charColors[index] * glyph;
                 }
-
-                //float sdf = SampleFontSdf(input.uv);
-                //color = smoothstep(_FontSdfEdge - _FontSdfSoftness, _FontSdfEdge + _FontSdfSoftness, sdf);
 
                 fixed4 res = fixed4(color, 1.0);
                 // apply fog
