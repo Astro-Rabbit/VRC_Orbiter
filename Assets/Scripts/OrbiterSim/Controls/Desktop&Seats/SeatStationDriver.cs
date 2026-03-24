@@ -133,8 +133,6 @@ public class SeatStationDriver : UdonSharpBehaviour
         if (desktopInputDriver != null)
             desktopInputDriver.SetSeatSessionActive(false);
 
-        if (authorityManager != null)
-            authorityManager.ReleaseControl(seatId);
     }
 
     public void ExitSeat()
@@ -144,10 +142,7 @@ public class SeatStationDriver : UdonSharpBehaviour
         if (!_localInStation) return;
 
         if (desktopInputDriver != null)
-            desktopInputDriver.ReleaseControls();
-
-        if (authorityManager != null)
-            authorityManager.ReleaseControl(seatId);
+            desktopInputDriver.SetSeatSessionActive(false);
 
         station.ExitStation(local);
     }
@@ -158,8 +153,8 @@ public class SeatStationDriver : UdonSharpBehaviour
 
     public void ToggleSeatControlRequest()
     {
-        if (desktopInputDriver == null) return;
-        desktopInputDriver.ToggleControlsEngaged();
+        // No-op under the new model.
+        // Desktop authority is now driven by actual live input, not a toggle.
     }
 
     public bool LocalSeatHasControl()
@@ -171,22 +166,27 @@ public class SeatStationDriver : UdonSharpBehaviour
     public bool LocalSeatCanTakeControl()
     {
         if (!_localInStation) return false;
-        if (desktopInputDriver == null) return false;
-        if (!desktopInputDriver.CanEngageDesktopControls()) return false;
-        if (authorityManager == null) return false;
-        return authorityManager.SeatCanTakeControl(seatId);
+        return true;
     }
 
     public bool LocalSeatIsContested()
     {
         if (authorityManager == null) return false;
-        return authorityManager.SeatIsContested(seatId);
+
+        if (!authorityManager.SeatHasControl(seatId))
+            return false;
+
+        byte otherSeat = (seatId == CockpitAuthorityManager.SEAT_RIGHT)
+            ? CockpitAuthorityManager.SEAT_LEFT
+            : CockpitAuthorityManager.SEAT_RIGHT;
+
+        return authorityManager.SeatIsManipulatingLocal(otherSeat);
     }
 
     public bool LocalSeatIsRequesting()
     {
-        if (authorityManager == null) return false;
-        return authorityManager.SeatIsRequestingLocal(seatId);
+        if (desktopInputDriver == null) return false;
+        return desktopInputDriver.IsManipulating();
     }
 
     // ---------------------------------------------------------------------
@@ -335,7 +335,7 @@ public class SeatStationDriver : UdonSharpBehaviour
         if (desktopInputDriver == null) return false;
         if (authorityManager == null) return false;
 
-        return desktopInputDriver.IsControlsEngaged() && authorityManager.SeatHasControl(seatId);
+        return desktopInputDriver.IsManipulating() && authorityManager.SeatHasControl(seatId);
     }
     private void UpdateControlButtonLight()
     {
@@ -349,10 +349,10 @@ public class SeatStationDriver : UdonSharpBehaviour
 
         if (_localInStation)
         {
-            bool controlsEngaged = (desktopInputDriver != null && desktopInputDriver.IsControlsEngaged());
+            bool manipulating = (desktopInputDriver != null && desktopInputDriver.IsManipulating());
             bool actuallyHoldingControl = LocalDesktopActuallyHoldingControl();
             bool contested = LocalSeatIsContested();
-            bool canEngage = (desktopInputDriver != null && desktopInputDriver.CanEngageDesktopControls());
+            bool canInteract = _localInStation;
 
             if (actuallyHoldingControl && contested)
             {
@@ -363,7 +363,7 @@ public class SeatStationDriver : UdonSharpBehaviour
             {
                 c = controlHeldColor;
             }
-            else if (!controlsEngaged && canEngage)
+            else if (!manipulating && canInteract)
             {
                 c = controlAvailableColor;
             }

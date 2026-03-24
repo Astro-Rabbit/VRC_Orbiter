@@ -48,12 +48,17 @@ public class OrreryController : UdonSharpBehaviour
     public Transform moonTf;
     public Transform craftTf;
 
+    [Header("SOI Visual Transforms")]
+    public Transform earthSoiTf;
+    public Transform moonSoiTf;
+
     [Header("Show / Hide")]
     public bool showSun = true;
     public bool showEarth = true;
     public bool showMoon = true;
     public bool showCraft = true;
-
+    public bool showEarthSOI = true;
+    public bool showMoonSOI = true;
     [Header("Body Materials (optional runtime lighting drive)")]
     public Renderer earthRenderer;
     public Renderer moonRenderer;
@@ -61,6 +66,18 @@ public class OrreryController : UdonSharpBehaviour
     private bool _craftRenderersCached = false;
     private MaterialPropertyBlock _earthMPB;
     private MaterialPropertyBlock _moonMPB;
+
+
+    [Header("SOI Display")]
+    public bool soiUsePhysicalScale = true;
+    public float earthSoiScaleMultiplier = 1.0f;
+    public float moonSoiScaleMultiplier = 1.0f;
+    public float earthSoiMinDisplayDiameter = 0.0f;
+    public float moonSoiMinDisplayDiameter = 0.0f;
+
+    [Header("SOI Materials")]
+    public Renderer earthSoiRenderer;
+    public Renderer moonSoiRenderer;
 
     [Header("Volume Clipping")]
     public Renderer stencilVolumeRenderer;
@@ -598,6 +615,7 @@ public class OrreryController : UdonSharpBehaviour
         Quaternion qE_toFrame = Quaternion.Inverse(qFrameE);
 
         ApplyDynamicBodyScales();
+        ApplySOIVisuals(qE_toFrame);
 
         if (sunTf != null)
         {
@@ -914,7 +932,8 @@ public class OrreryController : UdonSharpBehaviour
         ApplyClipParamsToRenderer(earthRenderer, centerWorld, radiusWorld);
         ApplyClipParamsToRenderer(moonRenderer, centerWorld, radiusWorld);
         ApplyClipParamsToRenderer(orbitRibbonRenderer, centerWorld, radiusWorld);
-
+        ApplyClipParamsToRenderer(earthSoiRenderer, centerWorld, radiusWorld);
+        ApplyClipParamsToRenderer(moonSoiRenderer, centerWorld, radiusWorld);
         if (craftTf != null)
         {
             CacheCraftRenderers();
@@ -957,6 +976,41 @@ public class OrreryController : UdonSharpBehaviour
         mpb.SetVector("_ClipCenterWorld", new Vector4(centerWorld.x, centerWorld.y, centerWorld.z, 0f));
         mpb.SetFloat("_ClipRadiusWorld", radiusWorld);
         r.SetPropertyBlock(mpb);
+    }
+
+    private void ApplySOIVisuals(Quaternion qE_toFrame)
+    {
+        if (earthSoiTf != null)
+        {
+            earthSoiTf.gameObject.SetActive(showEarthSOI);
+            if (showEarthSOI)
+            {
+                double x, y, z;
+                GetBodyPosED(bodies.earthId, out x, out y, out z);
+                earthSoiTf.localPosition = ComputeDisplayPosition(x, y, z, qE_toFrame);
+                earthSoiTf.localRotation = Quaternion.identity;
+
+                double r = bodies.GetSOIRadius(bodies.earthId);
+                float d = GetDisplayedSOIDiameterUnity(r, earthSoiScaleMultiplier, earthSoiMinDisplayDiameter);
+                earthSoiTf.localScale = Vector3.one * d;
+            }
+        }
+
+        if (moonSoiTf != null)
+        {
+            moonSoiTf.gameObject.SetActive(showMoonSOI);
+            if (showMoonSOI)
+            {
+                double x, y, z;
+                GetBodyPosED(bodies.moonId, out x, out y, out z);
+                moonSoiTf.localPosition = ComputeDisplayPosition(x, y, z, qE_toFrame);
+                moonSoiTf.localRotation = Quaternion.identity;
+
+                double r = bodies.GetSOIRadius(bodies.moonId);
+                float d = GetDisplayedSOIDiameterUnity(r, moonSoiScaleMultiplier, moonSoiMinDisplayDiameter);
+                moonSoiTf.localScale = Vector3.one * d;
+            }
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -1008,6 +1062,15 @@ public class OrreryController : UdonSharpBehaviour
     {
         return a + (b - a) * (double)t;
     }
+
+
+    private float GetDisplayedSOIDiameterUnity(double soiRadiusMeters, float multiplier, float minDiameter)
+    {
+        float d = (float)(2.0 * soiRadiusMeters * _sceneScaleSmoothed) * multiplier;
+        if (d < minDiameter) d = minDiameter;
+        return d;
+    }
+
 
 #if UNITY_EDITOR
     private void OnValidate()
