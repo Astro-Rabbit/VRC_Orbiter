@@ -23,8 +23,22 @@ public class MFDTransferPage : MFDPage
     // for calculating position and velocity at burn time
     public ConicPropagator propagator;
 
-    [Header("GC / Upload")]
+    [Header("Auto / Lambert")]
     public GC_Core gc;
+    public int coarseBurnSamples = 16;
+    public int coarseEncounterSamples = 20;
+    public int refineTopCount = 2;
+    public int refinePasses = 2;
+    public int refineBurnSamples = 7;
+    public int refineEncounterSamples = 7;
+    public int coarseSolvesPerFrame = 4;
+    public int refineSolvesPerFrame = 2;
+
+    public double burnLeadTimeSec = 30.0;
+    public double minTimeOfFlightSec = 120.0;
+    public double burnSearchMaxSec = 21600.0;      // 6 hr
+    public double encounterSearchMaxSec = 21600.0; // 6 hr
+    public double dvCapMps = 1000.0;
 
     [Header("Display Data")]
     public bool hasTarget = false;
@@ -54,49 +68,18 @@ public class MFDTransferPage : MFDPage
     public double meetDist2;
     public double meetOop2;
 
-    [Header("Manual State")]
+    [Header("State")]
     [UdonSynced] public int stepSize = DEFAULT_STEP_SIZE;
     [UdonSynced] public double burnTime;
     [UdonSynced] public double burnDv;
 
-    [Header("Auto Solver - Config")]
-    public int coarseBurnSamples = 24;
-    public int coarseDvSamples = 17;
-    public int coarseArrivalSamples = 24;
-    public int refineSamplesBurn = 7;
-    public int refineSamplesDv = 7;
-    public int refineSamplesArrival = 16;
-    public int refinePasses = 2;
-    public int solverJobsPerFrame = 2;
-
-    public double autoLeadTimeSec = 60.0;
-    public double autoMinTransferSec = 120.0;
-    public double autoHardCapSec = 21600.0;      // 6 hr
-    public double autoDvCapMps = 500.0;
-    public double planeMismatchDegLimit = 10.0;
-    public double acceptMissMeters = 500000.0;   // 500 km acceptance cap
-
-    public double scoreDvWeight = 50.0;
-    public double scoreTimeWeight = 0.01;
-
-    [Header("Auto Solver - Status")]
-    public bool autoBusy = false;
+    [Header("Auto State (read-only)")]
     public byte autoStatus = AUTO_IDLE;
-    public bool autoShowSolution = false;
-
-    [Header("Auto Candidate")]
     public bool autoValid = false;
-    public double autoBurnTime;
-    public double autoEncounterTime;
-    public double autoBurnDv;
+    public double autoBurnTime = 0.0;
+    public double autoEncounterTime = 0.0;
     public Vector3 autoDvE = Vector3.zero;
-    public double autoDvMag;
-    public double autoMissMeters;
-    public double autoScore;
-
-    // Internal active display/manual-or-auto selector
-    private double activeBurnTime;
-    private double activeBurnDv;
+    public float autoDvMag = 0.0f;
 
     private double calcBurnTime;
     private double stepRatio;
@@ -108,69 +91,61 @@ public class MFDTransferPage : MFDPage
     private const int MIN_STEP_SIZE = -10;
     private const int DEFAULT_STEP_SIZE = -5;
 
-    // Auto status codes
     private const byte AUTO_IDLE = 0;
-    private const byte AUTO_BUSY_COARSE = 1;
-    private const byte AUTO_BUSY_REFINE = 2;
+    private const byte AUTO_COARSE = 1;
+    private const byte AUTO_REFINE = 2;
     private const byte AUTO_READY = 3;
-    private const byte AUTO_FAIL_NO_TARGET = 10;
-    private const byte AUTO_FAIL_PRIMARY_MISMATCH = 11;
-    private const byte AUTO_FAIL_INVALID_SOURCE = 12;
-    private const byte AUTO_FAIL_INVALID_TARGET = 13;
-    private const byte AUTO_FAIL_PLANE_MISMATCH = 14;
-    private const byte AUTO_FAIL_NO_SOLUTION = 15;
-    private const byte AUTO_UPLOADED = 20;
+    private const byte AUTO_PLAN = 4;
+    private const byte AUTO_NONE = 5;
+    private const byte AUTO_ERR = 6;
 
-    // Progressive solver phase
-    private byte solverPhase = 0;
     private const byte PHASE_IDLE = 0;
     private const byte PHASE_COARSE = 1;
     private const byte PHASE_REFINE = 2;
     private const byte PHASE_FINALIZE = 3;
 
-    // Search ranges
-    private double solveNow;
-    private double solveBurnStart;
-    private double solveBurnEnd;
-    private double solveArrivalCap;
+    private byte solverPhase = PHASE_IDLE;
+    private bool solverBusy = false;
 
-    // Coarse loop indices
+    private double solveNow = 0.0;
+    private double solveMu = 0.0;
+    private byte solvePrimaryBodyId = 0;
+    private double solveBurnStart = 0.0;
+    private double solveBurnEnd = 0.0;
+    private double solveMaxEncounterDt = 0.0;
+    private double solveSrcEpoch = Double.NegativeInfinity;
+    private double solveTgtEpoch = Double.NegativeInfinity;
+
     private int coarseBurnIndex = 0;
-    private int coarseDvIndex = 0;
+    private int coarseEncounterIndex = 0;
 
-    // Best coarse candidates (top 3)
-    private const int TOP_COUNT = 3;
-    private double[] topScore = new double[TOP_COUNT];
-    private double[] topBurnTime = new double[TOP_COUNT];
-    private double[] topEncounterTime = new double[TOP_COUNT];
-    private double[] topBurnDv = new double[TOP_COUNT];
-    private Vector3[] topDvE = new Vector3[TOP_COUNT];
-    private double[] topMiss = new double[TOP_COUNT];
-
-    // Refine state
     private int refineCandidateIndex = 0;
     private int refinePassIndex = 0;
     private int refineBurnIndex = 0;
-    private int refineDvIndex = 0;
+    private int refineEncounterIndex = 0;
+    private double refineCenterBurn = 0.0;
+    private double refineCenterEncounter = 0.0;
+    private double refineBurnHalfWindow = 0.0;
+    private double refineEncounterHalfWindow = 0.0;
 
-    private double refineCenterBurnTime;
-    private double refineCenterBurnDv;
-    private double refineWindowBurnTime;
-    private double refineWindowDv;
+    private bool bestValid = false;
+    private double bestScore = 0.0;
+    private double bestBurnTime = 0.0;
+    private double bestEncounterTime = 0.0;
+    private Vector3 bestDvE = Vector3.zero;
+    private float bestDvMag = 0.0f;
 
-    // Final best during solve
-    private bool solveBestValid = false;
-    private double solveBestScore;
-    private double solveBestBurnTime;
-    private double solveBestEncounterTime;
-    private double solveBestBurnDv;
-    private Vector3 solveBestDvE = Vector3.zero;
-    private double solveBestMissMeters;
+    private const int TOP_MAX = 2;
+    private double[] topScore = new double[TOP_MAX];
+    private double[] topBurnTime = new double[TOP_MAX];
+    private double[] topEncounterTime = new double[TOP_MAX];
+    private Vector3[] topDvE = new Vector3[TOP_MAX];
+    private float[] topDvMag = new float[TOP_MAX];
 
     void Start()
     {
         OnStepSizeChange();
-        InitTopArrays();
+        ClearTopCandidates();
     }
 
     void Update()
@@ -178,14 +153,12 @@ public class MFDTransferPage : MFDPage
         if (tgt == null || tgt.conic == null) {
             hasTarget = false;
             meets = false;
-            if (autoBusy) {
-                AbortAutoSolve(AUTO_FAIL_NO_TARGET);
-            }
+            if (solverBusy) AbortAutoSolve(AUTO_NONE);
             return;
         }
         hasTarget = true;
 
-        if (autoBusy) {
+        if (solverBusy) {
             StepAutoSolve();
         }
 
@@ -206,16 +179,8 @@ public class MFDTransferPage : MFDPage
             conicsUpdated = true;
         }
 
-        if (autoShowSolution && autoValid) {
-            activeBurnTime = autoBurnTime;
-            activeBurnDv = autoBurnDv;
-        } else {
-            activeBurnTime = burnTime;
-            activeBurnDv = burnDv;
-        }
-
-        calcBurnTime = Math.Max(activeBurnTime, clock.simTime);
-        if (burnChanged || conicsUpdated || (calcBurnTime != activeBurnTime && activeBurnDv > 0.0)) {
+        calcBurnTime = Math.Max(burnTime, clock.simTime);
+        if (burnChanged || conicsUpdated || (calcBurnTime != burnTime && burnDv > 0.0)) {
             burnChanged = false;
 
             propagator.conic = src.conic;
@@ -226,24 +191,24 @@ public class MFDTransferPage : MFDPage
             double dx = propagator.rel_vx;
             double dy = propagator.rel_vy;
             double dz = propagator.rel_vz;
-
             double mag = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-            if (mag <= 1e-12) {
-                dx = 1.0;
-                dy = 0.0;
-                dz = 0.0;
-            } else {
+
+            if (mag > 1e-12) {
                 dx /= mag;
                 dy /= mag;
                 dz /= mag;
+            } else {
+                dx = 1.0;
+                dy = 0.0;
+                dz = 0.0;
             }
 
             fitter.rx = propagator.rel_rx;
             fitter.ry = propagator.rel_ry;
             fitter.rz = propagator.rel_rz;
-            fitter.vx = propagator.rel_vx + dx * activeBurnDv;
-            fitter.vy = propagator.rel_vy + dy * activeBurnDv;
-            fitter.vz = propagator.rel_vz + dz * activeBurnDv;
+            fitter.vx = propagator.rel_vx + dx * burnDv;
+            fitter.vy = propagator.rel_vy + dy * burnDv;
+            fitter.vz = propagator.rel_vz + dz * burnDv;
 
             fitter.Fit(src.conic.primaryBodyId, calcBurnTime);
             tfr.UpdateInfo();
@@ -304,10 +269,10 @@ public class MFDTransferPage : MFDPage
         meetTime1 = tfr.GetTime(theta1);
         meetTime2 = tfr.GetTime(theta2);
 
-        double x, y, z;
-
         propagator.conic = tgt.conic;
+
         propagator.Evaluate(meetTime1);
+        double x, y, z;
         src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
         meetOop1 = z;
         x -= meetX1;
@@ -347,13 +312,10 @@ public class MFDTransferPage : MFDPage
                     BeginAutoSolve();
                     break;
                 case 4:
-                    UploadAutoNode();
+                    PlanAutoNode();
                     break;
             }
         } else if (side == ButtonSide.Top) {
-            autoShowSolution = false;
-
-            double baseSpeed;
             switch (num) {
                 case 0:
                     SetBurnTime(Math.Max(clock.simTime, burnTime) - stepRatio * src.t);
@@ -365,12 +327,10 @@ public class MFDTransferPage : MFDPage
                     ResetState();
                     break;
                 case 3:
-                    baseSpeed = Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a));
-                    SetBurnDV(burnDv - stepRatio * baseSpeed);
+                    SetBurnDV(burnDv - stepRatio * Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a)));
                     break;
                 case 4:
-                    baseSpeed = Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a));
-                    SetBurnDV(burnDv + stepRatio * baseSpeed);
+                    SetBurnDV(burnDv + stepRatio * Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a)));
                     break;
             }
         }
@@ -389,12 +349,6 @@ public class MFDTransferPage : MFDPage
 
         OnStepSizeChange();
         burnChanged = true;
-
-        autoShowSolution = false;
-        autoValid = false;
-        autoBusy = false;
-        autoStatus = AUTO_IDLE;
-        solverPhase = PHASE_IDLE;
     }
 
     public void SetStepSize(int newStepSize)
@@ -441,136 +395,145 @@ public class MFDTransferPage : MFDPage
         burnChanged = true;
     }
 
-    // -------------------------------------------------------------------------
+    // ============================================================
     // AUTO SOLVER
-    // -------------------------------------------------------------------------
+    // ============================================================
 
     public void BeginAutoSolve()
     {
-        autoValid = false;
-        autoShowSolution = false;
-        meets = false;
-
         if (src == null || src.conic == null || !src.conic.valid) {
-            AbortAutoSolve(AUTO_FAIL_INVALID_SOURCE);
+            AbortAutoSolve(AUTO_ERR);
             return;
         }
         if (tgt == null || tgt.conic == null || !tgt.conic.valid) {
-            AbortAutoSolve(AUTO_FAIL_INVALID_TARGET);
+            AbortAutoSolve(AUTO_NONE);
             return;
         }
         if (src.conic.primaryBodyId != tgt.conic.primaryBodyId) {
-            AbortAutoSolve(AUTO_FAIL_PRIMARY_MISMATCH);
+            AbortAutoSolve(AUTO_ERR);
             return;
         }
-        if (src.e >= 1.0 || tgt.e >= 1.0 || src.a <= 0.0 || tgt.a <= 0.0) {
-            AbortAutoSolve(AUTO_FAIL_INVALID_TARGET);
-            return;
-        }
-        if (!CheckPlaneCompatibility()) {
-            AbortAutoSolve(AUTO_FAIL_PLANE_MISMATCH);
-            return;
-        }
+
+        double srcPeriod = (src.t > 0.0) ? src.t : burnSearchMaxSec;
+        double tgtPeriod = (tgt.t > 0.0) ? tgt.t : burnSearchMaxSec;
+        double maxPeriod = Math.Max(srcPeriod, tgtPeriod);
 
         solveNow = clock.simTime;
+        solveMu = bodies.GetMu(src.conic.primaryBodyId);
+        solvePrimaryBodyId = src.conic.primaryBodyId;
+        solveBurnStart = solveNow + burnLeadTimeSec;
+        solveBurnEnd = solveNow + Math.Min(burnSearchMaxSec, 2.0 * maxPeriod);
+        solveMaxEncounterDt = Math.Min(encounterSearchMaxSec, 2.0 * maxPeriod);
 
-        double srcPeriod = src.t > 0.0 ? src.t : autoHardCapSec;
-        double tgtPeriod = tgt.t > 0.0 ? tgt.t : autoHardCapSec;
-
-        solveBurnStart = solveNow + autoLeadTimeSec;
-        solveBurnEnd = solveNow + Math.Min(autoHardCapSec, Math.Min(2.0 * srcPeriod, 2.0 * tgtPeriod));
-        solveArrivalCap = Math.Min(autoHardCapSec, 1.5 * Math.Max(srcPeriod, tgtPeriod));
+        solveSrcEpoch = src.conic.epochT0;
+        solveTgtEpoch = tgt.conic.epochT0;
 
         coarseBurnIndex = 0;
-        coarseDvIndex = 0;
-
+        coarseEncounterIndex = 0;
         refineCandidateIndex = 0;
         refinePassIndex = 0;
         refineBurnIndex = 0;
-        refineDvIndex = 0;
+        refineEncounterIndex = 0;
 
-        solveBestValid = false;
-        solveBestScore = 0.0;
-        solveBestBurnTime = 0.0;
-        solveBestEncounterTime = 0.0;
-        solveBestBurnDv = 0.0;
-        solveBestDvE = Vector3.zero;
-        solveBestMissMeters = 0.0;
+        bestValid = false;
+        bestScore = 0.0;
+        bestBurnTime = 0.0;
+        bestEncounterTime = 0.0;
+        bestDvE = Vector3.zero;
+        bestDvMag = 0.0f;
 
-        InitTopArrays();
+        autoValid = false;
+        autoBurnTime = 0.0;
+        autoEncounterTime = 0.0;
+        autoDvE = Vector3.zero;
+        autoDvMag = 0.0f;
 
-        autoBusy = true;
-        autoStatus = AUTO_BUSY_COARSE;
+        ClearTopCandidates();
+
+        solverBusy = true;
         solverPhase = PHASE_COARSE;
+        autoStatus = AUTO_COARSE;
     }
 
-    private void AbortAutoSolve(byte failCode)
+    private void AbortAutoSolve(byte failStatus)
     {
-        autoBusy = false;
-        autoValid = false;
-        autoShowSolution = false;
-        autoStatus = failCode;
+        solverBusy = false;
         solverPhase = PHASE_IDLE;
+        autoValid = false;
+        autoStatus = failStatus;
     }
 
     private void StepAutoSolve()
     {
-        int jobs = solverJobsPerFrame;
-        if (jobs < 1) jobs = 1;
+        if (src == null || tgt == null || src.conic == null || tgt.conic == null) {
+            AbortAutoSolve(AUTO_ERR);
+            return;
+        }
 
-        while (jobs > 0 && autoBusy) {
-            if (solverPhase == PHASE_COARSE) {
-                if (!StepCoarseJob()) {
+        if (src.conic.epochT0 != solveSrcEpoch || tgt.conic.epochT0 != solveTgtEpoch) {
+            AbortAutoSolve(AUTO_ERR);
+            return;
+        }
+
+        if (solverPhase == PHASE_COARSE) {
+            int n = coarseSolvesPerFrame;
+            if (n < 1) n = 1;
+
+            while (n > 0 && solverPhase == PHASE_COARSE) {
+                if (!StepCoarseSolve()) {
                     BeginRefinePhase();
+                    break;
                 }
-            } else if (solverPhase == PHASE_REFINE) {
-                if (!StepRefineJob()) {
-                    solverPhase = PHASE_FINALIZE;
-                }
-            } else if (solverPhase == PHASE_FINALIZE) {
-                FinalizeAutoSolve();
-            } else {
-                autoBusy = false;
-                solverPhase = PHASE_IDLE;
+                n--;
             }
-            jobs--;
+        } else if (solverPhase == PHASE_REFINE) {
+            int n = refineSolvesPerFrame;
+            if (n < 1) n = 1;
+
+            while (n > 0 && solverPhase == PHASE_REFINE) {
+                if (!StepRefineSolve()) {
+                    solverPhase = PHASE_FINALIZE;
+                    break;
+                }
+                n--;
+            }
+        }
+
+        if (solverPhase == PHASE_FINALIZE) {
+            FinalizeAutoSolve();
         }
     }
 
-    private bool StepCoarseJob()
+    private bool StepCoarseSolve()
     {
         if (coarseBurnSamples < 2) coarseBurnSamples = 2;
-        if (coarseDvSamples < 2) coarseDvSamples = 2;
+        if (coarseEncounterSamples < 2) coarseEncounterSamples = 2;
 
         if (coarseBurnIndex >= coarseBurnSamples) {
             return false;
         }
 
-        double burnFrac = (double)coarseBurnIndex / (double)(coarseBurnSamples - 1);
-        double dvFrac = (double)coarseDvIndex / (double)(coarseDvSamples - 1);
+        double tb = LerpSolveBurn(coarseBurnIndex, coarseBurnSamples);
+        double ta = LerpSolveEncounter(tb, coarseEncounterIndex, coarseEncounterSamples);
 
-        double tb = solveBurnStart + (solveBurnEnd - solveBurnStart) * burnFrac;
-        double dv = -autoDvCapMps + (2.0 * autoDvCapMps) * dvFrac;
-
-        EvaluateCandidate(tb, dv, coarseArrivalSamples, solveArrivalCap, out bool valid, out double score, out double encounterTime, out Vector3 dvE, out double missMeters);
+        EvaluateLambertCandidate(tb, ta, out bool valid, out float dvMag, out Vector3 dvE, out double score);
 
         if (valid) {
-            InsertTopCandidate(score, tb, encounterTime, dv, dvE, missMeters);
+            InsertTopCandidate(score, tb, ta, dvE, dvMag);
 
-            if (!solveBestValid || score < solveBestScore) {
-                solveBestValid = true;
-                solveBestScore = score;
-                solveBestBurnTime = tb;
-                solveBestEncounterTime = encounterTime;
-                solveBestBurnDv = dv;
-                solveBestDvE = dvE;
-                solveBestMissMeters = missMeters;
+            if (!bestValid || score < bestScore) {
+                bestValid = true;
+                bestScore = score;
+                bestBurnTime = tb;
+                bestEncounterTime = ta;
+                bestDvE = dvE;
+                bestDvMag = dvMag;
             }
         }
 
-        coarseDvIndex++;
-        if (coarseDvIndex >= coarseDvSamples) {
-            coarseDvIndex = 0;
+        coarseEncounterIndex++;
+        if (coarseEncounterIndex >= coarseEncounterSamples) {
+            coarseEncounterIndex = 0;
             coarseBurnIndex++;
         }
 
@@ -579,310 +542,412 @@ public class MFDTransferPage : MFDPage
 
     private void BeginRefinePhase()
     {
-        if (topScore[0] >= 1e299) {
-            AbortAutoSolve(AUTO_FAIL_NO_SOLUTION);
+        if (!HasTopCandidate()) {
+            AbortAutoSolve(AUTO_NONE);
             return;
         }
 
         refineCandidateIndex = 0;
         refinePassIndex = 0;
         refineBurnIndex = 0;
-        refineDvIndex = 0;
+        refineEncounterIndex = 0;
+        SetupRefineWindow();
 
-        SetupRefineCandidateWindow();
         solverPhase = PHASE_REFINE;
-        autoStatus = AUTO_BUSY_REFINE;
+        autoStatus = AUTO_REFINE;
     }
 
-    private void SetupRefineCandidateWindow()
+    private bool StepRefineSolve()
     {
-        refineCenterBurnTime = topBurnTime[refineCandidateIndex];
-        refineCenterBurnDv = topBurnDv[refineCandidateIndex];
-
-        double srcPeriod = src.t > 0.0 ? src.t : autoHardCapSec;
-        double burnSpanBase = Math.Max(60.0, 0.25 * srcPeriod);
-        double dvSpanBase = Math.Max(5.0, 0.25 * autoDvCapMps);
-
-        double shrink = Math.Pow(0.35, refinePassIndex);
-        refineWindowBurnTime = burnSpanBase * shrink;
-        refineWindowDv = dvSpanBase * shrink;
-    }
-
-    private bool StepRefineJob()
-    {
-        if (refineCandidateIndex >= TOP_COUNT || topScore[refineCandidateIndex] >= 1e299) {
+        if (refineCandidateIndex >= refineTopCount || refineCandidateIndex >= TOP_MAX) {
+            return false;
+        }
+        if (topScore[refineCandidateIndex] >= 1e299) {
             return false;
         }
 
-        double tb = SampleSymmetric(refineCenterBurnTime, refineWindowBurnTime, refineBurnSamplesIndex(), refineSamplesBurn);
-        double dv = SampleSymmetric(refineCenterBurnDv, refineWindowDv, refineDvSamplesIndex(), refineSamplesDv);
+        double tb = SampleCentered(refineCenterBurn, refineBurnHalfWindow, refineBurnIndex, refineBurnSamples);
+        double ta = SampleCentered(refineCenterEncounter, refineEncounterHalfWindow, refineEncounterIndex, refineEncounterSamples);
 
         if (tb < solveBurnStart) tb = solveBurnStart;
         if (tb > solveBurnEnd) tb = solveBurnEnd;
-        if (dv < -autoDvCapMps) dv = -autoDvCapMps;
-        if (dv > autoDvCapMps) dv = autoDvCapMps;
 
-        EvaluateCandidate(tb, dv, refineSamplesArrival, solveArrivalCap, out bool valid, out double score, out double encounterTime, out Vector3 dvE, out double missMeters);
+        double minEncounter = tb + minTimeOfFlightSec;
+        double maxEncounter = tb + solveMaxEncounterDt;
+        if (ta < minEncounter) ta = minEncounter;
+        if (ta > maxEncounter) ta = maxEncounter;
 
-        if (valid && (!solveBestValid || score < solveBestScore)) {
-            solveBestValid = true;
-            solveBestScore = score;
-            solveBestBurnTime = tb;
-            solveBestEncounterTime = encounterTime;
-            solveBestBurnDv = dv;
-            solveBestDvE = dvE;
-            solveBestMissMeters = missMeters;
+        EvaluateLambertCandidate(tb, ta, out bool valid, out float dvMag, out Vector3 dvE, out double score);
+
+        if (valid && (!bestValid || score < bestScore)) {
+            bestValid = true;
+            bestScore = score;
+            bestBurnTime = tb;
+            bestEncounterTime = ta;
+            bestDvE = dvE;
+            bestDvMag = dvMag;
         }
 
-        refineDvIndex++;
-        if (refineDvIndex >= refineSamplesDv) {
-            refineDvIndex = 0;
+        refineEncounterIndex++;
+        if (refineEncounterIndex >= refineEncounterSamples) {
+            refineEncounterIndex = 0;
             refineBurnIndex++;
-            if (refineBurnIndex >= refineSamplesBurn) {
+
+            if (refineBurnIndex >= refineBurnSamples) {
                 refineBurnIndex = 0;
                 refinePassIndex++;
+
                 if (refinePassIndex >= refinePasses) {
                     refinePassIndex = 0;
                     refineCandidateIndex++;
-                    if (refineCandidateIndex >= TOP_COUNT || topScore[refineCandidateIndex] >= 1e299) {
+                    if (refineCandidateIndex >= refineTopCount || refineCandidateIndex >= TOP_MAX || topScore[refineCandidateIndex] >= 1e299) {
                         return false;
                     }
                 }
-                SetupRefineCandidateWindow();
+
+                SetupRefineWindow();
             }
         }
 
         return true;
     }
 
-    private int refineBurnSamplesIndex()
-    {
-        return refineBurnIndex;
-    }
-
-    private int refineDvSamplesIndex()
-    {
-        return refineDvIndex;
-    }
-
-    private double SampleSymmetric(double center, double halfWidth, int index, int count)
-    {
-        if (count <= 1) return center;
-        double u = (double)index / (double)(count - 1); // 0..1
-        return center + (2.0 * u - 1.0) * halfWidth;
-    }
-
     private void FinalizeAutoSolve()
     {
-        autoBusy = false;
+        solverBusy = false;
         solverPhase = PHASE_IDLE;
 
-        if (!solveBestValid || solveBestMissMeters > acceptMissMeters) {
+        if (!bestValid) {
             autoValid = false;
-            autoShowSolution = false;
-            autoStatus = AUTO_FAIL_NO_SOLUTION;
+            autoStatus = AUTO_NONE;
             return;
         }
 
         autoValid = true;
-        autoBurnTime = solveBestBurnTime;
-        autoEncounterTime = solveBestEncounterTime;
-        autoBurnDv = solveBestBurnDv;
-        autoDvE = solveBestDvE;
-        autoDvMag = autoDvE.magnitude;
-        autoMissMeters = solveBestMissMeters;
-        autoScore = solveBestScore;
-
-        autoShowSolution = true;
-        burnChanged = true;
+        autoBurnTime = bestBurnTime;
+        autoEncounterTime = bestEncounterTime;
+        autoDvE = bestDvE;
+        autoDvMag = bestDvMag;
         autoStatus = AUTO_READY;
     }
 
-    private bool CheckPlaneCompatibility()
+    private void SetupRefineWindow()
     {
-        double sx, sy, sz;
-        double tx, ty, tz;
-        src.Normal(out sx, out sy, out sz);
-        tgt.Normal(out tx, out ty, out tz);
+        refineCenterBurn = topBurnTime[refineCandidateIndex];
+        refineCenterEncounter = topEncounterTime[refineCandidateIndex];
 
-        double dot = sx * tx + sy * ty + sz * tz;
-        if (dot > 1.0) dot = 1.0;
-        if (dot < -1.0) dot = -1.0;
+        double burnSpan = Math.Max(60.0, (solveBurnEnd - solveBurnStart) / Math.Max(2.0, (double)(coarseBurnSamples - 1)));
+        double encSpan = Math.Max(60.0, solveMaxEncounterDt / Math.Max(2.0, (double)(coarseEncounterSamples - 1)));
 
-        double angleDeg = Math.Acos(dot) * 180.0 / Math.PI;
-        return angleDeg <= planeMismatchDegLimit;
+        double shrink = Math.Pow(0.35, refinePassIndex + 1);
+        refineBurnHalfWindow = burnSpan * shrink;
+        refineEncounterHalfWindow = encSpan * shrink;
     }
 
-    private void EvaluateCandidate(
-        double tb,
-        double dvT,
-        int arrivalSamples,
-        double arrivalCapSec,
-        out bool valid,
-        out double score,
-        out double encounterTime,
-        out Vector3 dvE,
-        out double missMeters)
+    private void EvaluateLambertCandidate(double tb, double ta, out bool valid, out float dvMag, out Vector3 dvE, out double score)
     {
         valid = false;
-        score = 0.0;
-        encounterTime = 0.0;
+        dvMag = 0.0f;
         dvE = Vector3.zero;
-        missMeters = 0.0;
+        score = 0.0;
 
-        if (tb < clock.simTime) return;
-        if (src.conic == null || tgt.conic == null) return;
-        if (src.conic.primaryBodyId != tgt.conic.primaryBodyId) return;
+        if (tb < solveBurnStart) return;
+        if (tb > solveBurnEnd) return;
+        if (ta <= tb + minTimeOfFlightSec) return;
+        if (ta > tb + solveMaxEncounterDt) return;
+        if (solveMu <= 0.0) return;
 
         propagator.conic = src.conic;
         propagator.Evaluate(tb);
 
-        double vx = propagator.rel_vx;
-        double vy = propagator.rel_vy;
-        double vz = propagator.rel_vz;
-        double vmag = Math.Sqrt(vx * vx + vy * vy + vz * vz);
-        if (vmag <= 1e-12) return;
+        double r1x = propagator.rel_rx;
+        double r1y = propagator.rel_ry;
+        double r1z = propagator.rel_rz;
+        double vCurX = propagator.rel_vx;
+        double vCurY = propagator.rel_vy;
+        double vCurZ = propagator.rel_vz;
 
-        double tx = vx / vmag;
-        double ty = vy / vmag;
-        double tz = vz / vmag;
+        propagator.conic = tgt.conic;
+        propagator.Evaluate(ta);
 
-        fitter.rx = propagator.rel_rx;
-        fitter.ry = propagator.rel_ry;
-        fitter.rz = propagator.rel_rz;
-        fitter.vx = vx + tx * dvT;
-        fitter.vy = vy + ty * dvT;
-        fitter.vz = vz + tz * dvT;
+        double r2x = propagator.rel_rx;
+        double r2y = propagator.rel_ry;
+        double r2z = propagator.rel_rz;
 
-        fitter.Fit(src.conic.primaryBodyId, tb);
-        tfr.UpdateInfo();
-
-        if (!tfr.conic.valid) return;
-        if (tfr.a <= 0.0 || tfr.e >= 1.0) return;
-
-        double arrivalStart = tb + autoMinTransferSec;
-        double srcPeriod = src.t > 0.0 ? src.t : autoHardCapSec;
-        double tgtPeriod = tgt.t > 0.0 ? tgt.t : autoHardCapSec;
-        double arrivalEnd = tb + Math.Min(arrivalCapSec, 1.5 * Math.Max(srcPeriod, tgtPeriod));
-
-        if (arrivalEnd <= arrivalStart) return;
-        if (arrivalSamples < 2) arrivalSamples = 2;
-
-        bool found = false;
-        double bestMiss = 0.0;
-        double bestEncounterTime = 0.0;
-
-        for (int i = 0; i < arrivalSamples; i++) {
-            double frac = (double)i / (double)(arrivalSamples - 1);
-            double ta = arrivalStart + (arrivalEnd - arrivalStart) * frac;
-
-            // transfer position
-            propagator.conic = tfr.conic;
-            propagator.Evaluate(ta);
-            double cx = propagator.rel_rx;
-            double cy = propagator.rel_ry;
-            double cz = propagator.rel_rz;
-
-            // target position
-            propagator.conic = tgt.conic;
-            propagator.Evaluate(ta);
-            double txp = propagator.rel_rx;
-            double typ = propagator.rel_ry;
-            double tzp = propagator.rel_rz;
-
-            double dx = cx - txp;
-            double dy = cy - typ;
-            double dz = cz - tzp;
-            double miss = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-
-            if (!found || miss < bestMiss) {
-                found = true;
-                bestMiss = miss;
-                bestEncounterTime = ta;
-            }
-        }
-
-        if (!found) return;
-
-        valid = true;
-        encounterTime = bestEncounterTime;
-        missMeters = bestMiss;
-        dvE = new Vector3((float)(tx * dvT), (float)(ty * dvT), (float)(tz * dvT));
-        score = bestMiss + scoreDvWeight * Math.Abs(dvT) + scoreTimeWeight * (bestEncounterTime - tb);
-    }
-
-    private void InitTopArrays()
-    {
-        for (int i = 0; i < TOP_COUNT; i++) {
-            topScore[i] = 1e300;
-            topBurnTime[i] = 0.0;
-            topEncounterTime[i] = 0.0;
-            topBurnDv[i] = 0.0;
-            topDvE[i] = Vector3.zero;
-            topMiss[i] = 0.0;
-        }
-    }
-
-    private void InsertTopCandidate(double score, double burnTimeValue, double encounterTimeValue, double burnDvValue, Vector3 dvEValue, double missValue)
-    {
-        int insertIndex = -1;
-        for (int i = 0; i < TOP_COUNT; i++) {
-            if (score < topScore[i]) {
-                insertIndex = i;
-                break;
-            }
-        }
-        if (insertIndex < 0) return;
-
-        for (int i = TOP_COUNT - 1; i > insertIndex; i--) {
-            topScore[i] = topScore[i - 1];
-            topBurnTime[i] = topBurnTime[i - 1];
-            topEncounterTime[i] = topEncounterTime[i - 1];
-            topBurnDv[i] = topBurnDv[i - 1];
-            topDvE[i] = topDvE[i - 1];
-            topMiss[i] = topMiss[i - 1];
-        }
-
-        topScore[insertIndex] = score;
-        topBurnTime[insertIndex] = burnTimeValue;
-        topEncounterTime[insertIndex] = encounterTimeValue;
-        topBurnDv[insertIndex] = burnDvValue;
-        topDvE[insertIndex] = dvEValue;
-        topMiss[insertIndex] = missValue;
-    }
-
-    public void UploadAutoNode()
-    {
-        if (!autoValid || gc == null) {
+        double vReqX, vReqY, vReqZ;
+        if (!SolveLambertShortElliptic(r1x, r1y, r1z, r2x, r2y, r2z, ta - tb, solveMu, out vReqX, out vReqY, out vReqZ)) {
             return;
         }
 
-        gc.API_Node_CreateAtTime(autoDvE, autoBurnTime);
-        autoStatus = AUTO_UPLOADED;
+        double dvx = vReqX - vCurX;
+        double dvy = vReqY - vCurY;
+        double dvz = vReqZ - vCurZ;
+        double dv = Math.Sqrt(dvx * dvx + dvy * dvy + dvz * dvz);
+
+        if (dv > dvCapMps) return;
+
+        dvE = new Vector3((float)dvx, (float)dvy, (float)dvz);
+        dvMag = (float)dv;
+
+        // Score: prioritize lower DV, with a small preference for shorter TOF.
+        score = dv + 0.002 * (ta - tb);
+        valid = true;
     }
 
-    // -------------------------------------------------------------------------
+    private bool SolveLambertShortElliptic(
+        double r1x, double r1y, double r1z,
+        double r2x, double r2y, double r2z,
+        double dt,
+        double mu,
+        out double v1x, out double v1y, out double v1z)
+    {
+        v1x = 0.0;
+        v1y = 0.0;
+        v1z = 0.0;
+
+        if (dt <= 0.0 || mu <= 0.0) return false;
+
+        double r1 = Math.Sqrt(r1x * r1x + r1y * r1y + r1z * r1z);
+        double r2 = Math.Sqrt(r2x * r2x + r2y * r2y + r2z * r2z);
+        if (r1 <= 0.0 || r2 <= 0.0) return false;
+
+        double dot = r1x * r2x + r1y * r2y + r1z * r2z;
+        double cosDtheta = dot / (r1 * r2);
+        if (cosDtheta > 1.0) cosDtheta = 1.0;
+        if (cosDtheta < -1.0) cosDtheta = -1.0;
+
+        double dtheta = Math.Acos(cosDtheta);
+        if (dtheta <= 1e-8 || Math.Abs(Math.PI - dtheta) <= 1e-8) return false;
+
+        double sinDtheta = Math.Sin(dtheta);
+        double denom = 1.0 - cosDtheta;
+        if (Math.Abs(denom) <= 1e-12) return false;
+
+        double A = sinDtheta * Math.Sqrt(r1 * r2 / denom);
+        if (Math.Abs(A) <= 1e-12) return false;
+
+        double f0, y0;
+        if (!LambertTimeResidual(0.0, r1, r2, A, dt, mu, out f0, out y0)) return false;
+        if (f0 > 0.0) return false; // desired dt below parabolic minimum
+
+        double zLow = 0.0;
+        double fLow = f0;
+
+        double zHigh = 4.0;
+        double fHigh = 0.0;
+        bool bracketed = false;
+
+        for (int i = 0; i < 32; i++) {
+            double fTry, yTry;
+            if (LambertTimeResidual(zHigh, r1, r2, A, dt, mu, out fTry, out yTry)) {
+                if (fTry >= 0.0) {
+                    fHigh = fTry;
+                    bracketed = true;
+                    break;
+                }
+            }
+            zHigh *= 2.0;
+        }
+
+        if (!bracketed) return false;
+
+        double zMid = 0.0;
+        double fMid = 0.0;
+        double y = 0.0;
+
+        for (int iter = 0; iter < 48; iter++) {
+            zMid = 0.5 * (zLow + zHigh);
+
+            if (!LambertTimeResidual(zMid, r1, r2, A, dt, mu, out fMid, out y)) {
+                zLow = zMid;
+                continue;
+            }
+
+            if (Math.Abs(fMid) < 1e-6) {
+                break;
+            }
+
+            if (fMid > 0.0) {
+                zHigh = zMid;
+                fHigh = fMid;
+            } else {
+                zLow = zMid;
+                fLow = fMid;
+            }
+        }
+
+        if (y <= 0.0) return false;
+
+        double Cz = StumpffC(zMid);
+        if (Cz <= 0.0) return false;
+
+        double g = A * Math.Sqrt(y / mu);
+        if (Math.Abs(g) <= 1e-9) return false;
+
+        double f = 1.0 - y / r1;
+
+        v1x = (r2x - f * r1x) / g;
+        v1y = (r2y - f * r1y) / g;
+        v1z = (r2z - f * r1z) / g;
+        return true;
+    }
+
+    private bool LambertTimeResidual(double z, double r1, double r2, double A, double dt, double mu, out double residual, out double y)
+    {
+        residual = 0.0;
+        y = 0.0;
+
+        double C = StumpffC(z);
+        double S = StumpffS(z);
+
+        if (C <= 1e-14) {
+            return false;
+        }
+
+        y = r1 + r2 + A * ((z * S - 1.0) / Math.Sqrt(C));
+        if (y <= 0.0) {
+            return false;
+        }
+
+        double x = Math.Sqrt(y / C);
+        double tof = (x * x * x * S + A * Math.Sqrt(y)) / Math.Sqrt(mu);
+        residual = tof - dt;
+        return true;
+    }
+
+    private double StumpffC(double z)
+    {
+        if (Math.Abs(z) < 1e-8) {
+            return 0.5;
+        }
+
+        if (z > 0.0) {
+            double s = Math.Sqrt(z);
+            return (1.0 - Math.Cos(s)) / z;
+        }
+
+        double sh = Math.Sqrt(-z);
+        return (Math.Cosh(sh) - 1.0) / (-z);
+    }
+
+    private double StumpffS(double z)
+    {
+        if (Math.Abs(z) < 1e-8) {
+            return 1.0 / 6.0;
+        }
+
+        if (z > 0.0) {
+            double s = Math.Sqrt(z);
+            return (s - Math.Sin(s)) / (s * s * s);
+        }
+
+        double sh = Math.Sqrt(-z);
+        return (Math.Sinh(sh) - sh) / (sh * sh * sh);
+    }
+
+    private void PlanAutoNode()
+    {
+        if (!autoValid || gc == null) return;
+        int idx = gc.API_Node_CreateAtTime(autoDvE, autoBurnTime);
+        if (idx >= 0) {
+            autoStatus = AUTO_PLAN;
+        } else {
+            autoStatus = AUTO_ERR;
+        }
+    }
+
+    private double LerpSolveBurn(int index, int count)
+    {
+        if (count <= 1) return solveBurnStart;
+        double u = (double)index / (double)(count - 1);
+        return solveBurnStart + (solveBurnEnd - solveBurnStart) * u;
+    }
+
+    private double LerpSolveEncounter(double tb, int index, int count)
+    {
+        double start = tb + minTimeOfFlightSec;
+        double end = tb + solveMaxEncounterDt;
+        if (count <= 1) return start;
+        double u = (double)index / (double)(count - 1);
+        return start + (end - start) * u;
+    }
+
+    private double SampleCentered(double center, double halfWindow, int index, int count)
+    {
+        if (count <= 1) return center;
+        double u = (double)index / (double)(count - 1);
+        return center + (2.0 * u - 1.0) * halfWindow;
+    }
+
+    private void ClearTopCandidates()
+    {
+        for (int i = 0; i < TOP_MAX; i++) {
+            topScore[i] = 1e300;
+            topBurnTime[i] = 0.0;
+            topEncounterTime[i] = 0.0;
+            topDvE[i] = Vector3.zero;
+            topDvMag[i] = 0.0f;
+        }
+    }
+
+    private bool HasTopCandidate()
+    {
+        return topScore[0] < 1e299;
+    }
+
+    private void InsertTopCandidate(double score, double tb, double ta, Vector3 dvE, float dvMag)
+    {
+        int idx = -1;
+        for (int i = 0; i < TOP_MAX; i++) {
+            if (score < topScore[i]) {
+                idx = i;
+                break;
+            }
+        }
+        if (idx < 0) return;
+
+        for (int i = TOP_MAX - 1; i > idx; i--) {
+            topScore[i] = topScore[i - 1];
+            topBurnTime[i] = topBurnTime[i - 1];
+            topEncounterTime[i] = topEncounterTime[i - 1];
+            topDvE[i] = topDvE[i - 1];
+            topDvMag[i] = topDvMag[i - 1];
+        }
+
+        topScore[idx] = score;
+        topBurnTime[idx] = tb;
+        topEncounterTime[idx] = ta;
+        topDvE[idx] = dvE;
+        topDvMag[idx] = dvMag;
+    }
+
+    // ============================================================
     // DISPLAY
-    // -------------------------------------------------------------------------
+    // ============================================================
 
     public override void DrawDisplay(MFD display)
     {
-        if (!hasTarget) {
-            display.ClearGraphics();
-            display.ClearText();
+        display.ClearGraphics();
 
+        if (!hasTarget) {
+            display.ClearText();
             string msg = "NO TARGET SELECTED";
             display.DrawText(msg, 10, 24 - msg.Length / 2, Color.green);
 
+            display.DrawText(" T- ", 0, 2, Color.white);
+            display.DrawText(" T+ ", 0, 12, Color.white);
+            display.DrawText("RSET", 0, 22, Color.white);
+            display.DrawText(" V- ", 0, 32, Color.white);
+            display.DrawText(" V+ ", 0, 42, Color.white);
+
             display.DrawText("STP-", MFD.TEXT_ROWS - 1, 2, Color.white);
             display.DrawText("STP+", MFD.TEXT_ROWS - 1, 12, Color.white);
-            display.DrawText("AUTO", MFD.TEXT_ROWS - 1, 32, Color.white);
-            display.DrawText("UPLD", MFD.TEXT_ROWS - 1, 42, Color.white);
+            display.DrawText("CALC", MFD.TEXT_ROWS - 1, 32, Color.white);
+            display.DrawText("PLAN", MFD.TEXT_ROWS - 1, 42, Color.white);
             display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
             return;
         }
 
-        display.ClearGraphics();
         const float orbitSize = 0.4f;
         float scale = orbitSize / (float)src.a;
 
@@ -904,39 +969,26 @@ public class MFDTransferPage : MFDPage
         display.ClearText();
 
         double now = clock.simTime;
-        Color planColor = autoShowSolution && autoValid ? Color.cyan : Color.green;
-
         display.DrawText(MFD.FormatPercent("STP", stepRatio), 2, 19, Color.green);
-        display.DrawText(MFD.FormatNumber("BT", calcBurnTime - now), 3, 19, planColor);
-        display.DrawText(MFD.FormatNumber("BDV", activeBurnDv), 4, 19, planColor);
-
-        if (autoBusy) {
-            display.DrawText("AUTO SEARCH", 6, 18, Color.yellow);
-            if (autoStatus == AUTO_BUSY_COARSE) {
-                display.DrawText("COARSE", 7, 21, Color.yellow);
-            } else if (autoStatus == AUTO_BUSY_REFINE) {
-                display.DrawText("REFINE", 7, 21, Color.yellow);
-            }
-        } else if (autoValid) {
-            display.DrawText(MFD.FormatNumber("AMISS", autoMissMeters), 6, 14, Color.cyan);
-            display.DrawText(MFD.FormatNumber("AT", autoEncounterTime - now), 7, 16, Color.cyan);
-        } else {
-            string s = GetAutoStatusText();
-            if (s != "") {
-                display.DrawText(s, 6, 24 - s.Length / 2, Color.yellow);
-            }
-        }
+        display.DrawText(MFD.FormatNumber("BT", calcBurnTime - now), 3, 19, Color.green);
+        display.DrawText(MFD.FormatNumber("BDV", burnDv), 4, 19, Color.green);
 
         if (meets) {
-            // meet 1 = cyan
             display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 4, Color.cyan);
             display.DrawText(MFD.FormatNumber("DST", meetDist1), 3, 4, Color.cyan);
-            //display.DrawText(MFD.FormatNumber("OOP", meetOop1), 4, 4, Color.cyan);
 
-            // meet 2 = red
             display.DrawText(MFD.FormatNumber("T", meetTime2 - now), 2, 34, Color.red);
             display.DrawText(MFD.FormatNumber("DST", meetDist2), 3, 34, Color.red);
-            //display.DrawText(MFD.FormatNumber("OOP", meetOop2), 4, 34, Color.red);
+        }
+
+        // Auto block: bottom right
+        display.DrawText("AUTO", 6, 39, Color.white);
+        display.DrawText(GetAutoStatusText(), 7, 39, GetAutoStatusColor());
+
+        if (autoValid || solverBusy) {
+            display.DrawText(FormatAdvLine(), 8, 35, GetAutoStatusColor());
+        } else {
+            display.DrawText("DV  ----", 8, 35, Color.gray);
         }
 
         display.DrawText(" T- ", 0, 2, Color.white);
@@ -947,8 +999,8 @@ public class MFDTransferPage : MFDPage
 
         display.DrawText("STP-", MFD.TEXT_ROWS - 1, 2, Color.white);
         display.DrawText("STP+", MFD.TEXT_ROWS - 1, 12, Color.white);
-        display.DrawText("AUTO", MFD.TEXT_ROWS - 1, 32, Color.white);
-        display.DrawText("UPLD", MFD.TEXT_ROWS - 1, 42, Color.white);
+        display.DrawText("CALC", MFD.TEXT_ROWS - 1, 32, Color.white);
+        display.DrawText("PLAN", MFD.TEXT_ROWS - 1, 42, Color.white);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }
@@ -956,17 +1008,47 @@ public class MFDTransferPage : MFDPage
     private string GetAutoStatusText()
     {
         switch (autoStatus) {
-            case AUTO_IDLE: return "";
-            case AUTO_READY: return "AUTO READY";
-            case AUTO_UPLOADED: return "NODE UPLOADED";
-            case AUTO_FAIL_NO_TARGET: return "NO TARGET";
-            case AUTO_FAIL_PRIMARY_MISMATCH: return "PRIMARY MISMATCH";
-            case AUTO_FAIL_INVALID_SOURCE: return "INVALID SOURCE";
-            case AUTO_FAIL_INVALID_TARGET: return "INVALID TARGET";
-            case AUTO_FAIL_PLANE_MISMATCH: return "PLANE MISMATCH";
-            case AUTO_FAIL_NO_SOLUTION: return "NO SOLUTION";
+            case AUTO_IDLE: return "IDLE";
+            case AUTO_COARSE: return "COAR";
+            case AUTO_REFINE: return "REFN";
+            case AUTO_READY: return "RDY ";
+            case AUTO_PLAN: return "PLAN";
+            case AUTO_NONE: return "NONE";
+            case AUTO_ERR: return "ERR ";
         }
-        return "";
+        return "ERR ";
+    }
+
+    private Color GetAutoStatusColor()
+    {
+        switch (autoStatus) {
+            case AUTO_READY:
+            case AUTO_PLAN:
+                return Color.green;
+            case AUTO_COARSE:
+            case AUTO_REFINE:
+                return Color.yellow;
+            case AUTO_NONE:
+                return Color.gray;
+            case AUTO_ERR:
+                return Color.red;
+        }
+        return Color.white;
+    }
+
+    private string FormatAdvLine()
+    {
+        float dv = 0.0f;
+        if (solverBusy && bestValid) {
+            dv = bestDvMag;
+        } else if (autoValid) {
+            dv = autoDvMag;
+        }
+
+        if (dv <= 0.0f) return "DV  ----";
+        if (dv < 100.0f) return "DV  " + dv.ToString("F1");
+        if (dv < 1000.0f) return "DV  " + dv.ToString("F0");
+        return "DV   >1k";
     }
 
     public override void OnDeserialization()
