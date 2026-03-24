@@ -70,7 +70,8 @@ public class MFD : UdonSharpBehaviour
         charColors = new Color[TEXT_ROWS * TEXT_COLUMNS];
         ClearText();
 
-        graphicsMaterial.SetVectorArray("fontUvs", fontData.uvs);
+        graphicsMaterial.SetVectorArray("atlasRects", fontData.atlasRects);
+        graphicsMaterial.SetVectorArray("charRects", fontData.charRects);
 
         shapeColors = new Color[MAX_SHAPES];
         shapeData1 = new float[MAX_SHAPES];
@@ -114,11 +115,8 @@ public class MFD : UdonSharpBehaviour
 
     public void ClearText()
     {
-        for (int i = 0; i < TEXT_ROWS; i++) {
-            for (int j = 0; j < TEXT_COLUMNS; j++) {
-                charGrid[i*TEXT_COLUMNS + j] = (float)' ';
-            }
-        }
+        // Trying to avoid long loops inside Udon
+        charGrid = new float[TEXT_ROWS * TEXT_COLUMNS];
     }
 
     public void ClearGraphics()

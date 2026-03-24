@@ -100,7 +100,7 @@ public class NodePlanState : UdonSharpBehaviour
             dV_E[i] = Vector3.zero;
             bodyAxisToPoint[i] = 2;
 
-            preSlewLeadSec[i] = 30f;
+            preSlewLeadSec[i] = 90f;
             postHoldSec[i] = 5f;
 
             burnDurationSec[i] = 0f;
@@ -204,7 +204,7 @@ public class NodePlanState : UdonSharpBehaviour
 
         bodyAxisToPoint[i] = 2;
 
-        preSlewLeadSec[i] = 30f;
+        preSlewLeadSec[i] = 90f;
         postHoldSec[i] = 5f;
 
         if (activeIndex == i) activeIndex = -1;
