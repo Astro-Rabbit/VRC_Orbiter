@@ -23,6 +23,8 @@ public class BodyCatalog : UdonSharpBehaviour
     public double earthRadiusM = 6371000.0;
     public double moonRadiusM  = 1737400.0;
 
+    public double earthSOIRadiusM = 9.25e8; // ~925,000 km
+
     public double moonSOIRadiusM = 6.61e7;
 
     public double GetMu(byte bodyId)
@@ -40,9 +42,18 @@ public class BodyCatalog : UdonSharpBehaviour
         return 0.0;
     }
 
+    public byte GetParentBodyId(byte bodyId)
+    {
+        if (bodyId == moonId)  return earthId;
+        if (bodyId == earthId) return sunId;
+
+        // Sun or unknown -> no higher parent in current system
+        return sunId;
+    }
     public double GetSOIRadius(byte bodyId)
     {
-        if (bodyId == moonId) return moonSOIRadiusM;
+        if (bodyId == earthId) return earthSOIRadiusM;
+        if (bodyId == moonId)  return moonSOIRadiusM;
         return 0.0;
     }
 

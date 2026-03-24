@@ -1,7 +1,7 @@
 using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
-
+using VRC.SDK3.UdonNetworkCalling;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class CraftNetState : UdonSharpBehaviour
 {
@@ -14,8 +14,14 @@ public class CraftNetState : UdonSharpBehaviour
     public SimClock clock;
     public CraftStateModel craft;
 
+    [Header("Optional local mirrors")]
+    public DockingRuntimeState dock;
+    public DockingComputer dockingComp;
+    public GuidanceNavContactsState contactsState;
+    public GuidanceNavContactsComputer contactsComp;
+
     [Header("Identity")]
-    public int craftId = 0;
+    public byte craftId = 0;
 
     [Header("Publish rate")]
     [Tooltip("Core/meta publish rate (Hz). Set low (e.g. 1-5). 0 disables periodic publishing (use ForcePublishCore).")]
@@ -35,6 +41,10 @@ public class CraftNetState : UdonSharpBehaviour
     [Tooltip("Network/server time when the latest mode change was published.")]
     public double modeChangeNetT = 0.0;
 
+    [Header("Read-only (target selection mirrors synced)")]
+    public int selectedStationIndex = -1;
+    public int selectedStationDockPortIndex = -1;
+
     [Header("Read-only (docking mirrors synced)")]
     public byte dockPhase = 0;
     public int dockStationIndex = -1;
@@ -52,7 +62,7 @@ public class CraftNetState : UdonSharpBehaviour
 
     // --- synced core ---
     [UdonSynced] private int _rev;
-    [UdonSynced] private int _craftId;
+    [UdonSynced] private byte _craftId;
     [UdonSynced] private byte _mode;
     [UdonSynced] private byte _primaryBodyId;
 
@@ -63,12 +73,9 @@ public class CraftNetState : UdonSharpBehaviour
     [UdonSynced] private double _modeChangeNetT;
 
     // Mass/fuel state (doubles)
-    [UdonSynced] private double _dryMassKg;
-    [UdonSynced] private double _propMassKg;
-    [UdonSynced] private double _massKg;
+    [UdonSynced] private float _propMassKg;
 
-    // Optional: a generic "fuel fraction" convenience (0..1). If you don't want it, ignore.
-    [UdonSynced] private float _fuel01;
+
 
     // Optional: time the mode/meta was last published (sim time)
     [UdonSynced] private double _coreEpochT;
@@ -86,6 +93,15 @@ public class CraftNetState : UdonSharpBehaviour
     // --- synced dock pose (station body frame) ---
     [UdonSynced] private Vector3 _dockRelPos_SB;
     [UdonSynced] private Quaternion _dock_qCraftToStation;
+
+    // --- synced target selection ---
+    [UdonSynced] private byte _selectedStationIndex = 255;
+    [UdonSynced] private byte _selectedStationDockPortIndex = 255;
+
+    [Header("Read-only handoff ack")]
+    public int handoffEstablishedTxnId = -1;
+
+    [UdonSynced] private int _handoffEstablishedTxnId = -1;
 
     private float _accum;
     private int _appliedRev = -1;
@@ -105,7 +121,12 @@ public class CraftNetState : UdonSharpBehaviour
         prevMode = _prevMode;
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
-        ownershipTransferHardLocked = _ownershipTransferHardLocked;        
+        ownershipTransferHardLocked = _ownershipTransferHardLocked;    
+        handoffEstablishedTxnId = _handoffEstablishedTxnId;    
+
+
+        ApplySyncedTargetSelectionToLocal();
+
     }
 
     public byte GetMode() => _mode;
@@ -196,9 +217,7 @@ public class CraftNetState : UdonSharpBehaviour
         _coreEpochT = clock.Now();
 
         // Mirror from craft state
-        _dryMassKg = craft.dryMassKg;
-        _propMassKg = craft.propMassKg;
-        _massKg = craft.massKg;
+        _propMassKg = (float)craft.propMassKg;
 
         // Mirror publics for inspector/debug
         dockPhase = _dockPhase;
@@ -214,10 +233,6 @@ public class CraftNetState : UdonSharpBehaviour
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
 
-        // Fuel fraction convenience (avoid div by 0)
-        double denom = craft.dryMassKg + craft.propMassKg;
-        _fuel01 = (denom > 1e-6) ? (float)(craft.propMassKg / denom) : 0f;
-
         if (simManager != null)
         {
             _ownershipTransferHardLocked = simManager.ownershipTransferHardLocked;
@@ -225,10 +240,14 @@ public class CraftNetState : UdonSharpBehaviour
 
         ownershipTransferHardLocked = _ownershipTransferHardLocked;
 
-        if (bumpRevision) _rev++;
 
         mode = _mode;
         primaryBodyId = _primaryBodyId;
+        handoffEstablishedTxnId = _handoffEstablishedTxnId;
+
+        ApplySyncedTargetSelectionToLocal();
+
+        if (bumpRevision) _rev++;
 
         RequestSerialization();
         _appliedRev = _rev;
@@ -254,17 +273,24 @@ public class CraftNetState : UdonSharpBehaviour
         dockRelPos_SB = _dockRelPos_SB;
         dock_qCraftToStation = _dock_qCraftToStation;
 
+        ApplySyncedTargetSelectionToLocal();
+
         if (_rev == _appliedRev) return;
         _appliedRev = _rev;
+
+        if (!HasSimAuthority())
+        {
+            MirrorDockRuntimeFromSyncedState();
+        }
 
         // Apply mass/fuel to local craft model (remote follow / UI)
         if (!HasSimAuthority() && craft != null)
         {
             craft.primaryBodyId = _primaryBodyId;
-            craft.dryMassKg = _dryMassKg;
-            craft.propMassKg = _propMassKg;
-            craft.massKg = _massKg;
+            craft.propMassKg = (double)_propMassKg;
+            craft.RecomputeMass();
         }
+        handoffEstablishedTxnId = _handoffEstablishedTxnId;
     }
 
     public void SetDocked(
@@ -352,5 +378,184 @@ public class CraftNetState : UdonSharpBehaviour
         modeChangeNetT = _modeChangeNetT;
     }
     public bool GetOwnershipTransferHardLocked() => _ownershipTransferHardLocked;
+
+    private void MirrorDockRuntimeFromSyncedState()
+    {
+        if (dock == null) return;
+
+        if (_mode != MODE_DOCKED)
+        {
+            dock.ResetState();
+            return;
+        }
+
+        dock.active = true;
+        dock.phase = _dockPhase;
+
+        dock.dockedStationIndex = _dockStationIndex;
+        dock.stationPortIndex = _dockStationPortIndex;
+        dock.craftPortIndex = _dockCraftPortIndex;
+
+        dock.captureTime = _dockCaptureT0;
+        dock.relPos_SB = _dockRelPos_SB;
+        dock.qCraftToStation = _dock_qCraftToStation;
+        dock.retractCommanded = false;
+
+        if (dock.phase == DockingRuntimeState.DOCK_SOFT)
+        {
+            dock.retractS = 0f;
+        }
+        else if (dock.phase == DockingRuntimeState.DOCK_RETRACT)
+        {
+            double tNow = (clock != null) ? clock.Now() : 0.0;
+            double t0 = _dockRetractT0;
+
+            float s = 0f;
+            if (t0 > 0.0)
+                s = (float)((tNow - t0) * (double)dock.retractSpeed);
+
+            if (s < 0f) s = 0f;
+            if (s > 1f) s = 1f;
+            dock.retractS = s;
+        }
+        else if (dock.phase == DockingRuntimeState.DOCK_HARD)
+        {
+            dock.retractS = 1f;
+        }
+
+        if (dockingComp != null &&
+            dockingComp.stations != null &&
+            _dockStationIndex >= 0 &&
+            _dockStationIndex < dockingComp.stations.Length &&
+            dockingComp.stations[_dockStationIndex] != null)
+        {
+            dockingComp.ComputeHardTargetRelativePose(dockingComp.stations[_dockStationIndex]);
+        }
+    }
+
+    public void SetHandoffEstablishedTxnId(int txnId)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (!HasSimAuthority()) return;
+
+        _handoffEstablishedTxnId = txnId;
+        handoffEstablishedTxnId = txnId;
+    }
+
+    private const byte NONE_BYTE = 255;
+
+    private byte EncodeIndexOrNone(int value)
+    {
+        if (value < 0 || value >= 255) return NONE_BYTE;
+        return (byte)value;
+    }
+
+    private int DecodeIndexOrNone(byte value)
+    {
+        return (value == NONE_BYTE) ? -1 : (int)value;
+    }
+
+    private int GetStationCount()
+    {
+        if (contactsComp == null || contactsComp.stations == null) return 0;
+        return contactsComp.stations.Length;
+    }
+
+    private int GetDockPortCountForStation(int stationIndex)
+    {
+        if (contactsComp == null || contactsComp.stations == null) return 0;
+        if (stationIndex < 0 || stationIndex >= contactsComp.stations.Length) return 0;
+
+        StationStateModel st = contactsComp.stations[stationIndex];
+        if (st == null) return 0;
+
+        return st.dockingPortCount;
+    }
+
+    private void ApplySyncedTargetSelectionToLocal()
+    {
+        int stationIndex = DecodeIndexOrNone(_selectedStationIndex);
+        int stationPortIndex = DecodeIndexOrNone(_selectedStationDockPortIndex);
+
+        selectedStationIndex = stationIndex;
+        selectedStationDockPortIndex = stationPortIndex;
+
+        if (contactsState != null)
+        {
+            contactsState.selectedStationIndex = stationIndex;
+            contactsState.selectedStationDockPortIndex = stationPortIndex;
+            contactsState.selectedCraftDockPortIndex = 0;
+        }
+    }
+
+    public void OwnerCommitTargetSelection(int requestedStationIndex, int requestedStationDockPortIndex, bool forcePublish = true)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (!HasSimAuthority()) return;
+
+        int stationCount = GetStationCount();
+
+        int stationIndex = requestedStationIndex;
+        int stationPortIndex = requestedStationDockPortIndex;
+
+        if (stationIndex < 0 || stationIndex >= stationCount)
+        {
+            stationIndex = -1;
+            stationPortIndex = -1;
+        }
+        else
+        {
+            int portCount = GetDockPortCountForStation(stationIndex);
+
+            if (stationPortIndex < 0 || stationPortIndex >= portCount)
+                stationPortIndex = -1;
+        }
+
+        _selectedStationIndex = EncodeIndexOrNone(stationIndex);
+        _selectedStationDockPortIndex = EncodeIndexOrNone(stationPortIndex);
+
+        ApplySyncedTargetSelectionToLocal();
+
+        if (forcePublish)
+            ForcePublishCore();
+    }
+    public void AdoptModeImmediate(byte adoptedMode, byte adoptedPrimaryBodyId)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (!HasSimAuthority()) return;
+
+        _mode = adoptedMode;
+        _primaryBodyId = adoptedPrimaryBodyId;
+
+        // Keep prev/current aligned so remotes don't see a fake transition caused by takeover
+        _prevMode = adoptedMode;
+        _prevPrimaryBodyId = adoptedPrimaryBodyId;
+
+        _modeChangeNetT = (clock != null) ? clock.NowNetwork() : Networking.GetServerTimeInSeconds();
+
+        if (_mode != MODE_DOCKED)
+            ClearDockSynced();
+
+        mode = _mode;
+        primaryBodyId = _primaryBodyId;
+        prevMode = _prevMode;
+        prevPrimaryBodyId = _prevPrimaryBodyId;
+        modeChangeNetT = _modeChangeNetT;
+    }
+
+    [NetworkCallable]
+    public void Net_RequestSelectedStation(int requestedStationIndex)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        OwnerCommitTargetSelection(requestedStationIndex, -1, true);
+    }
+
+    [NetworkCallable]
+    public void Net_RequestSelectedStationPort(int requestedStationIndex, int requestedStationDockPortIndex)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        OwnerCommitTargetSelection(requestedStationIndex, requestedStationDockPortIndex, true);
+    }
+
 
 }

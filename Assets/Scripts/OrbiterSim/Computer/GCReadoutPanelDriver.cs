@@ -11,6 +11,7 @@ public class GCReadoutPanelDriver : UdonSharpBehaviour
     public GC_ActuatorOverrideState overrides;
     public NodePlanState plan;
     public EffectsSyncState effectsSync;
+    public CraftStateModel craft;
 
     [Header("Text Outputs")]
     public TMP_Text gcStatusText;
@@ -19,7 +20,7 @@ public class GCReadoutPanelDriver : UdonSharpBehaviour
     public TMP_Text nodeListText;
 
     [Header("Refresh")]
-    public float refreshInterval = 0.15f;
+    public float refreshInterval = 0.25f;
 
     private float _refreshTimer = 0f;
 
@@ -307,7 +308,8 @@ private string AttActuatorOverrideToString(byte v)
             "ACTUATORS\n" +
             "TAU : " + FormatVec3Signed1(tauX, tauY, tauZ) + "\n" +
             "MAIN: " + FormatPercent0(main01) + "\n" +
-            "XLAT: " + FormatVec3Signed1(transX, transY, transZ);
+            "XLAT: " + FormatVec3Signed1(transX, transY, transZ)+
+            "Mass: "+ craft.massKg;
     }
 
     private string RtnDirToString(byte rtnDir)

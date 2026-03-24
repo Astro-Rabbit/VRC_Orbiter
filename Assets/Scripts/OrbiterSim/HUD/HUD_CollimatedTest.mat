@@ -86,24 +86,38 @@ Material:
     - _LineWidth: 0.0005
     - _MarkerRadius: 0.035
     - _MarkerThickness: 0.0015
+    - _NodeDVmag_mps: 0
+    - _NodeMarkerRadius: 0.028
+    - _NodeMarkerThickness: 0.004
+    - _NodeRemainingDV_mps: 0
+    - _NodeValid: 0
+    - _OrbitAPO_UnitCode: 0
+    - _OrbitAPO_Valid: 0
+    - _OrbitAPO_Value: 0
+    - _OrbitPER_UnitCode: 0
+    - _OrbitPER_Valid: 0
+    - _OrbitPER_Value: 0
+    - _OrbitRDV_UnitCode: 0
+    - _OrbitRDV_Value: 0
+    - _OrbitReadoutTextHeight: 0.024
     - _PitchLadderLimitDeg: 45
     - _Softness: 1.5
     - _TapeCoreThickness: 0.003
     - _TapeThickness: 0.001
     - _TargetBoxHalfSize: 0.04
-    - _TargetNameC0: 6
-    - _TargetNameC1: 0
-    - _TargetNameC2: 19
-    - _TargetNameC3: 4
+    - _TargetNameC0: -1
+    - _TargetNameC1: -1
+    - _TargetNameC2: -1
+    - _TargetNameC3: -1
     - _TargetNameC4: -1
-    - _TargetNameLen: 4
-    - _TargetRangeMeters: 0
+    - _TargetNameLen: 0
+    - _TargetRangeMeters: 199.99403
     - _TargetRelMarkerRadius: 0.022
     - _TargetRelMarkerThickness: 0.0005
-    - _TargetRelSpeedMps: 0
-    - _TargetRelVelValid: 0
+    - _TargetRelSpeedMps: 0.00035926406
+    - _TargetRelVelValid: 1
     - _TargetTextHeight: 0.02
-    - _TargetValid: 0
+    - _TargetValid: 1
     - _TickMajorHalfLen: 0.006
     - _TickMajorLength: 0.06
     - _TickMajorStepDeg: 10
@@ -159,11 +173,12 @@ Material:
     - _FontUV_Z: {r: 0.80859375, g: 0.2602539, b: 0.8754883, a: 0.3774414}
     - _GlassTint: {r: 0, g: 0, b: 0, a: 1}
     - _HudColor: {r: 0.0047169924, g: 1, b: 0.18244614, a: 1}
-    - _NormalDir_B: {r: 0.0000001825533, g: 0.000008170678, b: 1, a: 0}
-    - _ProgradeDir_B: {r: 1.0000001, g: -0.0000016598427, b: -0.00000018319845, a: 0}
-    - _RadialOutDir_B: {r: 0.0000016599281, g: 1, b: -0.000008169888, a: 0}
-    - _TargetPos_HUD: {r: 0, g: 0, b: 0, a: 0}
-    - _TargetRelVelProg_HUD: {r: 0, g: 0, b: 0, a: 0}
-    - _TargetRelVelRetro_HUD: {r: 0, g: 0, b: 0, a: 0}
+    - _NodePos_HUD: {r: 0, g: 0, b: 0, a: 0}
+    - _NormalDir_B: {r: -0.000044523338, g: -0.009999833, b: 0.99995, a: 0}
+    - _ProgradeDir_B: {r: 0.0077576586, g: 0.9999199, b: 0.009999878, a: 0}
+    - _RadialOutDir_B: {r: -0.9999699, g: 0.007757716, b: 0.00003305552, a: 0}
+    - _TargetPos_HUD: {r: -0, g: -0.014283708, b: 0, a: 0}
+    - _TargetRelVelProg_HUD: {r: -0.00035705313, g: -0.014283327, b: 0, a: 0}
+    - _TargetRelVelRetro_HUD: {r: 4.4876323, g: 4.4737062, b: 0, a: 0}
     - _TestMarkerDir_B: {r: 0, g: 0, b: 1, a: 0}
   m_BuildTextureStacks: []

@@ -4,7 +4,6 @@ using UnityEngine;
 /// <summary>
 /// NodePlanState
 /// Data-only container for scheduled maneuver nodes.
-/// V1: nodes drive ATTITUDE ONLY (pointing along burn direction). No burn/throttle yet.
 /// Δv is expressed in E (solver inertial).
 ///
 /// Trigger types:
@@ -38,16 +37,20 @@ public class NodePlanState : UdonSharpBehaviour
     public double[] triggerNuRad;
 
     [Header("Attitude pointing")]
-    public Vector3[] dV_E;        // desired burn direction+magnitude in E
-    public byte[] bodyAxisToPoint;// 0=+X,1=+Y,2=+Z
+    public Vector3[] dV_E;         // desired burn direction+magnitude in E
+    public byte[] bodyAxisToPoint; // 0=+X,1=+Y,2=+Z
 
     [Header("Timing (seconds)")]
     public float[] preSlewLeadSec; // how early to start pointing before trigger
     public float[] postHoldSec;    // how long to keep pointing after trigger
 
-    [Header("Burn execution (V2)")]
+    [Header("Burn execution")]
     public float[] burnDurationSec;   // computed at creation
     public float[] burnThrottle01;    // computed at creation (V1 fixed 1.0)
+
+    [Header("Delta-V bookkeeping")]
+    public float[] dVmag_mps;         // planned node magnitude
+    public float[] remainingDV_mps;   // remaining magnitude for manual/autopilot execution tracking
 
     [Header("Runtime bookkeeping")]
     public int activeIndex = -1;
@@ -77,6 +80,8 @@ public class NodePlanState : UdonSharpBehaviour
         if (burnDurationSec == null || burnDurationSec.Length != n) burnDurationSec = new float[n];
         if (burnThrottle01 == null || burnThrottle01.Length != n) burnThrottle01 = new float[n];
 
+        if (dVmag_mps == null || dVmag_mps.Length != n) dVmag_mps = new float[n];
+        if (remainingDV_mps == null || remainingDV_mps.Length != n) remainingDV_mps = new float[n];
     }
 
     public void ClearAll()
@@ -101,6 +106,8 @@ public class NodePlanState : UdonSharpBehaviour
             burnDurationSec[i] = 0f;
             burnThrottle01[i] = 0f;
 
+            dVmag_mps[i] = 0f;
+            remainingDV_mps[i] = 0f;
         }
     }
 
@@ -121,7 +128,7 @@ public class NodePlanState : UdonSharpBehaviour
         return status[i] == STATUS_ARMED;
     }
 
-    // --- UI-facing create APIs (your requested shape) ---
+    // --- UI-facing create APIs ---
 
     public int API_CreateNode_Time(Vector3 dvE, double tTrigger, byte axis012)
     {
@@ -133,6 +140,9 @@ public class NodePlanState : UdonSharpBehaviour
         trigType[i] = TRIG_TIME;
 
         dV_E[i] = dvE;
+        dVmag_mps[i] = dvE.magnitude;
+        remainingDV_mps[i] = dVmag_mps[i];
+
         triggerTime[i] = tTrigger;
         bodyAxisToPoint[i] = axis012;
 
@@ -148,6 +158,11 @@ public class NodePlanState : UdonSharpBehaviour
         status[i] = STATUS_ARMED;
         trigType[i] = trig;
         bodyAxisToPoint[i] = axis012;
+
+        dV_E[i] = Vector3.zero;
+        dVmag_mps[i] = 0f;
+        remainingDV_mps[i] = 0f;
+
         return i;
     }
 
@@ -161,6 +176,9 @@ public class NodePlanState : UdonSharpBehaviour
         trigType[i] = TRIG_TRUE_ANOMALY;
 
         dV_E[i] = dvE;
+        dVmag_mps[i] = dvE.magnitude;
+        remainingDV_mps[i] = dVmag_mps[i];
+
         triggerNuRad[i] = nuTargetRad;
         bodyAxisToPoint[i] = axis012;
 
@@ -181,6 +199,9 @@ public class NodePlanState : UdonSharpBehaviour
         burnThrottle01[i] = 0f;
 
         dV_E[i] = Vector3.zero;
+        dVmag_mps[i] = 0f;
+        remainingDV_mps[i] = 0f;
+
         bodyAxisToPoint[i] = 2;
 
         preSlewLeadSec[i] = 30f;
@@ -188,8 +209,4 @@ public class NodePlanState : UdonSharpBehaviour
 
         if (activeIndex == i) activeIndex = -1;
     }
-
-
-
-    
 }

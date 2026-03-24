@@ -23,6 +23,10 @@ public class StationRenderManager : UdonSharpBehaviour
 {
     [Header("Inputs")]
     public GuidanceNavContactsState contacts;
+
+    [Header("Optional")]
+    public SimManager simManager;
+
     public Transform craftCG;
 
     [Header("Station render roots (index matches contacts station list)")]
@@ -80,6 +84,14 @@ public class StationRenderManager : UdonSharpBehaviour
 
     public void Tick()
     {
+
+        if (simManager != null && simManager.IsFreezeActive())
+        {
+            // Hold the currently active station and pose exactly as they were
+            // when freeze began. Do not re-resolve candidates or disable anything.
+            return;
+        }
+        
         if (contacts == null || craftCG == null || stationRenderRoots == null) return;
         int n = stationRenderRoots.Length;
         if (n == 0) return;
@@ -123,7 +135,7 @@ public class StationRenderManager : UdonSharpBehaviour
             {
                 double r2 = SafeRange2(_activeIndex);
                 double off2 = renderOffRangeMeters * renderOffRangeMeters;
-                if (r2 > off2 || idx < 0)
+                if (r2 > off2)
                 {
                     SetActiveStation(-1);
                 }

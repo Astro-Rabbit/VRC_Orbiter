@@ -46,7 +46,7 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
     public int selectedStationIndex = -1;
 
     [Tooltip("Selected docking port on the selected station. -1 means none.")]
-    public int selectedStationDockPortIndex = 0;
+    public int selectedStationDockPortIndex = -1;
 
     [Tooltip("Selected craft docking port. -1 means none.")]
     public int selectedCraftDockPortIndex = 0;
@@ -136,6 +136,12 @@ public class GuidanceNavContactsState : UdonSharpBehaviour
         ClearDocking();
     }
 
+    public void SetSelection(int stationIndex, int stationDockPortIndex)
+    {
+        selectedStationIndex = stationIndex;
+        selectedStationDockPortIndex = stationDockPortIndex;
+        selectedCraftDockPortIndex = 0;
+    }
     public void ClearDocking()
     {
         dockValid0 = false;

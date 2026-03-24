@@ -1,6 +1,7 @@
 using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
+using VRC.SDK3.UdonNetworkCalling;
 
 /// <summary>
 /// SimManager
@@ -38,6 +39,22 @@ public class SimManager : UdonSharpBehaviour
     public const byte MODE_RAILS = 0;
     public const byte MODE_INTEGRATED = 1;
     public const byte MODE_DOCKED = 2;
+
+
+
+    [Header("Handoff")]
+    public SimHandoffNetState handoffNet;
+
+    private bool authorityArmed = true;
+    private bool handoffFreeze = false;
+
+    // Local tracking (for freeze control)
+    private int _lastConsumedTxnId = -1;
+
+    // Debug toggle
+    public bool debugHandoff = true;
+
+
 
     // -------------------------------------------------------------------------
     // Core systems
@@ -110,6 +127,9 @@ public class SimManager : UdonSharpBehaviour
     [Tooltip("Hard lock for sim ownership transfer. Intended to be controlled by tablet/UI policy, not by cockpit release timing.")]
     public bool ownershipTransferHardLocked = false;
 
+    [Header("Cockpit authority")]
+    public CockpitAuthorityManager cockpitAuthorityManager;
+
     // -------------------------------------------------------------------------
     // Integrated stepping
     // -------------------------------------------------------------------------
@@ -136,6 +156,9 @@ public class SimManager : UdonSharpBehaviour
     public double exitIntegratedForceN = 0.5;
     public float settleSeconds = 3.0f;
     public bool autoModeSwitch = true;
+
+    private double _holdIntegratedUntil = -1.0;
+    public float undockIntegratedHoldSeconds = 0.5f;
 
     [Header("Warp policy")]
     [Tooltip("If true, entering integrated will force warp to x1.")]
@@ -205,10 +228,17 @@ public class SimManager : UdonSharpBehaviour
 
     // Mission-time accumulator used for fixed integrated stepping
     private double _accumSim = 0.0;
-
+    private int _lastOwnershipRequestTxnId = -1;
     // -------------------------------------------------------------------------
     // Unity lifecycle
     // -------------------------------------------------------------------------
+
+    public bool IsFreezeActive()
+    {
+        return handoffNet != null &&
+            handoffNet.state == 1 &&
+            handoffNet.txnId != _lastConsumedTxnId;
+    }
 
     void Start()
     {
@@ -239,10 +269,47 @@ public class SimManager : UdonSharpBehaviour
     void Update()
     {
         if (paused || isRestarting || clock == null) return;
-        double Tmission = clock.Now();
+
+
+
 
         bool hasNetCore = (netCore != null);
         bool isOwner = hasNetCore && Networking.IsOwner(gameObject);
+
+        // -----------------------------------------------------------------
+        // HANDOFF: requester ownership trigger (Phase 3)
+        // -----------------------------------------------------------------
+        if (!isOwner &&
+            handoffNet != null &&
+            handoffNet.state == 1 &&
+            handoffNet.targetPlayerId == Networking.LocalPlayer.playerId &&
+            handoffNet.txnId != _lastConsumedTxnId &&
+            handoffNet.txnId != _lastOwnershipRequestTxnId)
+        {
+            _lastOwnershipRequestTxnId = handoffNet.txnId;
+            HandoffLog($"REQUESTER: snapshot ready → taking ownership txn={handoffNet.txnId}");
+
+            authorityArmed = false;
+            handoffFreeze = true;
+
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
+
+            // IMPORTANT: bail out this frame to avoid mixed-state execution
+            return;
+        }
+
+        if (!Networking.IsOwner(gameObject) &&
+            handoffNet != null &&
+            netCore != null &&
+            handoffNet.txnId != _lastConsumedTxnId &&
+            netCore.handoffEstablishedTxnId == handoffNet.txnId)
+        {
+            HandoffLog($"REMOTE: handoff established via netCore → unfreeze txn={handoffNet.txnId}");
+
+            _lastConsumedTxnId = handoffNet.txnId;
+        }
+
+        double Tmission = clock.Now();
 
         double backTime = 0.0;
         if (netAtt != null)
@@ -267,26 +334,53 @@ public class SimManager : UdonSharpBehaviour
         // Remote:
         // - default delayed presentation time for rails/docked
         // - integrated: align to sampled netKin sim timeline
-        double Tview = Tmission;
 
-        if (isOwner)
+
+        double Tview;
+
+        bool freezeActive = IsFreezeActive();
+
+        bool ownerMutationBlocked = isOwner && (!authorityArmed || handoffFreeze);
+        if (freezeActive)
         {
-            if (netCore != null && netCore.mode == MODE_INTEGRATED && _simTValid)
-                Tview = _simT;
+            Tview = handoffNet.simT;
+
+            if (debugHandoff)
+                HandoffLog($"FREEZE ACTIVE txn={handoffNet.txnId} simT={handoffNet.simT:F3}");
+
+
+            // if (isOwner)
+            // {
+            //     handoffNet.RequestSerialization();
+            // }
         }
         else
         {
-            // Default remote delayed sim-time for rails/docked presentation
-            Tview = Tmission - backTime * clock.timeScale;
-
-            // Integrated remote world timing comes from latest RAW kinematic snapshot,
-            // not from interpolated kinematic playback.
-            if (presentedMode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
+            Tview = Tmission;
+            if (isOwner)
             {
-                netKin.UpdatePresentedState();   // update separate visual-smoothed output
-                Tview = netKin.rawSimT;          // coherent latest packet sim-time
+                if (netCore != null && netCore.mode == MODE_INTEGRATED && _simTValid)
+                    Tview = _simT;
             }
+            else
+            {
+                // Default remote delayed sim-time for rails/docked presentation
+                Tview = Tmission - backTime * clock.timeScale;
+
+                // Integrated remote world timing comes from latest RAW kinematic snapshot,
+                // not from interpolated kinematic playback.
+                if (presentedMode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
+                {
+                    netKin.UpdatePresentedState();   // update separate visual-smoothed output
+                    Tview = netKin.rawSimT;          // coherent latest packet sim-time
+                }
+            }
+
         }
+
+
+
+
 
         // 1) Evaluate ephemeris for the chosen presentation time
         if (ephem != null)
@@ -300,7 +394,20 @@ public class SimManager : UdonSharpBehaviour
         //    - owner docked motion
         //    - remote net-driven presentation
         //    - owner integrated does nothing here (FixedUpdate owns it)
-        TickCraft_UpdateSide(Tmission, Tview, tRenderNet, isOwner);
+        // 3) Craft handling
+        if (freezeActive)
+        {
+            ApplyFrozenHandoffSnapshot();
+        }
+        else
+        {
+            //    - owner rails propagation
+            //    - owner docked motion
+            //    - remote net-driven presentation
+            //    - owner integrated does nothing here (FixedUpdate owns it)
+            if (!ownerMutationBlocked || !isOwner)
+                TickCraft_UpdateSide(Tmission, Tview, tRenderNet, isOwner);
+        }
 
         // -----------------------------------------------------------------
         // Docking / undocking transitions
@@ -309,42 +416,47 @@ public class SimManager : UdonSharpBehaviour
         // Undock release request:
         // DockingComputer has already written the released craft state.
         // Switch directly to rails/conic from the current docked frame state.
-        if (dockingComp != null && dockingComp.requestUndock)
+        if (!ownerMutationBlocked)
         {
-            dockingComp.ExecuteUndockRelease(Tmission);
-        }
-
-        // Consume leave-docked-to-rails transition request
-        if (dockingComp != null && dockingComp.requestLeaveDockedToRails)
-        {
-            dockingComp.requestLeaveDockedToRails = false;
-
-            _settleAccum = 0f;
-            _simTValid = false;
-            _accumSim = 0.0;
-
-            EnterRails();
-
-            if (dock != null)
-                dock.ResetState();
-        }
-
-        // Docking capture check (owner only, gated by dockingAllowed)
-        if (DockingAllowedNow() && dockingComp != null && netCore != null && clock != null)
-        {
-            if (isOwner && netCore.mode != MODE_DOCKED)
+            // Undock release request
+            if (dockingComp != null && dockingComp.requestUndock)
             {
-                dockingComp.EvaluateLatchAndStart(Tmission);
+                dockingComp.ExecuteUndockRelease(Tmission);
+            }
 
-                if (dockingComp.requestEnterDocked)
+            // Consume leave-docked-to-rails transition request
+            if (dockingComp != null && dockingComp.requestLeaveDockedToRails)
+            {
+                dockingComp.requestLeaveDockedToRails = false;
+
+                _settleAccum = 0f;
+                _simTValid = false;
+                _accumSim = 0.0;
+
+                _holdIntegratedUntil = Tmission + (double)undockIntegratedHoldSeconds;
+                EnterIntegrated(Tmission);
+
+
+
+                if (dock != null)
+                    dock.ResetState();
+            }
+
+            // Docking capture check (owner only, gated by dockingAllowed)
+            if (DockingAllowedNow() && dockingComp != null && netCore != null && clock != null)
+            {
+                if (isOwner && netCore.mode != MODE_DOCKED)
                 {
-                    // DockingComputer is expected to have already populated dock snapshot via netCore.SetDocked(...)
-                    byte pid = craft != null ? craft.primaryBodyId : (byte)0;
-                    netCore.SetMode(MODE_DOCKED, pid, true);
+                    dockingComp.EvaluateLatchAndStart(Tmission);
 
-                    // Immediate attitude publish helps remotes snap cleanly
-                    if (netAtt != null)
-                        netAtt.ForcePublishAttitude();
+                    if (dockingComp.requestEnterDocked)
+                    {
+                        byte pid = craft != null ? craft.primaryBodyId : (byte)0;
+                        netCore.SetMode(MODE_DOCKED, pid, true);
+
+                        if (netAtt != null)
+                            netAtt.ForcePublishAttitude();
+                    }
                 }
             }
         }
@@ -368,7 +480,8 @@ public class SimManager : UdonSharpBehaviour
             return;
 
         bool isOwner = Networking.IsOwner(gameObject);
-        if (!isOwner) return;
+        if (!isOwner || !authorityArmed || handoffFreeze || IsFreezeActive())
+            return;
 
         byte mode = netCore.mode;
 
@@ -419,12 +532,12 @@ public class SimManager : UdonSharpBehaviour
             // Propellant bookkeeping
             if (craft != null && actuation != null)
             {
-                double dProp = actuation.mainMdot_kgps * h;
-                if (dProp > 0.0)
-                {
-                    craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
-                    craft.RecomputeMass();
-                }
+                // double dProp = actuation.mainMdot_kgps * h;
+                // if (dProp > 0.0)
+                // {
+                //     craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
+                //     craft.RecomputeMass();
+                // }
             }
 
             // Owner translation integration
@@ -436,8 +549,10 @@ public class SimManager : UdonSharpBehaviour
                 numeric.Step(h, t0);
             }
 
+            bool holdIntegrated = (clock != null && clock.Now() < _holdIntegratedUntil);
+
             // Auto-settle back to rails if force remains low long enough
-            if (autoModeSwitch)
+            if (autoModeSwitch && !holdIntegrated)
             {
                 double F = GetNetForceMagN();
 
@@ -632,15 +747,25 @@ public class SimManager : UdonSharpBehaviour
                 // direct ApplyRemoteKinematics() is intentionally not used here.
                 if (netAtt != null)
                     netAtt.ApplyRemoteAttitude();
-                if (netKin != null)
-                    netKin.ApplyRemoteRawToCraft();
+                bool freezeActive =
+                    handoffNet != null &&
+                    handoffNet.state == 1 &&
+                    handoffNet.txnId != _lastConsumedTxnId;
+
+                // During handoff freeze, do NOT keep advancing remote integrated craft
+                // from raw packets; world and craft must both stay frozen at the snapshot.
+                if (!freezeActive)
+                {
+                    if (netKin != null)
+                        netKin.ApplyRemoteRawToCraft();
+                }
 
 
             }
             else if (mode == MODE_DOCKED)
             {
                 // Do NOT apply netKin while docked; docking is deterministic from station + snapshot
-                if (DockingAllowedNow() && dockingComp != null)
+                if (dockingComp != null)
                 {
                     dockingComp.EvaluateDockedRemote(Tview);
                 }
@@ -761,70 +886,117 @@ public class SimManager : UdonSharpBehaviour
 
     public override void OnOwnershipTransferred(VRCPlayerApi player)
     {
-        string playerName = player != null ? player.displayName : "null";
-        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
-
-        Debug.Log("[SimManager] OnOwnershipTransferred: local=" + localName +
-                " newOwner=" + playerName +
-                " amOwner=" + Networking.IsOwner(gameObject));
-
         if (!Networking.IsOwner(gameObject)) return;
 
-        _accumSim = 0.0;
-        _settleAccum = 0f;
-
-        if (netCore != null && netCore.mode == MODE_INTEGRATED && netKin != null && netKin.rawValid)
+        if (handoffNet == null || handoffNet.state != 1)
         {
-            // adopt the same integrated snapshot timeline the remote view was using
-            if (craft != null)
-            {
-                craft.rx = netKin.rawRx;
-                craft.ry = netKin.rawRy;
-                craft.rz = netKin.rawRz;
+            HandoffLog("Ownership transfer (non-handoff)");
+            return;
+        }
 
-                craft.vx = netKin.rawVx;
-                craft.vy = netKin.rawVy;
-                craft.vz = netKin.rawVz;
-            }
+        if (handoffNet.targetPlayerId != Networking.LocalPlayer.playerId)
+        {
+            HandoffLog("Ownership transfer not intended for us");
+            return;
+        }
 
-            _simT = netKin.rawSimT;
+        // stay frozen until adoption is complete
+        authorityArmed = false;
+        handoffFreeze = true;
+
+
+        HandoffLog($"TAKEOVER START txn={handoffNet.txnId}");
+
+        // --- Adopt snapshot ---
+        if (craft != null)
+            craft.primaryBodyId = handoffNet.primaryBodyId;
+
+
+        _simT = handoffNet.simT;
+
+        craft.rx = handoffNet.rx;
+        craft.ry = handoffNet.ry;
+        craft.rz = handoffNet.rz;
+
+        craft.vx = handoffNet.vx;
+        craft.vy = handoffNet.vy;
+        craft.vz = handoffNet.vz;
+
+        craftAtt.qBE = new Quaternion(
+            handoffNet.qx,
+            handoffNet.qy,
+            handoffNet.qz,
+            handoffNet.qw
+        );
+
+        craftAtt.wx = handoffNet.wx;
+        craftAtt.wy = handoffNet.wy;
+        craftAtt.wz = handoffNet.wz;
+
+
+        if (handoffNet.mode == MODE_INTEGRATED)
+        {
+            _simT = handoffNet.simT;
             _simTValid = true;
         }
         else
         {
+            _simT = handoffNet.simT;
             _simTValid = false;
         }
 
+        _accumSim = 0.0;
+        _settleAccum = 0f;
 
+        // --- Transfer subordinate ownership ---
         TransferSubordinateOwnershipsToLocal();
-        ForcePublishAuthoritativeState();
 
-        Debug.Log("[SimManager] OnOwnershipTransferred: takeover complete.");
+        // --- Mark txn consumed ---
+        _lastConsumedTxnId = handoffNet.txnId;
+        _lastOwnershipRequestTxnId = -1;
+
+        if (netCore != null)
+            netCore.AdoptModeImmediate(handoffNet.mode, handoffNet.primaryBodyId);
+
+        if (netAtt != null)
+            netAtt.ForcePublishAttitude();
+
+
+        if (handoffNet.mode == MODE_INTEGRATED && netKin != null)
+        {
+            netKin.currentOwnerSimT = _simT;
+            netKin.ForcePublishKinematics();
+        }
+
+        if (handoffNet.mode == MODE_DOCKED)
+            AdoptDockRuntimeFromNetCore();
+        else if (dock != null)
+            dock.ResetState();
+
+        HandoffLog("SNAPSHOT ADOPTED + OWNERSHIP READY");
+
+        // --- Resume ---
+        authorityArmed = true;
+        handoffFreeze = false;
+
+        if (netCore != null)
+        {
+            netCore.SetHandoffEstablishedTxnId(handoffNet.txnId);
+            netCore.ForcePublishCore();
+        }
+
+        HandoffLog("HANDOFF COMPLETE → SIM RESUMED");
     }
 
     public override bool OnOwnershipRequest(VRCPlayerApi requester, VRCPlayerApi newOwner)
     {
-        string requesterName = requester != null ? requester.displayName : "null";
-        string newOwnerName = newOwner != null ? newOwner.displayName : "null";
-        string localName = Networking.LocalPlayer != null ? Networking.LocalPlayer.displayName : "null";
-
-        Debug.Log("[SimManager] OnOwnershipRequest: local=" + localName +
-                " requester=" + requesterName +
-                " newOwner=" + newOwnerName +
-                " amOwner=" + Networking.IsOwner(gameObject));
-
-        if (Networking.IsOwner(gameObject))
+        if (Networking.IsOwner(gameObject) && ownershipTransferHardLocked)
         {
-            ForcePublishAuthoritativeState();
-
-            if (!CanApproveOwnershipTransfer())
-            {
-                Debug.Log("[SimManager] OnOwnershipRequest: denied (hard ownership lock active).");
-                return false;
-            }
+            HandoffLog("OnOwnershipRequest denied: hard lock active");
+            return false;
         }
 
-        Debug.Log("[SimManager] OnOwnershipRequest: approving transfer.");
+        HandoffLog("OnOwnershipRequest approved");
         return true;
     }
 
@@ -856,6 +1028,70 @@ public class SimManager : UdonSharpBehaviour
         Networking.SetOwner(local, gameObject);
 
         Debug.Log("[SimManager] BeginOwnershipTransfer: SetOwner called.");
+    }
+
+
+    private void BeginHandoffForRequester(int targetPlayerId)
+    {
+        var local = Networking.LocalPlayer;
+
+        if (!Networking.IsOwner(gameObject)) return;
+
+        if (targetPlayerId <= 0)
+        {
+            HandoffLog("No valid requester");
+            return;
+        }
+        if (targetPlayerId == Networking.LocalPlayer.playerId)
+        {
+            HandoffLog("Refusing self-handoff");
+            return;
+        }
+        HandoffLog($"BEGIN HANDOFF → target={targetPlayerId}");
+
+        // --- Freeze immediately ---
+        handoffFreeze = true;
+        authorityArmed = false;
+
+        // --- Snapshot ---
+        handoffNet.txnId++;
+        handoffNet.sourcePlayerId = local.playerId;
+        handoffNet.targetPlayerId = targetPlayerId;
+
+        handoffNet.state = 1; // READY
+
+        byte mode = (netCore != null) ? netCore.mode : MODE_RAILS;
+        byte primary = (craft != null) ? craft.primaryBodyId : (byte)0;
+
+        double snapMissionT = (clock != null) ? clock.Now() : 0.0;
+        handoffNet.simT = (mode == MODE_INTEGRATED && _simTValid) ? _simT : snapMissionT;
+        handoffNet.mode = mode;
+        handoffNet.primaryBodyId = primary;
+
+        handoffNet.rx = craft.rx;
+        handoffNet.ry = craft.ry;
+        handoffNet.rz = craft.rz;
+
+        handoffNet.vx = craft.vx;
+        handoffNet.vy = craft.vy;
+        handoffNet.vz = craft.vz;
+
+        Quaternion q = craftAtt.qBE;
+        handoffNet.qx = q.x;
+        handoffNet.qy = q.y;
+        handoffNet.qz = q.z;
+        handoffNet.qw = q.w;
+
+        handoffNet.wx = (float)craftAtt.wx;
+        handoffNet.wy = (float)craftAtt.wy;
+        handoffNet.wz = (float)craftAtt.wz;
+
+        netCore.ForcePublishCore();
+
+        handoffNet.CommitAndSerialize(); // ← SINGLE SEND
+        HandoffLog("SNAPSHOT SERIALIZED");
+
+        // handoffNet.RequestSerialization();
     }
 
     /// <summary>
@@ -919,6 +1155,58 @@ public class SimManager : UdonSharpBehaviour
         return !ownershipTransferHardLocked;
     }
 
+    [NetworkCallable]
+    public void Evt_RequestHandoff(int requesterPlayerId)
+    {
+        if (!Networking.IsOwner(gameObject))
+        {
+            HandoffLog("Ignored handoff request (not owner)");
+            return;
+        }
+
+        VRCPlayerApi requester;
+        if (!TryGetPlayerById(requesterPlayerId, out requester))
+        {
+            HandoffLog("Denied handoff: requester invalid or missing");
+            return;
+        }
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local != null && requester.playerId == local.playerId)
+        {
+            HandoffLog("Denied handoff: requester is current owner");
+            return;
+        }
+
+
+        if (handoffNet == null)
+        {
+            HandoffLog("ERROR: handoffNet not assigned");
+            return;
+        }
+
+        if (handoffFreeze || !authorityArmed)
+        {
+            HandoffLog("Ignored request (handoff already in progress)");
+            return;
+        }
+
+        if (isRestarting)
+        {
+            HandoffLog("Ignored request (reset lock active)");
+            return;
+        }
+
+        if (ownershipTransferHardLocked)
+        {
+            HandoffLog("Denied handoff: ownership transfer hard-locked");
+            return;
+        }
+
+        HandoffLog("HANDOFF REQUEST RECEIVED");
+
+        BeginHandoffForRequester(requesterPlayerId);
+    }
 
     /// <summary>
     /// New manager owner pulls subordinate sync objects under the same owner.
@@ -1129,6 +1417,101 @@ public class SimManager : UdonSharpBehaviour
         if (resetLockedByMaster && !Networking.IsMaster) return false;
         return true;
     }
+
+    private void ApplyFrozenHandoffSnapshot()
+    {
+        if (handoffNet == null || craft == null || craftAtt == null) return;
+
+        craft.primaryBodyId = handoffNet.primaryBodyId;
+
+        craft.rx = handoffNet.rx;
+        craft.ry = handoffNet.ry;
+        craft.rz = handoffNet.rz;
+
+        craft.vx = handoffNet.vx;
+        craft.vy = handoffNet.vy;
+        craft.vz = handoffNet.vz;
+
+        craftAtt.qBE = new Quaternion(
+            handoffNet.qx,
+            handoffNet.qy,
+            handoffNet.qz,
+            handoffNet.qw
+        );
+
+        craftAtt.wx = handoffNet.wx;
+        craftAtt.wy = handoffNet.wy;
+        craftAtt.wz = handoffNet.wz;
+    }
+    private void AdoptDockRuntimeFromNetCore()
+    {
+        if (dock == null || netCore == null) return;
+
+        if (netCore.mode != MODE_DOCKED)
+        {
+            dock.ResetState();
+            return;
+        }
+
+        dock.active = true;
+        dock.phase = netCore.dockPhase;
+
+        dock.dockedStationIndex = netCore.dockStationIndex;
+        dock.stationPortIndex = netCore.dockStationPortIndex;
+        dock.craftPortIndex = netCore.dockCraftPortIndex;
+
+        dock.captureTime = netCore.dockCaptureT0;
+
+        dock.relPos_SB = netCore.dockRelPos_SB;
+        dock.qCraftToStation = netCore.dock_qCraftToStation;
+
+        dock.retractCommanded = false;
+
+        if (dock.phase == DockingRuntimeState.DOCK_SOFT)
+        {
+            dock.retractS = 0f;
+        }
+        else if (dock.phase == DockingRuntimeState.DOCK_RETRACT)
+        {
+            // reconstruct deterministic retract progress from published retract start time
+            double tNow = (clock != null) ? clock.Now() : 0.0;
+            double t0 = netCore.dockRetractT0;
+
+            float s = 0f;
+            if (t0 > 0.0)
+                s = (float)((tNow - t0) * (double)dock.retractSpeed);
+
+            if (s < 0f) s = 0f;
+            if (s > 1f) s = 1f;
+            dock.retractS = s;
+        }
+        else if (dock.phase == DockingRuntimeState.DOCK_HARD)
+        {
+            dock.retractS = 1f;
+        }
+
+        // Recompute hard target from cached port frames so EvaluateDocked() has it locally
+        if (dockingComp != null &&
+            dock.dockedStationIndex >= 0 &&
+            stations != null &&
+            dock.dockedStationIndex < stations.Length &&
+            stations[dock.dockedStationIndex] != null)
+        {
+            dockingComp.ComputeHardTargetRelativePose(stations[dock.dockedStationIndex]);
+        }
+    }
+
+    private bool TryGetPlayerById(int playerId, out VRCPlayerApi player)
+    {
+        player = VRCPlayerApi.GetPlayerById(playerId);
+        return player != null && player.IsValid();
+    }
+    // private int GetWaitingSeatPlayerId()
+    // {
+    //     if (cockpitAuthorityManager == null) return -1;
+    //     return cockpitAuthorityManager.GetWaitingSeatPlayerIdForHandoff();
+    // }
+
     private void ApplyRender()
     {
         if (orbit != null) orbit.Evaluate();
@@ -1144,4 +1527,16 @@ public class SimManager : UdonSharpBehaviour
         if (stewartResolver != null)
             stewartResolver.Tick();
     }
+
+    private void HandoffLog(string msg)
+    {
+        if (!debugHandoff) return;
+
+        var p = Networking.LocalPlayer;
+        string who = (p != null) ? $"[{p.displayName}]" : "[unknown]";
+
+        Debug.Log($"[HANDOFF] {who} {msg}");
+    }
+
+
 }
