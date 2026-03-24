@@ -41,9 +41,9 @@ public class KnobTest : UdonSharpBehaviour
     {
         valueDisplay.color = Color.green;
     }
-    public int Switch;
+    public int SwitchState;
     public void OnSwitch()
     {
-        valueDisplay.color = Switch==0 ? Color.red : Color.green;
+        valueDisplay.color = SwitchState == 0 ? Color.red : Color.green;
     }
 }
