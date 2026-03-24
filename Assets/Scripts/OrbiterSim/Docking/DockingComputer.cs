@@ -427,7 +427,7 @@ public class DockingComputer : UdonSharpBehaviour
         Vector3 h = Vector3.Cross(r, v); // m^2/s
         float rMag = Mathf.Sqrt(r2);
         if (rMag < 1e-6f) return Vector3.zero;
-        return h / (r2 * rMag); // h / r^3                  // rad/s approx
+        return h / (r2); // h / r^3                  // rad/s approx
     }
 
 

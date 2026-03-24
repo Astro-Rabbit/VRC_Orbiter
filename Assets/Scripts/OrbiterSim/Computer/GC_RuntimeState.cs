@@ -38,6 +38,11 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public const byte MODE_RELVEL_PROGRADE  = 8;  // continuous: point at +dv (station - craft)
     public const byte MODE_RELVEL_RETROGRADE= 9;  // continuous: point at -dv
 
+    public const byte MODE_HOLD_HORIZON        = 10; // continuous: local horizon attitude hold
+    public const byte MODE_POINT_NODE_VECTOR   = 11; // continuous: point selected body axis along selected node dV
+
+
+
     // --------------------
     // Executor slot (future: node execution)
     // --------------------
@@ -82,6 +87,9 @@ public class GC_RuntimeState : UdonSharpBehaviour
 
     public const byte PROG_DOCK_POINT_PORT  = 13;
     public const byte PROG_DOCK_ALIGN_PORTS = 14;
+    public const byte PROG_HOLD_HORIZON       = 15;
+    public const byte PROG_POINT_NODE_VECTOR  = 16;
+
     public const byte PROG_EXEC_NODE     = 20; // executor is actively controlling
 
 
@@ -108,6 +116,12 @@ public class GC_RuntimeState : UdonSharpBehaviour
 
     [Header("Policy")]
     public byte policyId = POLICY_V1_DEFAULT;
+
+
+    [Header("Node execution policy")]
+    [Tooltip("If true, armed nodes may auto-enter executor wait/slew/burn flow. If false, nodes remain planned only and must be flown manually.")]
+    public bool autoExecuteArmedNodes = true;
+
 
     [Header("Resume behavior (used by executor later)")]
     [Tooltip("Mode to restore after executor completes (if configured).")]
@@ -161,11 +175,19 @@ public class GC_RuntimeState : UdonSharpBehaviour
     public void ResetState(double nowT)
     {
         status = STATUS_IDLE;
+
         activeModeId = MODE_MANUAL;
+        activeProgramId = PROG_MANUAL;
+
+        activeTranslateModeId = XLAT_MANUAL;
+
         activeExecutorId = EXEC_NONE;
         executorPhase = EXEC_PHASE_NONE;
+        executorNodeIndex = -1;
+        cachedModeBeforeExec = MODE_MANUAL;
 
         policyId = POLICY_V1_DEFAULT;
+        autoExecuteArmedNodes = true;
 
         resumeModeId = MODE_MANUAL;
         resumeModeOnExecutorDone = true;
@@ -178,10 +200,10 @@ public class GC_RuntimeState : UdonSharpBehaviour
         lastFaultCode = 0;
         lastFaultMessage = "";
 
-        activeTranslateModeId = XLAT_MANUAL;
+        lastNonManualModeId = MODE_MANUAL;
+        lastManualInputTime = nowT;
+
         lastNonManualTranslateModeId = XLAT_MANUAL;
         lastManualTranslateInputTime = nowT;
-
-
     }
 }

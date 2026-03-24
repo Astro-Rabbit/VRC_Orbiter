@@ -2,81 +2,162 @@
 using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon;
+using VRC.Udon.Common.Interfaces;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
+[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class MFDTargetPage : MFDPage
 {
     [Header("References")]
+    public CraftNetState netCore;
     public OrbitAnalyzer tgtAnalyzer;
     public GuidanceNavContactsComputer contacts;
     public GuidanceNavContactsState contactsState;
 
-    private StationStateModel station = null;
+    [Header("Target Orbit Sources")]
+    [Tooltip("Must match contacts.stations[] order exactly.")]
+    public ConicState[] stationConics;
 
-    [UdonSynced] private int targetIndex = -1;
-    [UdonSynced] private int portIndex = -1;
+    private StationStateModel station = null;
+    private int cachedTargetIndex = int.MinValue;
 
     public override void OnButton(MFD display, ButtonSide side, int num)
     {
+        int targetIndex = GetSelectedTargetIndex();
+        int portIndex = GetSelectedPortIndex();
+
         if (side == ButtonSide.Bottom && num == 2) {
             display.SetPage((byte)MFDPageID.Menu);
-        } else if (side == ButtonSide.Left) {
+            return;
+        }
+
+        if (contacts == null || contacts.stations == null) {
+            return;
+        }
+
+        int stationCount = contacts.stations.Length;
+
+        if (side == ButtonSide.Left) {
             if (num == 1 && targetIndex > 0) {
-                SetTargetIndex(targetIndex - 1);
-            } else if (num == 3 && targetIndex < contacts.stations.Length - 1) {
-                SetTargetIndex(targetIndex + 1);
+                RequestTargetIndex(targetIndex - 1);
+            } else if (num == 3 && targetIndex < stationCount - 1) {
+                RequestTargetIndex(targetIndex + 1);
             }
         } else if (side == ButtonSide.Right) {
+            if (targetIndex < 0 || targetIndex >= stationCount) {
+                return;
+            }
+
+            StationStateModel st = contacts.stations[targetIndex];
+            if (st == null) {
+                return;
+            }
+
+            int portCount = st.dockingPortCount;
+
             if (num == 1 && portIndex > 0) {
-                SetPortIndex(portIndex - 1);
-            } else if (num == 3 && portIndex < station.dockingPortCount - 1) {
-                SetPortIndex(portIndex + 1);
+                RequestPortIndex(targetIndex, portIndex - 1);
+            } else if (num == 3 && portIndex < portCount - 1) {
+                RequestPortIndex(targetIndex, portIndex + 1);
             }
         }
     }
 
-    public void SetTargetIndex(int index)
+    private void Update()
     {
-        if (!Networking.IsOwner(gameObject)) {
-            Networking.SetOwner(Networking.LocalPlayer, gameObject);
-        }
-        targetIndex = index;
-        OnTargetIndexChanged();
+        RefreshSelectedStationBindings();
     }
 
-    public void SetPortIndex(int index)
+    private int GetSelectedTargetIndex()
     {
-        if (!Networking.IsOwner(gameObject)) {
-            Networking.SetOwner(Networking.LocalPlayer, gameObject);
-        }
-        portIndex = index;
-        OnPortIndexChanged();
+        if (contactsState == null) return -1;
+        return contactsState.selectedStationIndex;
     }
 
-    private void OnTargetIndexChanged()
+    private int GetSelectedPortIndex()
     {
-        contactsState.selectedStationIndex = targetIndex;
+        if (contactsState == null) return -1;
+        return contactsState.selectedStationDockPortIndex;
+    }
+
+    private void RequestTargetIndex(int index)
+    {
+        if (netCore == null) return;
+
+        netCore.SendCustomNetworkEvent(
+            NetworkEventTarget.Owner,
+            nameof(CraftNetState.Net_RequestSelectedStation),
+            index
+        );
+    }
+
+    private void RequestPortIndex(int targetIndex, int portIndex)
+    {
+        if (netCore == null) return;
+
+        netCore.SendCustomNetworkEvent(
+            NetworkEventTarget.Owner,
+            nameof(CraftNetState.Net_RequestSelectedStationPort),
+            targetIndex,
+            portIndex
+        );
+    }
+
+    private void RefreshSelectedStationBindings()
+    {
+        int targetIndex = GetSelectedTargetIndex();
+
+        if (targetIndex == cachedTargetIndex) {
+            return;
+        }
+
+        cachedTargetIndex = targetIndex;
+        station = null;
+
+        if (tgtAnalyzer != null) {
+            tgtAnalyzer.conic = null;
+        }
+
+        if (contacts == null || contacts.stations == null) {
+            return;
+        }
+
+        if (targetIndex < 0 || targetIndex >= contacts.stations.Length) {
+            return;
+        }
+
         station = contacts.stations[targetIndex];
-        //FIXME: Needs to be replaced when stationstatemodel gets proper references
-        tgtAnalyzer.conic = (ConicState)station.gameObject.transform.GetChild(0).GetComponent(typeof(UdonBehaviour));
 
-        portIndex = -1;
-        contactsState.selectedStationDockPortIndex = portIndex;
-    }
+        if (tgtAnalyzer == null || stationConics == null) {
+            return;
+        }
 
-    private void OnPortIndexChanged()
-    {
-        contactsState.selectedStationDockPortIndex = portIndex;
+        if (targetIndex < 0 || targetIndex >= stationConics.Length) {
+            return;
+        }
+
+        tgtAnalyzer.conic = stationConics[targetIndex];
+        if (tgtAnalyzer.conic != null) {
+            tgtAnalyzer.UpdateInfo();
+        }
     }
 
     public override void DrawDisplay(MFD display)
     {
+        RefreshSelectedStationBindings();
+
         display.ClearGraphics();
         display.ClearText();
 
-        int stationCount = contacts.stations.Length;
-        for (int i = 0; i < stationCount; i++) {
-            display.DrawText(contacts.stations[i].gameObject.name, 2 + i, 2, i == targetIndex ? Color.green : Color.white);
+        int targetIndex = GetSelectedTargetIndex();
+        int portIndex = GetSelectedPortIndex();
+
+        if (contacts != null && contacts.stations != null) {
+            int stationCount = contacts.stations.Length;
+
+            for (int i = 0; i < stationCount; i++) {
+                string name = contacts.stations[i] != null ? contacts.stations[i].gameObject.name : ("Station " + i);
+                display.DrawText(name, 2 + i, 2, i == targetIndex ? Color.green : Color.white);
+            }
         }
 
         if (station != null) {
@@ -86,17 +167,11 @@ public class MFDTargetPage : MFDPage
             }
         }
 
-        display.DrawVerticalText(" Λ| ", 5, 0, Color.white);
+        display.DrawVerticalText(" ^| ", 5, 0, Color.white);
         display.DrawVerticalText(" |V ", 15, 0, Color.white);
-        display.DrawVerticalText(" Λ| ", 5, MFD.TEXT_COLUMNS - 1, Color.white);
+        display.DrawVerticalText(" ^| ", 5, MFD.TEXT_COLUMNS - 1, Color.white);
         display.DrawVerticalText(" |V ", 15, MFD.TEXT_COLUMNS - 1, Color.white);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
-    }
-
-    public override void OnDeserialization()
-    {
-        OnTargetIndexChanged();
-        OnPortIndexChanged();
     }
 }

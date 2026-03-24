@@ -617,6 +617,178 @@ public class OrbitHelpers : UdonSharpBehaviour
         return false;
     }
 
+
+    /// <summary>
+    /// Converts true anomaly to mean anomaly for either an elliptic or hyperbolic conic.
+    ///
+    /// Ellipse:
+    /// - returns the standard mean anomaly M in [0, 2π).
+    ///
+    /// Hyperbola:
+    /// - returns the hyperbolic mean anomaly Mh (signed, not wrapped).
+    ///
+    /// Inputs:
+    /// - e: eccentricity magnitude.
+    /// - nuRad: true anomaly [rad].
+    /// - eTol: near-parabolic exclusion tolerance (|1-e| <= eTol).
+    ///
+    /// Output:
+    /// - meanAnomalyRad:
+    ///     ellipse   -> M
+    ///     hyperbola -> Mh
+    /// </summary>
+    public static bool TryMeanAnomalyFromTrueAnomaly(
+        double e,
+        double nuRad,
+        double eTol,
+        out double meanAnomalyRad)
+    {
+        meanAnomalyRad = 0.0;
+
+        if (Math.Abs(1.0 - e) <= eTol)
+            return false;
+
+        if (e < 1.0)
+            return TryMeanAnomalyFromTrueAnomaly_Ellipse(e, nuRad, out meanAnomalyRad);
+
+        if (e > 1.0)
+            return TryMeanAnomalyFromTrueAnomaly_Hyperbola(e, nuRad, out meanAnomalyRad);
+
+        return false;
+    }
+
+    /// <summary>
+    /// Propagates a primary-relative two-body conic from inertial-frame elements and a true anomaly
+    /// defined at epochT, returning future primary-relative state in the same solver inertial frame.
+    ///
+    /// IMPORTANT:
+    /// - The orientation angles (i, Ω, ω) must be expressed in the solver inertial reference plane,
+    ///   not a body-equatorial/display reference plane.
+    /// - This helper is intended for propagation from nav's inertial-fit angles, e.g.
+    ///   iInertialRad / raanInertialRad / argpInertialRad.
+    ///
+    /// Inputs:
+    /// - aMeters, e: conic shape
+    /// - iInertialRad, raanInertialRad, argpInertialRad: inertial-frame orientation
+    /// - nuAtEpochRad: true anomaly at epochT
+    /// - epochT: epoch mission time [s]
+    /// - sampleT: target mission time [s]
+    /// - mu: gravitational parameter [m^3/s^2]
+    /// - maxIters: Kepler solver iterations
+    /// - eTol: near-parabolic exclusion tolerance
+    ///
+    /// Outputs:
+    /// - rx,ry,rz: propagated relative position [m]
+    /// - vx,vy,vz: propagated relative velocity [m/s]
+    /// </summary>
+    public static bool TryPropagateConicStateFromElements(
+        double aMeters,
+        double e,
+        double iInertialRad,
+        double raanInertialRad,
+        double argpInertialRad,
+        double nuAtEpochRad,
+        double epochT,
+        double sampleT,
+        double mu,
+        int maxIters,
+        double eTol,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
+    {
+        rx = ry = rz = 0.0;
+        vx = vy = vz = 0.0;
+
+        if (mu <= 0.0) return false;
+        if (maxIters <= 0) maxIters = 12;
+        if (Math.Abs(1.0 - e) <= eTol) return false;
+
+        double mean0;
+        if (!TryMeanAnomalyFromTrueAnomaly(e, nuAtEpochRad, eTol, out mean0))
+            return false;
+
+        double dt = sampleT - epochT;
+
+        // -------------------------
+        // Elliptic
+        // -------------------------
+        if (e < 1.0)
+        {
+            if (aMeters <= 0.0) return false;
+
+            double n = Math.Sqrt(mu / (aMeters * aMeters * aMeters));
+            if (!(n > 0.0)) return false;
+
+            double M = Wrap2Pi(mean0 + n * dt);
+
+            double E;
+            if (!TrySolveKeplerEllipse_E(M, e, maxIters, 1e-10, out E))
+                return false;
+
+            double cosE = Math.Cos(E);
+            double sinE = Math.Sin(E);
+
+            double fac = Math.Sqrt(Math.Max(0.0, 1.0 - e * e));
+
+            double xpf = aMeters * (cosE - e);
+            double ypf = aMeters * (fac * sinE);
+
+            double edot = n / (1.0 - e * cosE);
+            double vxpf = -aMeters * sinE * edot;
+            double vypf =  aMeters * fac * cosE * edot;
+
+            return TryPQWStateToInertial(
+                raanInertialRad, iInertialRad, argpInertialRad,
+                xpf, ypf, 0.0,
+                vxpf, vypf, 0.0,
+                out rx, out ry, out rz,
+                out vx, out vy, out vz);
+        }
+
+        // -------------------------
+        // Hyperbolic
+        // -------------------------
+        if (e > 1.0)
+        {
+            if (aMeters >= 0.0) return false;
+
+            double absA = -aMeters;
+            double n = Math.Sqrt(mu / (absA * absA * absA));
+            if (!(n > 0.0)) return false;
+
+            double Mh = mean0 + n * dt;
+
+            double H;
+            if (!TrySolveKeplerHyperbola_H(Mh, e, maxIters, 1e-10, out H))
+                return false;
+
+            double coshH = Math.Cosh(H);
+            double sinhH = Math.Sinh(H);
+            double fac = Math.Sqrt(e * e - 1.0);
+
+            double xpf = absA * (e - coshH);
+            double ypf = absA * (fac * sinhH);
+
+            double dMdH = e * coshH - 1.0;
+            if (Math.Abs(dMdH) < 1e-15) return false;
+
+            double Hdot = n / dMdH;
+
+            double vxpf = (-absA * sinhH) * Hdot;
+            double vypf = ( absA * fac * coshH) * Hdot;
+
+            return TryPQWStateToInertial(
+                raanInertialRad, iInertialRad, argpInertialRad,
+                xpf, ypf, 0.0,
+                vxpf, vypf, 0.0,
+                out rx, out ry, out rz,
+                out vx, out vy, out vz);
+        }
+
+        return false;
+    }
+
+
     /// <summary>
     /// Builds the instantaneous RTN (Radial–Transverse–Normal) orthonormal basis from a relative state.
     ///
@@ -823,6 +995,76 @@ public class OrbitHelpers : UdonSharpBehaviour
         double th = Math.Tanh(0.5 * H);
         double k = Math.Sqrt((e + 1.0) / (e - 1.0));
         return 2.0 * Math.Atan(k * th);
+    }
+
+
+    /// <summary>
+    /// Rotates a PQW-frame position/velocity state into the solver inertial frame
+    /// using the standard 3-1-3 sequence (Ω, i, ω).
+    /// </summary>
+    private static bool TryPQWStateToInertial(
+        double raanRad,
+        double iRad,
+        double argpRad,
+        double rpx, double rpy, double rpz,
+        double vpx, double vpy, double vpz,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
+    {
+        rx = ry = rz = 0.0;
+        vx = vy = vz = 0.0;
+
+        double m00, m01, m02;
+        double m10, m11, m12;
+        double m20, m21, m22;
+
+        BuildPQWToInertialMatrix(
+            raanRad, iRad, argpRad,
+            out m00, out m01, out m02,
+            out m10, out m11, out m12,
+            out m20, out m21, out m22);
+
+        rx = m00 * rpx + m01 * rpy + m02 * rpz;
+        ry = m10 * rpx + m11 * rpy + m12 * rpz;
+        rz = m20 * rpx + m21 * rpy + m22 * rpz;
+
+        vx = m00 * vpx + m01 * vpy + m02 * vpz;
+        vy = m10 * vpx + m11 * vpy + m12 * vpz;
+        vz = m20 * vpx + m21 * vpy + m22 * vpz;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds the PQW->inertial direction-cosine matrix for the standard 3-1-3
+    /// element rotation sequence (Ω, i, ω).
+    /// </summary>
+    private static void BuildPQWToInertialMatrix(
+        double raanRad,
+        double iRad,
+        double argpRad,
+        out double m00, out double m01, out double m02,
+        out double m10, out double m11, out double m12,
+        out double m20, out double m21, out double m22)
+    {
+        double cO = Math.Cos(raanRad);
+        double sO = Math.Sin(raanRad);
+        double ci = Math.Cos(iRad);
+        double si = Math.Sin(iRad);
+        double cw = Math.Cos(argpRad);
+        double sw = Math.Sin(argpRad);
+
+        m00 =  cO * cw - sO * sw * ci;
+        m01 = -cO * sw - sO * cw * ci;
+        m02 =  sO * si;
+
+        m10 =  sO * cw + cO * sw * ci;
+        m11 = -sO * sw + cO * cw * ci;
+        m12 = -cO * si;
+
+        m20 =  sw * si;
+        m21 =  cw * si;
+        m22 =  ci;
     }
 
     // -------------------------

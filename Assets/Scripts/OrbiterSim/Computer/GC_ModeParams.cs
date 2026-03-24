@@ -47,6 +47,10 @@ public class GC_ModeParams : UdonSharpBehaviour
     [Header("Blending")]
     public bool blendDirectTorqueWithPD = true;
 
+    [Header("Maneuver node selection")]
+    [Tooltip("Selected maneuver node index for node-vector pointing/display. Defaults to 0.")]
+    public byte selectedNodeIndex = 0;
+
     public void ResetDefaults()
     {
         qTarget_BE = Quaternion.identity;
@@ -60,5 +64,6 @@ public class GC_ModeParams : UdonSharpBehaviour
 
         tauDirect_B = Vector3.zero;
         blendDirectTorqueWithPD = true;
+        selectedNodeIndex = 0;        
     }
 }

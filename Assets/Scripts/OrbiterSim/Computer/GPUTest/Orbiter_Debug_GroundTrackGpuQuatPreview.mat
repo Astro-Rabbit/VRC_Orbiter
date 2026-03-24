@@ -1,0 +1,49 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Orbiter_Debug_GroundTrackGpuQuatPreview
+  m_Shader: {fileID: 4800000, guid: f233f0cf88354d64eab43069f9918b76, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _QuatTex:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _A: 4537400
+    - _AltDisplayScale: 1000000
+    - _ArgP: 6.2823305
+    - _BodyRadius: 1737400
+    - _DebugGain: 2
+    - _E: 0.009999996
+    - _Inc: 0.009999694
+    - _Mu: 4.9048694e+12
+    - _Nu0: 0.036494635
+    - _RAAN: 0.00085654965
+    - _SampleCount: 256
+    - _SampleStepSec: 30
+    - _T0: 156.10605
+    m_Colors:
+    - _BodyOmega: {r: -0.000000089374716, g: -0.00000022657333, b: 0.0000026505322,
+        a: 0}
+    - _BodyQPF2E: {r: 0.039949894, g: -0.022400513, b: 0.13475485, a: 0.9898199}
+  m_BuildTextureStacks: []

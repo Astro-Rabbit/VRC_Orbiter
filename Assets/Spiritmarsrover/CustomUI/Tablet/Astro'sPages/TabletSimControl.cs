@@ -29,6 +29,9 @@ public class TabletSimControl : UdonSharpBehaviour
     [Header("Selection")]
     public int selectedScenarioIndex = 0;
 
+    [Header("Debug")]
+    public bool debugLog = true;
+
     private float _refreshTimer = 0f;
 
     private bool _lastCanReset = false;
@@ -50,6 +53,37 @@ public class TabletSimControl : UdonSharpBehaviour
             RefreshUI(false);
         }
     }
+
+
+    public void OwnerSwap()
+    {
+        if (simManager == null)
+        {
+            Debug.Log("[HandoffUIButton] ERROR: SimManager not assigned");
+            return;
+        }
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+
+        if (local == null)
+        {
+            Debug.Log("[HandoffUIButton] ERROR: No local player");
+            return;
+        }
+
+        int myId = local.playerId;
+
+        if (debugLog)
+            Debug.Log($"[HandoffUIButton] Requesting handoff → playerId={myId}");
+
+        // Send request ONLY to current owner of SimManager
+        simManager.SendCustomNetworkEvent(
+            VRC.Udon.Common.Interfaces.NetworkEventTarget.Owner,
+            nameof(SimManager.Evt_RequestHandoff),
+            myId
+        );
+    }
+
 
     public void ScenarioPrev()
     {
