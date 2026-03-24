@@ -11,6 +11,8 @@ public class MFDFontDataBaker : Editor
 
     private int atlasW;
     private int atlasH;
+    private float pointSize;
+    private float baseline;
 
     public override void OnInspectorGUI()
     {
@@ -52,22 +54,23 @@ public class MFDFontDataBaker : Editor
         atlasW = target.atlas.width;
         atlasH = target.atlas.height;
 
-        target.uvs = new Vector4[127 - 32];
+        pointSize = font.faceInfo.pointSize;
+        baseline = (font.faceInfo.baseline - font.faceInfo.descentLine) * pointSize / font.faceInfo.lineHeight;
+
+        target.atlasRects = new Vector4[127 - 32];
+        target.charRects = new Vector4[127 - 32];
 
         for (int i = 32; i < 127; i++)
-            target.uvs[i - 32] = GetUV(font, (char)i);
+            GetRects(font, (char)i, out target.atlasRects[i - 32], out target.charRects[i - 32]);
 
         EditorUtility.SetDirty(target);
         Debug.Log("MFD font bake complete.");
     }
 
-    Vector4 GetUV(TMP_FontAsset font, char c)
+    void GetRects(TMP_FontAsset font, char c, out Vector4 atlasRect, out Vector4 charRect)
     {
         if (!font.characterLookupTable.TryGetValue(c, out TMP_Character ch))
-        {
             Debug.LogWarning($"Missing glyph: {c}");
-            return Vector4.zero;
-        }
 
         var gr = ch.glyph.glyphRect;
 
@@ -77,7 +80,16 @@ public class MFDFontDataBaker : Editor
         float v0 = (float)gr.y / atlasH;
         float v1 = (float)(gr.y + gr.height) / atlasH;
 
-        return new Vector4(u0, v0, u1, v1);
+        atlasRect = new Vector4(u0, v0, u1, v1);
+
+        // Assumes a monospaced font with a roughly the same aspect ratio as the shader characters (0.6)
+        var gm = ch.glyph.metrics;
+        float charX = gm.horizontalBearingX / gm.horizontalAdvance;
+        float charW = gm.width / gm.horizontalAdvance;
+        float charY = (gm.horizontalBearingY + baseline) / pointSize;
+        float charH = gm.height / pointSize;
+
+        charRect = new Vector4(charX, charY, charW, charH);
     }
 }
 #endif

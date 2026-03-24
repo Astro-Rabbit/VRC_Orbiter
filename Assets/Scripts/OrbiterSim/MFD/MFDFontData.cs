@@ -9,5 +9,6 @@ public class MFDFontData : UdonSharpBehaviour
     public Texture2D atlas;
 
     [Header("Character UV's")]
-    public Vector4[] uvs;
+    public Vector4[] atlasRects;
+    public Vector4[] charRects;
 }
