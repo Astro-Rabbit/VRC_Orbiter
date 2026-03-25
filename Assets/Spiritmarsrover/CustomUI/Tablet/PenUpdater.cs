@@ -12,6 +12,12 @@ public class PenUpdater : UdonSharpBehaviour
     public VRC_Pickup PenRPickup;
     public GameObject PenLMesh;
     public GameObject PenRMesh;
+    public TabletPen PenLScript;
+    public TabletPen PenRScript;
+
+    public bool PickupableL;
+    public bool PickupableR;
+
     [Header("Use Filter")]
     public bool useFilter;
 
@@ -24,6 +30,8 @@ public class PenUpdater : UdonSharpBehaviour
     public float rotMinCutoff = 0.5f;
     public float rotBeta = 0.02f;
     public float rotDCutoff = 1.0f;
+
+    //public float TestValue = 0f;
 
     private VRCPlayerApi _localPlayer;
 
@@ -49,9 +57,10 @@ public class PenUpdater : UdonSharpBehaviour
             PenLMesh.SetActive(false);
             PenRMesh.SetActive(false);
         }
+        SetIndexControllerPose();
     }
 
-    private void Update()
+    private void LateUpdate()
     {
         if (_localPlayer == null) return;
 
@@ -164,17 +173,132 @@ public class PenUpdater : UdonSharpBehaviour
         );
     }
     // --- Existing UI / Pickup Methods ---
-    public void TogglePickup(VRC_Pickup pen) { pen.pickupable = !pen.pickupable; }
-    public void EnterPickUpable(VRC_Pickup pen) { pen.pickupable = true; }
-    public void ExitPickUpable(VRC_Pickup pen) { pen.pickupable = false; }
-    public void EnterLeft() => EnterPickUpable(PenLPickup);
-    public void ExitLeft() => ExitPickUpable(PenLPickup);
-    public void EnterRight() => EnterPickUpable(PenRPickup);
-    public void ExitRight() => ExitPickUpable(PenRPickup);
+    //public void TogglePickup(VRC_Pickup pen)
+    //{
+    //    pen.pickupable = !pen.pickupable;
+    //    PickupableL = pen.pickupable;
+    //    PickupableR = pen.pickupable;
+    //}
+    //public void EnterPickUpable(VRC_Pickup pen)
+    //{
+    //    pen.pickupable = true;
+    //    PickupableL = pen.pickupable;
+    //    PickupableR = pen.pickupable;
+    //}
+    //public void ExitPickUpable(VRC_Pickup pen)
+    //{
+    //    pen.pickupable = false;
+    //    PickupableL = pen.pickupable;
+    //    PickupableR = pen.pickupable;
+    //}
+    public void EnterLeft()
+    {
+        EnterPickUpable(PenLPickup);
+    }
+    public void ExitLeft()
+    {
+        ExitPickUpable(PenLPickup);
+    }
+
+    public void EnterRight()
+    {
+        EnterPickUpable(PenRPickup);
+    }
+    public void ExitRight()
+    {
+        ExitPickUpable(PenRPickup);
+    }
+
+    public void ToggleLeft()
+    {
+        TogglePickup(PenLPickup);
+    }
+    public void ToggleRight()
+    {
+        TogglePickup(PenRPickup);
+    }
 
     public void toggleFilter()
     {
         useFilter = !useFilter;
+    }
+
+    public void ResetLeftStylus()
+    {
+        PenLPickup.transform.localPosition = Vector3.zero;
+        PenLPickup.transform.localRotation =Quaternion.Euler( Vector3.zero);
+    }
+    public void ResetRightStylus()
+    {
+        PenRPickup.transform.localPosition = Vector3.zero;
+        PenRPickup.transform.localRotation =Quaternion.Euler( Vector3.zero);
+    }
+    public bool TriggerTouch;
+    public void ToggleTriggerTouch()
+    {
+        TriggerTouch = !PenLScript.TriggerRequiredForTablet;
+        SendCustomEventDelayedSeconds("ToggleTriggerDelayed",1.5f);
+    }
+    public void ToggleTriggerDelayed()
+    {
+        PenLScript.TriggerRequiredForTablet = TriggerTouch;
+        PenRScript.TriggerRequiredForTablet = TriggerTouch;
+        
+    }
+    public bool OverrideMesh;
+    public void OverrideMeshToggle()
+    {
+        OverrideMesh = !OverrideMesh;
+        PenLScript.OverRideMeshToggle(OverrideMesh);
+        PenRScript.OverRideMeshToggle(OverrideMesh);
+    }
+    public float Amp = 0.2f;
+    public void SetPenAmp()
+    {
+        PenLScript.HapticAmplitude = Amp;
+        PenRScript.HapticAmplitude = Amp;
+    }
+
+    public void TogglePickup(VRC_Pickup pen)
+    {
+        pen.pickupable = !pen.pickupable;
+        // Correctly update the individual tracking variables
+        PickupableL = PenLPickup.pickupable;
+        PickupableR = PenRPickup.pickupable;
+    }
+
+    public void EnterPickUpable(VRC_Pickup pen)
+    {
+        pen.pickupable = true;
+        // Correctly update the individual tracking variables
+        PickupableL = PenLPickup.pickupable;
+        PickupableR = PenRPickup.pickupable;
+    }
+
+    public void ExitPickUpable(VRC_Pickup pen)
+    {
+        pen.pickupable = false;
+        // Correctly update the individual tracking variables
+        PickupableL = PenLPickup.pickupable;
+        PickupableR = PenRPickup.pickupable;
+    }
+    public void SetIndexControllerPose()
+    {
+        PenLPickup.transform.localPosition = new Vector3(0f, -0.03f, 0.022f);
+        PenLPickup.transform.localRotation = Quaternion.Euler(new Vector3(300f,165f,240f));
+
+        PenRPickup.transform.localPosition = new Vector3(0f, 0.03f, 0.022f);
+        PenRPickup.transform.localRotation = Quaternion.Euler(new Vector3(330f,330f,75f));
+    }
+    public bool usePointer = true;//
+    public void ToggleStylusPointer()
+    {
+        usePointer = !usePointer;
+        PenLScript.usePointerMode = !usePointer;
+        
+        PenRScript.usePointerMode = !usePointer;
+        PenLScript.RefreshMeshVisibility();
+        PenRScript.RefreshMeshVisibility();
     }
 }
 

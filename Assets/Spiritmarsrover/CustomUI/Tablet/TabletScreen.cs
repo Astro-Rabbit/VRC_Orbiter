@@ -56,4 +56,46 @@ public class TabletScreen : UdonSharpBehaviour
         }
         return null;
     }
+
+    public TabletSlider GetSliderAtPoint(Vector3 worldPoint)
+    {
+        if (navManager.CurrentPage == null) return null;
+
+        // Get all sliders on the CURRENT active page
+        TabletSlider[] sliders = navManager.CurrentPage.GetComponentsInChildren<TabletSlider>(false);
+
+        for (int i = sliders.Length - 1; i >= 0; i--)
+        {
+            TabletSlider slider = sliders[i];
+
+            // Convert world hit point to local space of the slider
+            Vector3 localPoint = slider.transform.InverseTransformPoint(worldPoint);
+
+            if (slider.IsPointInside(localPoint))
+            {
+                return slider;
+            }
+        }
+        return null;
+    }
+    public TabletScrollbar GetScrollbarAtPoint(Vector3 worldPoint)
+    {
+        if (navManager.CurrentPage == null) return null;
+
+        TabletScrollbar[] scrollbars = navManager.CurrentPage.GetComponentsInChildren<TabletScrollbar>(false);
+
+        for (int i = scrollbars.Length - 1; i >= 0; i--)
+        {
+            TabletScrollbar sb = scrollbars[i];
+            Vector3 localPoint = sb.transform.InverseTransformPoint(worldPoint);
+
+            if (sb.IsPointInside(localPoint))
+            {
+                //Debug.Log("[TabletScreen] Scrollbar hit");
+                return sb;
+            }
+        }
+        
+        return null;
+    }
 }
