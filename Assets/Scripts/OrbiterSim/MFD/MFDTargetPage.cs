@@ -59,6 +59,7 @@ public class MFDTargetPage : MFDPage
         station = contacts.stations[targetIndex];
         //FIXME: Needs to be replaced when stationstatemodel gets proper references
         tgtAnalyzer.conic = (ConicState)station.gameObject.transform.GetChild(0).GetComponent(typeof(UdonBehaviour));
+        tgtAnalyzer.UpdateInfo();
 
         portIndex = -1;
         contactsState.selectedStationDockPortIndex = portIndex;

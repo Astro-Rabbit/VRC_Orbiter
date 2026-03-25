@@ -45,14 +45,12 @@ public class MFDTransferPage : MFDPage
     public double meetActualX1;
     public double meetActualY1;
     public double meetDist1;
-    public double meetOop1;
     public double meetTime2;
     public double meetX2;
     public double meetY2;
     public double meetActualX2;
     public double meetActualY2;
     public double meetDist2;
-    public double meetOop2;
 
     [Header("Manual State")]
     [UdonSynced] public int stepSize = DEFAULT_STEP_SIZE;
@@ -100,8 +98,6 @@ public class MFDTransferPage : MFDPage
 
     private double calcBurnTime;
     private double stepRatio;
-    private double srcLastEpochT0 = Double.NegativeInfinity;
-    private double tgtLastEpochT0 = Double.NegativeInfinity;
     private bool burnChanged = true;
 
     private const int MAX_STEP_SIZE = 0;
@@ -196,15 +192,8 @@ public class MFDTransferPage : MFDPage
         bodies.GetCraftToBodyVector(src.conic.primaryBodyId, craft, out x, out y, out z);
         src.EclipticToPerifocal(x, y, z, out srcX, out srcY, out _);
 
-        if (srcLastEpochT0 != src.conic.epochT0 || tgtLastEpochT0 != tgt.conic.epochT0 || burnChanged) {
-            srcLastEpochT0 = src.conic.epochT0;
-            tgtLastEpochT0 = tgt.conic.epochT0;
-
-            src.GetAligned(tgt, out tgtPx, out tgtPy);
-            tgtArgpDiff = Math.Atan2(tgtPy, tgtPx);
-
-            conicsUpdated = true;
-        }
+        src.GetAligned(tgt, out tgtPx, out tgtPy);
+        tgtArgpDiff = Math.Atan2(tgtPy, tgtPx);
 
         if (autoShowSolution && autoValid) {
             activeBurnTime = autoBurnTime;
@@ -215,48 +204,46 @@ public class MFDTransferPage : MFDPage
         }
 
         calcBurnTime = Math.Max(activeBurnTime, clock.simTime);
-        if (burnChanged || conicsUpdated || (calcBurnTime != activeBurnTime && activeBurnDv > 0.0)) {
-            burnChanged = false;
+        burnChanged = false;
 
-            propagator.conic = src.conic;
-            propagator.Evaluate(calcBurnTime);
+        propagator.conic = src.conic;
+        propagator.Evaluate(calcBurnTime);
 
-            src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out burnX, out burnY, out _);
+        src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out burnX, out burnY, out _);
 
-            double dx = propagator.rel_vx;
-            double dy = propagator.rel_vy;
-            double dz = propagator.rel_vz;
+        double dx = propagator.rel_vx;
+        double dy = propagator.rel_vy;
+        double dz = propagator.rel_vz;
 
-            double mag = Math.Sqrt(dx * dx + dy * dy + dz * dz);
-            if (mag <= 1e-12) {
-                dx = 1.0;
-                dy = 0.0;
-                dz = 0.0;
-            } else {
-                dx /= mag;
-                dy /= mag;
-                dz /= mag;
-            }
-
-            fitter.rx = propagator.rel_rx;
-            fitter.ry = propagator.rel_ry;
-            fitter.rz = propagator.rel_rz;
-            fitter.vx = propagator.rel_vx + dx * activeBurnDv;
-            fitter.vy = propagator.rel_vy + dy * activeBurnDv;
-            fitter.vz = propagator.rel_vz + dz * activeBurnDv;
-
-            fitter.Fit(src.conic.primaryBodyId, calcBurnTime);
-            tfr.UpdateInfo();
-
-            src.GetAligned(tfr, out tfrPx, out tfrPy);
-            tfrArgpDiff = Math.Atan2(tfrPy, tfrPx);
-
-            transferUpdated = true;
+        double mag = Math.Sqrt(dx*dx + dy*dy + dz*dz);
+        if (mag == 0) {
+            dx = 0.0;
+            dy = 0.0;
+            dz = 0.0;
+        } else {
+            dx /= mag;
+            dy /= mag;
+            dz /= mag;
         }
 
-        if ((transferUpdated || conicsUpdated) && tfr.e < 1.0 && tgt.e < 1.0) {
+        fitter.rx = propagator.rel_rx;
+        fitter.ry = propagator.rel_ry;
+        fitter.rz = propagator.rel_rz;
+        fitter.vx = propagator.rel_vx + dx*activeBurnDv;
+        fitter.vy = propagator.rel_vy + dy*activeBurnDv;
+        fitter.vz = propagator.rel_vz + dz*activeBurnDv;
+
+        fitter.Fit(src.conic.primaryBodyId, calcBurnTime);
+        tfr.UpdateInfo();
+
+        src.GetAligned(tfr, out tfrPx, out tfrPy);
+        tfrArgpDiff = Math.Atan2(tfrPy, tfrPx);
+
+        transferUpdated = true;
+
+        if (tfr.e < 1.0 && tgt.e < 1.0) {
             CalculateIntersections();
-        } else if (transferUpdated || conicsUpdated) {
+        } else {
             meets = false;
         }
     }
@@ -274,14 +261,7 @@ public class MFDTransferPage : MFDPage
         double xDiff = b2 * Math.Cos(argpDiff) - b1;
         double yDiff = b2 * Math.Sin(argpDiff);
 
-        double mag = Math.Sqrt(xDiff * xDiff + yDiff * yDiff);
-        if (mag <= 1e-12) {
-            meets = false;
-            return;
-        }
-
-        double phi = Math.Atan2(xDiff, yDiff);
-
+        double mag = Math.Sqrt(xDiff*xDiff + yDiff*yDiff);
         double ratio = pdiff / mag;
         if (ratio > 1.0 || ratio < -1.0) {
             meets = false;
@@ -289,12 +269,14 @@ public class MFDTransferPage : MFDPage
         }
         meets = true;
 
+        double phi = Math.Atan2(xDiff, yDiff);
+
         double thetaDiff = Math.Asin(ratio);
         double theta1 = phi + thetaDiff;
         double theta2 = phi + Math.PI - thetaDiff;
 
-        double r1 = p1 / (1.0 + tfr.e * Math.Cos(theta1));
-        double r2 = p1 / (1.0 + tfr.e * Math.Cos(theta2));
+        double r1 = p1 / (1.0 + tfr.e*Math.Cos(theta1));
+        double r2 = p1 / (1.0 + tfr.e*Math.Cos(theta2));
 
         meetX1 = r1 * Math.Cos(theta1 + tfrArgpDiff);
         meetY1 = r1 * Math.Sin(theta1 + tfrArgpDiff);
@@ -309,25 +291,23 @@ public class MFDTransferPage : MFDPage
         propagator.conic = tgt.conic;
         propagator.Evaluate(meetTime1);
         src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
-        meetOop1 = z;
         x -= meetX1;
         y -= meetY1;
-        meetDist1 = Math.Sqrt(x * x + y * y + z * z);
+        meetDist1 = Math.Sqrt(x*x + y*y + z*z);
 
         tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
-        meetActualX1 = x * tgtPx - y * tgtPy;
-        meetActualY1 = y * tgtPx + x * tgtPy;
+        meetActualX1 = x*tgtPx - y*tgtPy;
+        meetActualY1 = y*tgtPx + x*tgtPy;
 
         propagator.Evaluate(meetTime2);
         src.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
-        meetOop2 = z;
         x -= meetX2;
         y -= meetY2;
-        meetDist2 = Math.Sqrt(x * x + y * y + z * z);
+        meetDist2 = Math.Sqrt(x*x + y*y + z*z);
 
         tgt.EclipticToPerifocal(propagator.rel_rx, propagator.rel_ry, propagator.rel_rz, out x, out y, out z);
-        meetActualX2 = x * tgtPx - y * tgtPy;
-        meetActualY2 = y * tgtPx + x * tgtPy;
+        meetActualX2 = x*tgtPx - y*tgtPy;
+        meetActualY2 = y*tgtPx + x*tgtPy;
     }
 
     public override void OnButton(MFD display, ButtonSide side, int num)
@@ -356,21 +336,21 @@ public class MFDTransferPage : MFDPage
             double baseSpeed;
             switch (num) {
                 case 0:
-                    SetBurnTime(Math.Max(clock.simTime, burnTime) - stepRatio * src.t);
+                    SetBurnTime(calcBurnTime - stepRatio*src.t);
                     break;
                 case 1:
-                    SetBurnTime(Math.Max(clock.simTime, burnTime) + stepRatio * src.t);
+                    SetBurnTime(calcBurnTime + stepRatio*src.t);
                     break;
                 case 2:
                     ResetState();
                     break;
                 case 3:
                     baseSpeed = Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a));
-                    SetBurnDV(burnDv - stepRatio * baseSpeed);
+                    SetBurnDV(burnDv - stepRatio*baseSpeed);
                     break;
                 case 4:
                     baseSpeed = Math.Sqrt(bodies.GetMu(src.conic.primaryBodyId) / (4.0 * src.a));
-                    SetBurnDV(burnDv + stepRatio * baseSpeed);
+                    SetBurnDV(burnDv + stepRatio*baseSpeed);
                     break;
             }
         }
@@ -409,7 +389,7 @@ public class MFDTransferPage : MFDPage
 
     private void OnStepSizeChange()
     {
-        double ratio = Math.Pow(10.0, stepSize / 3.0);
+        double ratio = Math.Pow(10.0, stepSize / 3);
 
         int type = -stepSize % 3;
         if (type == 1) {
@@ -440,10 +420,6 @@ public class MFDTransferPage : MFDPage
         RequestSerialization();
         burnChanged = true;
     }
-
-    // -------------------------------------------------------------------------
-    // AUTO SOLVER
-    // -------------------------------------------------------------------------
 
     public void BeginAutoSolve()
     {
@@ -614,8 +590,8 @@ public class MFDTransferPage : MFDPage
             return false;
         }
 
-        double tb = SampleSymmetric(refineCenterBurnTime, refineWindowBurnTime, refineBurnSamplesIndex(), refineSamplesBurn);
-        double dv = SampleSymmetric(refineCenterBurnDv, refineWindowDv, refineDvSamplesIndex(), refineSamplesDv);
+        double tb = SampleSymmetric(refineCenterBurnTime, refineWindowBurnTime, refineBurnIndex, refineSamplesBurn);
+        double dv = SampleSymmetric(refineCenterBurnDv, refineWindowDv, refineDvIndex, refineSamplesDv);
 
         if (tb < solveBurnStart) tb = solveBurnStart;
         if (tb > solveBurnEnd) tb = solveBurnEnd;
@@ -653,16 +629,6 @@ public class MFDTransferPage : MFDPage
         }
 
         return true;
-    }
-
-    private int refineBurnSamplesIndex()
-    {
-        return refineBurnIndex;
-    }
-
-    private int refineDvSamplesIndex()
-    {
-        return refineDvIndex;
     }
 
     private double SampleSymmetric(double center, double halfWidth, int index, int count)
@@ -861,10 +827,6 @@ public class MFDTransferPage : MFDPage
         autoStatus = AUTO_UPLOADED;
     }
 
-    // -------------------------------------------------------------------------
-    // DISPLAY
-    // -------------------------------------------------------------------------
-
     public override void DrawDisplay(MFD display)
     {
         if (!hasTarget) {
@@ -918,8 +880,8 @@ public class MFDTransferPage : MFDPage
                 display.DrawText("REFINE", 7, 21, Color.yellow);
             }
         } else if (autoValid) {
-            display.DrawText(MFD.FormatNumber("AMISS", autoMissMeters), 6, 14, Color.cyan);
-            display.DrawText(MFD.FormatNumber("AT", autoEncounterTime - now), 7, 16, Color.cyan);
+            //display.DrawText(MFD.FormatNumber("AMISS", autoMissMeters), 6, 14, Color.cyan);
+            //display.DrawText(MFD.FormatNumber("AT", autoEncounterTime - now), 7, 16, Color.cyan);
         } else {
             string s = GetAutoStatusText();
             if (s != "") {
@@ -931,12 +893,10 @@ public class MFDTransferPage : MFDPage
             // meet 1 = cyan
             display.DrawText(MFD.FormatNumber("T", meetTime1 - now), 2, 4, Color.cyan);
             display.DrawText(MFD.FormatNumber("DST", meetDist1), 3, 4, Color.cyan);
-            //display.DrawText(MFD.FormatNumber("OOP", meetOop1), 4, 4, Color.cyan);
 
             // meet 2 = red
             display.DrawText(MFD.FormatNumber("T", meetTime2 - now), 2, 34, Color.red);
             display.DrawText(MFD.FormatNumber("DST", meetDist2), 3, 34, Color.red);
-            //display.DrawText(MFD.FormatNumber("OOP", meetOop2), 4, 34, Color.red);
         }
 
         display.DrawText(" T- ", 0, 2, Color.white);
@@ -947,7 +907,7 @@ public class MFDTransferPage : MFDPage
 
         display.DrawText("STP-", MFD.TEXT_ROWS - 1, 2, Color.white);
         display.DrawText("STP+", MFD.TEXT_ROWS - 1, 12, Color.white);
-        display.DrawText("AUTO", MFD.TEXT_ROWS - 1, 32, Color.white);
+        display.DrawText("CALC", MFD.TEXT_ROWS - 1, 32, Color.white);
         display.DrawText("UPLD", MFD.TEXT_ROWS - 1, 42, Color.white);
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);

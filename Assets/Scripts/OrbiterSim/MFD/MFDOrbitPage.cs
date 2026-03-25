@@ -26,8 +26,6 @@ public class MFDOrbitPage : MFDPage
 
     private Quaternion bodyToPerifocal;
 
-    private double lastEpochT0 = Double.NegativeInfinity;
-
     private int leftMargin;
     private int topMargin;
     private Color infoColor;
@@ -42,29 +40,25 @@ public class MFDOrbitPage : MFDPage
 
     public void Update()
     {
-        if (conic.epochT0 != lastEpochT0) {
-            lastEpochT0 = conic.epochT0;
+        a = conic.aMeters;
+        eccentricity = conic.e;
 
-            a = conic.aMeters;
-            eccentricity = conic.e;
-
-            if (eccentricity < 1.0 && a > 0.0) {
-                double mu = bodies.GetMu(conic.primaryBodyId);
-                period = 2.0 * Math.PI * Math.Sqrt(a * a * a / mu);
-                apoapsis = a * (1.0 + eccentricity);
-            }
-
-            periapsis = a * (1 - eccentricity);
-
-            raan = conic.raanRad;
-            inclination = conic.iRad;
-            argp = conic.argpRad;
-
-            const double RAD2DEG = 180 / Math.PI;
-            bodyToPerifocal = Quaternion.Euler(0, 0, (float)(-argp * RAD2DEG))
-                * Quaternion.Euler((float)(-inclination * RAD2DEG), 0, 0)
-                * Quaternion.Euler(0, 0, (float)(-raan * RAD2DEG));
+        if (eccentricity < 1.0 && a > 0.0) {
+            double mu = bodies.GetMu(conic.primaryBodyId);
+            period = 2.0 * Math.PI * Math.Sqrt(a * a * a / mu);
+            apoapsis = a * (1.0 + eccentricity);
         }
+
+        periapsis = a * (1 - eccentricity);
+
+        raan = conic.raanRad;
+        inclination = conic.iRad;
+        argp = conic.argpRad;
+
+        const double RAD2DEG = 180 / Math.PI;
+        bodyToPerifocal = Quaternion.Euler(0, 0, (float)(-argp * RAD2DEG))
+            * Quaternion.Euler((float)(-inclination * RAD2DEG), 0, 0)
+            * Quaternion.Euler(0, 0, (float)(-raan * RAD2DEG));
 
         Vector3 bodyPos = new Vector3((float)conicPropagator.rel_rx, (float)conicPropagator.rel_ry, (float)conicPropagator.rel_rz);
         Vector3 perifocalPos = bodyToPerifocal * bodyPos;

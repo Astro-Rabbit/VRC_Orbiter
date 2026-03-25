@@ -16,17 +16,13 @@ public class MFDAlignPage : MFDPage
 
     [Header("Display Data")]
     bool hasTarget = false;
-    double ascTime;
-    double descTime;
-    double inclination;
-    double dx;
-    double dy;
-    double px;
-    double py;
-
-
-    private double srcLastEpochT0 = Double.NegativeInfinity;
-    private double tgtLastEpochT0 = Double.NegativeInfinity;
+    public double ascTime;
+    public double descTime;
+    public double inclination;
+    public double dx;
+    public double dy;
+    public double px;
+    public double py;
 
     private double ascM;
     private double descM;
@@ -41,30 +37,26 @@ public class MFDAlignPage : MFDPage
         hasTarget = true;
 
         double _;
-        if (src.conic.epochT0 != srcLastEpochT0 || tgt.conic.epochT0 != tgtLastEpochT0) {
-            srcLastEpochT0 = src.conic.epochT0;
-            tgtLastEpochT0 = tgt.conic.epochT0;
 
-            double sx, sy, sz;
-            src.Normal(out sx, out sy, out sz);
-            double tx, ty, tz;
-            tgt.Normal(out tx, out ty, out tz);
+        double sx, sy, sz;
+        src.Normal(out sx, out sy, out sz);
+        double tx, ty, tz;
+        tgt.Normal(out tx, out ty, out tz);
 
-            double dot = sx*tx + sy*ty + sz*tz;
-            inclination = Math.Acos(dot);
+        double dot = sx*tx + sy*ty + sz*tz;
+        inclination = Math.Acos(dot);
 
-            double x, y;
-            src.EclipticToPerifocal(tx, ty, tz, out x, out y, out _);
-            double mag = Math.Sqrt(x*x + y*y);
+        double x, y;
+        src.EclipticToPerifocal(tx, ty, tz, out x, out y, out _);
+        double mag = Math.Sqrt(x*x + y*y);
 
-            dx = x / mag;
-            dy = y / mag;
+        dx = x / mag;
+        dy = y / mag;
 
-            ascM = src.GetMeanAnomaly(Math.Atan2(dy, dx)) / (2*Math.PI);
-            descM = src.GetMeanAnomaly(Math.Atan2(-dy, -dx)) / (2*Math.PI);
-            double a = src.a;
-            period = 2.0 * Math.PI * Math.Sqrt(a * a * a / bodies.GetMu(src.conic.primaryBodyId));
-        }
+        ascM = src.GetMeanAnomaly(Math.Atan2(dy, dx)) / (2*Math.PI);
+        descM = src.GetMeanAnomaly(Math.Atan2(-dy, -dx)) / (2*Math.PI);
+        double a = src.a;
+        period = 2.0 * Math.PI * Math.Sqrt(a * a * a / bodies.GetMu(src.conic.primaryBodyId));
 
         double m = (clock.simTime - src.conic.epochT0)/period + src.conic.M0Rad/(2*Math.PI);
         m %= 1;
