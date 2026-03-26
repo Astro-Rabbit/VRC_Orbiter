@@ -18,6 +18,9 @@ public class SpacecraftLever : UdonSharpBehaviour
     float lerpspeed;
     [UdonSynced]
     public bool _handlePickable;
+    [UdonSynced]
+    public bool isLeverOpen;
+
     void Start()
     {
         lerpspeed = 15f;
@@ -115,6 +118,22 @@ public class SpacecraftLever : UdonSharpBehaviour
         }
         angleOut = Mathf.LerpAngle(angleOut, TargetAngle, Time.deltaTime * lerpspeed);
         LeverPivot.transform.localRotation = Quaternion.Euler(angleOut, 0f, 0f);
+
+        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        {
+            // If we push it almost to the end, it's definitely OPEN
+            if (angleOut <= -175f)
+            {
+                isLeverOpen = true;
+            }
+            // If we pull it almost to the start, it's definitely CLOSED
+            else if (angleOut >= -5f)
+            {
+                isLeverOpen = false;
+            }
+            // If it's anywhere in the middle, we don't change isLeverOpen. 
+            // It stays whatever it was until it hits one of the boundaries above.
+        }
     }
 
     public override void OnPickup()
