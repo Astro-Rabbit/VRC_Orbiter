@@ -57,11 +57,13 @@ public class MFDFontDataBaker : Editor
         pointSize = font.faceInfo.pointSize;
         baseline = (font.faceInfo.baseline - font.faceInfo.descentLine) * pointSize / font.faceInfo.lineHeight;
 
-        target.atlasRects = new Vector4[127 - 32];
-        target.charRects = new Vector4[127 - 32];
+        target.atlasRects = new Vector4[127 - 32 + 1];
+        target.charRects = new Vector4[127 - 32 + 1];
 
-        for (int i = 32; i < 127; i++)
+        int i = 0;
+        for (i = 32; i < 127; i++)
             GetRects(font, (char)i, out target.atlasRects[i - 32], out target.charRects[i - 32]);
+        GetRects(font, '°', out target.atlasRects[i - 32], out target.charRects[i - 32]); // degree symbol
 
         EditorUtility.SetDirty(target);
         Debug.Log("MFD font bake complete.");

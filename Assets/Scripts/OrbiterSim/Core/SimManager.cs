@@ -765,6 +765,9 @@ public class SimManager : UdonSharpBehaviour
                 {
                     if (netKin != null)
                         netKin.ApplyRemoteRawToCraft();
+
+                    if (conicFitter != null)
+                        conicFitter.Fit(craft.primaryBodyId, clock.Now());
                 }
 
 
