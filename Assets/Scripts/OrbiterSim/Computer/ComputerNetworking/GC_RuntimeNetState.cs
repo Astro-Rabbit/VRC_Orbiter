@@ -25,6 +25,7 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
     public byte executorPhase;
     public byte bodyAxisToPoint;
     public byte rtnDir;
+    public int selectedNodeIndex = -1;
 
     [UdonSynced] private int _rev;
     [UdonSynced] private byte _status;
@@ -35,6 +36,7 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
     [UdonSynced] private byte _executorPhase;
     [UdonSynced] private byte _bodyAxisToPoint;
     [UdonSynced] private byte _rtnDir;
+    [UdonSynced] private byte _selectedNodeIndex = 255;
 
     private int _appliedRev = -1;
     private float _publishCooldown = 0f;
@@ -98,6 +100,11 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
         }
 
         if (changed) _rev++;
+
+
+        byte selectedNode = EncodeNodeIndexOrNone((int)modeParams.selectedNodeIndex);
+        if (_selectedNodeIndex != selectedNode) { _selectedNodeIndex = selectedNode; changed = true; }
+
         return changed;
     }
 
@@ -111,7 +118,7 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
         executorPhase = _executorPhase;
         bodyAxisToPoint = _bodyAxisToPoint;
         rtnDir = _rtnDir;
-
+        selectedNodeIndex = DecodeNodeIndexOrNone(_selectedNodeIndex);
         if (runtime != null)
         {
             runtime.status = _status;
@@ -126,6 +133,7 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
         {
             modeParams.bodyAxisToPoint = _bodyAxisToPoint;
             modeParams.rtnDir = _rtnDir;
+            modeParams.selectedNodeIndex = (byte)((selectedNodeIndex >= 0) ? selectedNodeIndex : 0);
         }
 
         _appliedRev = _rev;
@@ -200,15 +208,27 @@ public class GC_RuntimeNetState : UdonSharpBehaviour
         {
             _bodyAxisToPoint = modeParams.bodyAxisToPoint;
             _rtnDir = modeParams.rtnDir;
+            _selectedNodeIndex = EncodeNodeIndexOrNone((int)modeParams.selectedNodeIndex);
         }
         else
         {
             _bodyAxisToPoint = 0;
             _rtnDir = 0;
+            _selectedNodeIndex = 255;
         }
 
         ApplySyncedToLocals();
     }
 
+    private byte EncodeNodeIndexOrNone(int value)
+    {
+        if (value < 0 || value >= 255) return 255;
+        return (byte)value;
+    }
+
+    private int DecodeNodeIndexOrNone(byte value)
+    {
+        return (value == 255) ? -1 : (int)value;
+    }
 
 }

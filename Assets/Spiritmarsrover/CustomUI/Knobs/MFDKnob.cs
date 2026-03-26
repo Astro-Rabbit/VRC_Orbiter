@@ -23,15 +23,18 @@ public class MFDKnob : UdonSharpBehaviour
 
     [Header("Interaction Settings")]
     public bool isDiscrete = false;
+    public bool isContinuous = false;
+    public float hapticInterval = .1f;
     public float stepSize = 1f;
     public float desktopSensitivity = 2.0f;
 
-    [UdonSynced] private float _currentValue;
+    [UdonSynced] public float _currentValue;
     private float _startValue;
     private int _activePenID = -1;
 
     private Quaternion _grabRot;
     private TabletPen _activePen;
+
 
     void Start()
     {
@@ -73,41 +76,140 @@ public class MFDKnob : UdonSharpBehaviour
         ApplyDelta(angleDelta);
     }
 
-    public void OnStayDesktop(int id, Quaternion currentCameraRotation)
-    {
-        if (id != _activePenID) return;
+    //public void OnStayDesktop(int id, Quaternion currentCameraRotation)
+    //{
+    //    if (id != _activePenID) return;
 
-        Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
-        Vector3 eulers = relativeRot.eulerAngles;
+    //    Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
+    //    Vector3 eulers = relativeRot.eulerAngles;
 
-        float pitch = Mathf.DeltaAngle(0, eulers.x);
-        float yaw = Mathf.DeltaAngle(0, eulers.y);
+    //    float pitch = Mathf.DeltaAngle(0, eulers.x);
+    //    float yaw = Mathf.DeltaAngle(0, eulers.y);
 
-        float angleDelta = (yaw - pitch) * desktopSensitivity;
-        ApplyDelta(angleDelta);
-    }
+    //    float angleDelta = (yaw - pitch) * desktopSensitivity;
+    //    ApplyDelta(angleDelta);
+    //}
 
+    //old apply detla
+    //private void ApplyDelta(float angleDelta)
+    //{
+    //    float percentDelta = angleDelta / totalRotationAngle;
+    //    float valueDelta = percentDelta * (maxValue - minValue);
+
+    //    float newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+
+    //    if (isDiscrete)
+    //        newValue = Mathf.Round(newValue / stepSize) * stepSize;
+
+    //    if (Mathf.Approximately(newValue, _currentValue)) return;
+
+
+    //    if (isDiscrete && _activePen != null) _activePen.PlayKnobClip();
+    //    _activePen.TriggerHapticEvent();
+
+    //    _currentValue = newValue;
+    //    UpdateVisuals();
+    //    NotifyTarget();
+    //}
+    private float _lastHapticValue;
     private void ApplyDelta(float angleDelta)
     {
-        float percentDelta = angleDelta / totalRotationAngle;
-        float valueDelta = percentDelta * (maxValue - minValue);
+        float newValue;
 
-        float newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+        if (isContinuous)
+        {
+            // Value is cumulative degrees (or degrees * a multiplier)
+            newValue = _startValue + angleDelta;
+        }
+        else
+        {
+            // Existing ranged logic
+            float percentDelta = angleDelta / totalRotationAngle;
+            float valueDelta = percentDelta * (maxValue - minValue);
+            newValue = Mathf.Clamp(_startValue + valueDelta, minValue, maxValue);
+        }
 
         if (isDiscrete)
             newValue = Mathf.Round(newValue / stepSize) * stepSize;
 
         if (Mathf.Approximately(newValue, _currentValue)) return;
 
+        // Haptics and ownership
+        if (isDiscrete && _activePen != null)
+        {
+            _activePen.PlayKnobClip();
+            _activePen.TriggerHapticEvent();
+        }
+        else
+        {
+            if(Mathf.Abs(newValue - _lastHapticValue) >= hapticInterval)
+            {
+                // Trigger only after moving 'hapticInterval' amount
+                _activePen.TriggerHapticEvent();
+                _lastHapticValue = newValue;
+            }
+        }
+        
+        EnsureLocalOwnership();
+
+        _currentValue = newValue;
+        ApplyValue();
+        //RequestSerialization();
+    }
+
+    //public void OnStayDesktop(int id, Quaternion currentCameraRotation)
+    //{
+    //    if (id != _activePenID) return;
+
+    //    // Pitch and Yaw drag logic
+    //    Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
+    //    Vector3 eulers = relativeRot.eulerAngles;
+
+    //    float pitch = eulers.x > 180 ? eulers.x - 360 : eulers.x;
+    //    float yaw = eulers.y > 180 ? eulers.y - 360 : eulers.y;
+
+    //    // Combine Pitch (Up/Down) and Yaw (Left/Right) for a diagonal "pull" feel
+    //    float angleDelta = (yaw - pitch) * desktopSensitivity;
+
+    //    float targetAngle = _startAngle + angleDelta;
+    //    ApplyAngle(targetAngle);
+    //}
+
+    public void OnStayDesktop(int id, Quaternion currentCameraRotation)
+    {
+        if (id != _activePenID) return;
+
+        // 1. Calculate the rotation delta since OnDown
+        Quaternion relativeRot = Quaternion.Inverse(_grabRot) * currentCameraRotation;
+        Vector3 eulers = relativeRot.eulerAngles;
+
+        // 2. Normalize deltas to -180...180
+        float pitch = Mathf.DeltaAngle(0, eulers.x);
+        float yaw = Mathf.DeltaAngle(0, eulers.y);
+
+        // 3. Combine movement and scale by sensitivity
+        float angleDelta = (yaw - pitch) * desktopSensitivity;
+
+        // 4. Use ApplyDelta just like VR does
+        ApplyDelta(angleDelta);
+    }
+
+    private void ApplyAngle(float targetAngle)
+    {
+        // Convert angle back to value range
+        float percent = Mathf.Clamp(targetAngle / totalRotationAngle, 0f, 1f);
+        float rawValue = minValue + (percent * (maxValue - minValue));
+
+
         if (_activePen != null)
         {
             if (isDiscrete) _activePen.PlayKnobClip();
-            _activePen.TriggerHaptic(0.05f, 0.2f, 1.0f);
+            _activePen.TriggerHapticEvent();
         }
 
         EnsureLocalOwnership();
 
-        _currentValue = newValue;
+        _currentValue = rawValue;
         ApplyValue();
         RequestSerialization();
     }
@@ -118,14 +220,31 @@ public class MFDKnob : UdonSharpBehaviour
         NotifyTarget();
     }
 
+    //private void UpdateVisuals()
+    //{
+    //    if (knobMesh == null) return;
+
+    //    float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
+    //    float currentDegrees = percent * totalRotationAngle;
+
+    //    knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+    //}
     private void UpdateVisuals()
     {
         if (knobMesh == null) return;
 
-        float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
-        float currentDegrees = percent * totalRotationAngle;
-
-        knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+        if (isContinuous)
+        {
+            // Just spin based on the raw value
+            knobMesh.localRotation = Quaternion.AngleAxis(_currentValue, rotationAxis);
+        }
+        else
+        {
+            // Existing 0-300 degree limit logic
+            float percent = Mathf.InverseLerp(minValue, maxValue, _currentValue);
+            float currentDegrees = percent * totalRotationAngle;
+            knobMesh.localRotation = Quaternion.AngleAxis(currentDegrees, rotationAxis);
+        }
     }
 
     private void NotifyTarget()

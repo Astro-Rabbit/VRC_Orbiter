@@ -107,10 +107,20 @@ public class MFDSwitch : UdonSharpBehaviour
         // Local interaction feedback
         if (_activePen != null)
         {
-            if (newState == 0) _activePen.PlaySwitchUpClip();
-            else if (newState == 1) _activePen.PlaySwitchDownClip();
+            if(newState == 0)
+            {
+                if (_activePen != null) _activePen.PlaySwitchUpClip();
+            }
+            else if(newState == 1)
+            {
+                if (_activePen != null) _activePen.PlaySwitchDownClip();
+            }
+            _activePen.TriggerHapticEvent();
+            //state = newState;
+            
+            UpdateVisuals();
+            NotifyTarget();
 
-            _activePen.TriggerHaptic(0.05f, 0.2f, 1.0f);
         }
 
         EnsureLocalOwnership();

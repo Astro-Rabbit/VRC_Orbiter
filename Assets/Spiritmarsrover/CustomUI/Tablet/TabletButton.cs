@@ -2,7 +2,8 @@
 using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon;
-using UnityEngine.UI; // Required for Image
+using UnityEngine.UI;
+using TMPro;
 public enum TabletButtonMode { Trigger, Continuous, None }
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class TabletButton : UdonSharpBehaviour
@@ -22,6 +23,10 @@ public class TabletButton : UdonSharpBehaviour
     public Color pressedColor = new Color(0.78f, 0.78f, 0.78f);
     public Color disabledColor = new Color(0.78f, 0.78f, 0.78f, 0.5f);
 
+    [Header("Toggle Feedback")]
+    public TMP_Text textToggleColor;
+    public string boolVariableName;
+
     //void Start()
     //{
     //    rectTransform = (RectTransform)transform;
@@ -33,11 +38,13 @@ public class TabletButton : UdonSharpBehaviour
     //    Rect rect = rectTransform.rect;
     //    return rect.Contains(localPoint);
     //}
+    public bool released;
 
     void Start()
     {
         // GetComponent is more reliable in Udon than casting the 'transform' property
         rectTransform = GetComponent<RectTransform>();
+        updateToggleText(); // Initialize text state
     }
 
     public bool IsPointInside(Vector3 localPoint)
@@ -54,34 +61,43 @@ public class TabletButton : UdonSharpBehaviour
     public void OnDown(int id)
     {
         if (mode == TabletButtonMode.None) return;
-        _lastPenID = id; // Takeover: This pen is now the owner
+        _lastPenID = id;
         SetColor(pressedColor);
-        if (mode == TabletButtonMode.Trigger) targetScript.SendCustomEvent(eventName);
+        if (mode == TabletButtonMode.Trigger && !string.IsNullOrEmpty(eventName)) targetScript.SendCustomEvent(eventName);
+
+        // Add this to update the UI immediately after the click
+        updateToggleText();
     }
 
     public void OnStay(int id)
     {
         if (mode != TabletButtonMode.Continuous) return;
         // Only fire continuous events for the pen that currently owns the button
-        if (id == _lastPenID) targetScript.SendCustomEvent(eventName);
+        if (id == _lastPenID && !string.IsNullOrEmpty(eventName)) targetScript.SendCustomEvent(eventName);
     }
 
     public void OnUp(int id)
     {
         if (id != _lastPenID || mode == TabletButtonMode.None) return;
 
-        SetColor(highlightedColor);
+        SetColor(normalColor);
+        //Box in the release value for scroll checklist button. 
+        released = true;
+        // Trigger event
         if (mode == TabletButtonMode.Trigger && !string.IsNullOrEmpty(releaseEventName))
             targetScript.SendCustomEvent(releaseEventName);
+        released = false;
+        // Update text after the event has fired
+        updateToggleText();
 
-        _lastPenID = -1; // Release ownership
+        _lastPenID = -1;
     }
 
     public void OnHoverEnter(int id)
     {
         if (mode == TabletButtonMode.None) return;
         _lastPenID = id; // Newest pen takes the highlight
-        SetColor(highlightedColor);
+        //SetColor(highlightedColor);
     }
 
     public void OnHoverExit(int id)
@@ -97,5 +113,26 @@ public class TabletButton : UdonSharpBehaviour
     private void SetColor(Color c)
     {
         if (targetGraphic != null) targetGraphic.color = c;
+    }
+
+    public void updateToggleText()
+    {
+        if (targetScript == null || string.IsNullOrEmpty(boolVariableName) || textToggleColor == null)
+        {
+            return;
+        }
+
+        object value = targetScript.GetProgramVariable(boolVariableName);
+        if (value != null)
+        {
+            bool state = (bool)value;
+            textToggleColor.text = state ? "ON" : "OFF";
+            textToggleColor.color = state ? Color.green : Color.red;
+        }
+    }
+    public void OnEnable()
+    {
+        updateToggleText();
+        SetColor(normalColor);
     }
 }

@@ -18,11 +18,16 @@ public class TabletPen : UdonSharpBehaviour
     public AudioClip[] SwitchUpClip;
     public AudioClip[] SwitchDownClip;
     public AudioClip[] KnobClip;
+    public AudioClip[] ScreenTouchClips;
 
 
     public int penID;
     public bool isRightHand;
 
+    
+    public float HapticDuration = 0.05f;
+    public float HapticAmplitude = 0.2f;
+    public float HapticFreq = 1.0f;
     // Focus Lock (For Knobs/MFD)
     private bool _isLocked;
     private MFDButton _focusedMFDBtn;
@@ -37,31 +42,101 @@ public class TabletPen : UdonSharpBehaviour
     private string _triggerAxis;
     private VRCPlayerApi _localPlayer;
     private int _zoneCount = 0;
-    private Object _lastHapticTarget;
+
+
+
+    public bool IsGripping;
+    private string _gripAxis;
+    public GameObject Pickup;
+
+    // NEW VARIABLES FOR THE CONSTRAINT
+    public TabletPenPickup _heldPickup;
+    private Vector3 _heldPosOffset;
+    private Quaternion _heldRotOffset;
+    private bool _wasGripping;
+
+    private Object _lastHapticTarget; // Tracks Colliders or TabletButtons
+
+    public float PenTouchOffset = 0f;
+
+    private bool _wasTriggerHeld;
+
+    private TabletSlider _activeSlider;
+    private TabletSlider _lastHoveredSlider;
+    bool isVR;
+    public float clickExtensionOffset = -0.01f;
+
+    public float touchCooldown = 0.2f; // Seconds between allowed clicks
+    private float _lastTouchTime;
+
+    private int _lastSliderStep; // Tracks the current "notch" (0-30)
+
+    private TabletScrollbar _activeScrollbar;
+    private TabletScrollbar _lastHoveredScrollbar;
+    public float meshLerpSpeed = 25f; // Adjust this for snappiness (higher = faster)
+
+    [Header("Pointer Mode")]
+    public bool usePointerMode;
+    public GameObject PointerMesh;
+    //public GameObject PointerBase;
+    public GameObject PointerTipArrow;
+    public GameObject PointerTipHand;
+    // public LineRenderer PointerLine;
+
+    [Header("Pointer Colors")]
+    public Material PointerMat;
+    public Color PointerDefaultColor = Color.white;
+    public Color PointerHoverColor = Color.cyan;
+    public Color PointerClickColor = Color.green;
+    public Color PointerPickupColor = Color.yellow;
+
     void Start()
     {
         _localPlayer = Networking.LocalPlayer;
         _triggerAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryIndexTrigger" : "Oculus_CrossPlatform_PrimaryIndexTrigger";
+        _gripAxis = isRightHand ? "Oculus_CrossPlatform_SecondaryHandTrigger" : "Oculus_CrossPlatform_PrimaryHandTrigger";
+
         if (ButtonAudioSource == null) ButtonAudioSource = GetComponent<AudioSource>();
+
+        if (!Networking.LocalPlayer.IsUserInVR())
+        {
+            TriggerRequiredForTablet = true;
+            
+
+        }
+        else
+        {
+            //if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
+            //if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);//
+        }
+        if (PenMesh != null) PenMesh.SetActive(false);
+        if (PointerMesh != null) PointerMesh.SetActive(false);
+        //RefreshMeshVisibility();
+        isVR = Networking.LocalPlayer.IsUserInVR();
+        CapsuleCol = gameObject.GetComponent<CapsuleCollider>();
     }
 
     void Update()
     {
+        
+
+
+
         if (_localPlayer == null) return;
         if (!_localPlayer.IsUserInVR() && !isRightHand) return;
 
+        IsGripping = Input.GetAxisRaw(_gripAxis) > 0.95f;
+        bool gripJustPressed = IsGripping && !_wasGripping;
+        //HandlePickupConstraint();
+        HandlePickupConstraint(IsGripping, gripJustPressed);
+        _wasGripping = IsGripping;
+
+
         bool isVR = _localPlayer.IsUserInVR();
         bool triggerHeld = (Input.GetAxisRaw(_triggerAxis) > 0.9f) || Input.GetMouseButton(0);
+        bool triggerJustPressed = triggerHeld && !_wasTriggerHeld;
 
-        // 1. IF LOCKED (KNOB/MFD)
-        if (_isLocked)
-        {
-            if (!triggerHeld) ReleaseFocus();
-            else StayFocus(isVR);
-            return;
-        }
-
-        // 2. RAYCAST SEARCH
+        
         RaycastHit hit;
         Vector3 rayOrigin; Vector3 rayDirection; float dist;
 
@@ -74,9 +149,133 @@ public class TabletPen : UdonSharpBehaviour
         {
             rayOrigin = transform.position; rayDirection = -transform.up; dist = rayDistance;
         }
-
         bool currentlyHitting = Physics.Raycast(rayOrigin, rayDirection, out hit, dist, interactionLayers, QueryTriggerInteraction.Ignore);
+        //Pen Movment On trigger press
+        //if (PenMesh != null)
+        //{
+        //    float extension = 0f;
+        //    float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
 
+        //    if (currentlyHitting)
+        //    {
+        //        // Only apply extension and surface offset when touching something
+        //        extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
+        //    }
+
+        //    // interactionPlunge is added regardless of 'currentlyHitting'
+        //    Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+
+        //        PenMesh.transform.localPosition = Vector3.Lerp(
+        //        PenMesh.transform.localPosition,
+        //        targetPos,
+        //        Time.deltaTime * meshLerpSpeed
+        //    );
+        //}
+
+        // --- Mesh & Pointer Logic ---
+        //if (PenMesh != null) PenMesh.SetActive(!usePointerMode);
+        //if (PointerMesh != null) PointerMesh.SetActive(usePointerMode);
+
+        float extension = 0f;
+        float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+        bool isInteractiveHit = false;
+
+        if (currentlyHitting)
+        {
+            extension = -(hit.distance / transform.localScale.y) + PenTouchOffset;
+
+            // Determine if hit is interactive for color/icon logic
+            isInteractiveHit = (hit.collider.GetComponent<MFDKnob>() != null ||
+                                hit.collider.GetComponent<MFDButton>() != null ||
+                                hit.collider.GetComponent<MFDSwitch>() != null ||
+                                hit.collider.GetComponent<TabletScreen>() != null);
+        }
+
+        Vector3 targetPos = new Vector3(0f, extension + interactionPlunge, 0f);
+
+        // Update Pointer Color
+        if (PointerMat != null)
+        {
+            //Color targetColor = PointerDefaultColor;
+            //if (isInteractiveHit)
+            //{
+            //    targetColor = triggerHeld ? PointerClickColor : PointerHoverColor;
+            //}
+            //PointerMat.SetColor("_Color", targetColor); // Standard/Mobile shaders
+            //PointerMat.SetColor("_EmissionColor", targetColor); // Standard/Mobile shaders
+            //                                                    // PointerMat.color = targetColor; // Alternative if not using SetColor
+            Color targetColor = PointerDefaultColor;
+
+            if (isInteractiveHit)
+            {
+                targetColor = triggerHeld ? PointerClickColor : PointerHoverColor;
+            }
+            // If the TRIGGER system says we are hovering over a pickup...
+            else if (_hoveredPickup != null)
+            {
+                // Use ClickColor if gripping, otherwise use the new PickupColor
+                targetColor = PointerPickupColor;
+            }
+
+            PointerMat.SetColor("_Color", targetColor);
+            PointerMat.SetColor("_EmissionColor", targetColor);
+        }
+
+        if (!usePointerMode)
+        {
+            // Traditional Pen Behavior
+            PenMesh.transform.localPosition = Vector3.Lerp(PenMesh.transform.localPosition, targetPos, Time.deltaTime * meshLerpSpeed);
+        }
+        else
+        {
+            // Pointer Behavior
+            bool isPhysical = false;
+            if (currentlyHitting)
+            {
+                isPhysical = (hit.collider.GetComponent<MFDKnob>() != null || hit.collider.GetComponent<MFDSwitch>() != null);
+            }
+
+            if (PointerTipArrow != null) PointerTipArrow.SetActive(!isPhysical);
+            if (PointerTipHand != null) PointerTipHand.SetActive(isPhysical);
+
+            GameObject activeTip = isPhysical ? PointerTipHand : PointerTipArrow;
+            if (activeTip != null)
+            {
+                activeTip.transform.localPosition = Vector3.Lerp(activeTip.transform.localPosition, targetPos, Time.deltaTime * meshLerpSpeed);
+            }
+        }
+
+        // 1. IF LOCKED (KNOB/MFD)
+        if (_isLocked)
+        {
+            if (!triggerHeld) ReleaseFocus();
+            else StayFocus(isVR);
+            return;
+        }
+
+
+        
+
+
+        //if (PenMesh != null)
+        //{
+        //    Vector3 targetPos = Vector3.zero;
+
+        //    if (currentlyHitting)
+        //    {
+        //        float localExtension = -(hit.distance / transform.localScale.y);
+        //        float interactionPlunge = triggerHeld ? clickExtensionOffset : 0f;
+        //        targetPos = new Vector3(0f, localExtension + PenTouchOffset + interactionPlunge, 0f);
+        //    }
+
+        //    // Smoothly transition to the target position
+        //    PenMesh.transform.localPosition = Vector3.Lerp(
+        //        PenMesh.transform.localPosition,
+        //        targetPos,
+        //        Time.deltaTime * meshLerpSpeed
+        //    );
+        //}
+        
 
         // --- Haptic Hover Logic Start ---
         Object currentHitComp = null;
@@ -98,7 +297,13 @@ public class TabletPen : UdonSharpBehaviour
         // If we are looking at a new interactive object, pulse and save it
         if (currentHitComp != _lastHapticTarget)
         {
-            if (currentHitComp != null) TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+
+            if (currentHitComp != null)
+            {
+                // TriggerHaptic(0.01f, 0.2f); // Quick "tick"
+                TriggerHapticEvent();
+            }
+
             _lastHapticTarget = currentHitComp; // Will be null if looking at nothing/wall
         }
         // --- Haptic Hover Logic End ---
@@ -113,7 +318,8 @@ public class TabletPen : UdonSharpBehaviour
             MFDSwitch mfdSwitch = hit.collider.GetComponent<MFDSwitch>();
 
             // A. Handle Locked Objects (Knobs/MFD)
-            if (triggerHeld && (knob != null || mfdBtn != null || mfdSwitch != null))
+            //if (triggerHeld && (knob != null || mfdBtn != null || mfdSwitch != null))
+            if (triggerJustPressed && (knob != null || mfdBtn != null || mfdSwitch != null))
             {
 
                 // Inside TabletPen.cs -> AttemptCapture
@@ -148,7 +354,7 @@ public class TabletPen : UdonSharpBehaviour
                 else
                 {
                     _focusedMFDBtn = mfdBtn; _focusedMFDBtn.OnDown(penID, this);
-                    Debug.Log("[TabletPen] MFD hit");
+                    //Debug.Log("[TabletPen] MFD hit");
                 }
                 _isLocked = true;
                 ClearTabletInteraction(); // Ensure tablet state is reset if we switch to physical
@@ -158,7 +364,15 @@ public class TabletPen : UdonSharpBehaviour
             // B. Handle Tablet (Previous Hover/Slide System)
             if (screen != null)
             {
-                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), triggerHeld);
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), triggerHeld);
+
+                // Convert the world hit point to the local space of the screen/collider
+                Vector3 localPoint = hit.collider.transform.InverseTransformPoint(hit.point);
+
+                // Pass the slider and the local point into the handler
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), localPoint, triggerHeld);
+                //HandleTabletInteraction(screen.GetButtonAtPoint(hit.point), screen.GetSliderAtPoint(hit.point), hit.point, triggerHeld);
+                HandleTabletInteraction(screen.GetButtonAtPoint(hit.point),screen.GetSliderAtPoint(hit.point),screen.GetScrollbarAtPoint(hit.point),hit.point,triggerHeld);
             }
             else
             {
@@ -169,29 +383,101 @@ public class TabletPen : UdonSharpBehaviour
         {
             ClearTabletInteraction();
         }
+        _wasTriggerHeld = triggerHeld;
     }
+    public bool TriggerRequiredForTablet = true;
 
-    private void HandleTabletInteraction(TabletButton hovered, bool triggerHeld)
+    private void HandleTabletInteraction(TabletButton hoveredBtn, TabletSlider hoveredSlider, TabletScrollbar hoveredScrollbar, Vector3 worldPoint, bool triggerHeld)
     {
-        // Hover Logic
-        if (hovered != _lastHoveredTabletBtn)
+        // --- Slider Hover Logic ---
+        if (hoveredSlider != _lastHoveredSlider)
         {
-            if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
-            if (hovered != null) hovered.OnHoverEnter(penID);
-            _lastHoveredTabletBtn = hovered;
+            _lastHoveredSlider = hoveredSlider;
+        }
+        if (hoveredScrollbar != _lastHoveredScrollbar)
+        {
+            _lastHoveredScrollbar = hoveredScrollbar;
         }
 
-        // Press Logic
-        if (triggerHeld)
+        if (hoveredBtn != _lastHoveredTabletBtn)
+        {
+            if (_lastHoveredTabletBtn != null) _lastHoveredTabletBtn.OnHoverExit(penID);
+            if (hoveredBtn != null) hoveredBtn.OnHoverEnter(penID);
+            _lastHoveredTabletBtn = hoveredBtn;
+        }
+
+        // --- Interaction Logic ---
+        bool isInteracting;// = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null);
+
+        if (!isVR)
+        {
+            // Desktop: Always require the mouse click (triggerHeld includes Mouse0)
+            isInteracting = (hoveredBtn != null || hoveredSlider != null || hoveredScrollbar !=null) && triggerHeld;
+        }
+        else
+        {
+            // VR: Respect the toggle. If false, just hovering counts as interacting.
+            isInteracting = TriggerRequiredForTablet ? triggerHeld : (hoveredBtn != null || hoveredSlider != null || hoveredScrollbar != null);
+        }
+
+
+        if (isInteracting)
         {
             if (!_wasTouchingTablet)
             {
-                _activeTabletBtn = hovered;
+
+                // DEBOUNCE CHECK
+                if (Time.time < _lastTouchTime + touchCooldown) return;
+                _lastTouchTime = Time.time;
+
+                _activeTabletBtn = hoveredBtn;
+                _activeSlider = hoveredSlider; // Store the slider we started pressing
+                _activeScrollbar = hoveredScrollbar;
+
                 if (_activeTabletBtn != null) _activeTabletBtn.OnDown(penID);
+                if (_activeSlider != null)
+                {
+                    _activeSlider.OnDown(penID, worldPoint);
+                    // Initialize the starting step so it doesn't vibe instantly on touch
+                    float norm = Mathf.InverseLerp(_activeSlider.minValue, _activeSlider.maxValue, _activeSlider.currentValue);
+                    _lastSliderStep = Mathf.FloorToInt(norm * 30f);
+                }
+                if (_activeScrollbar != null)
+                {
+                    _activeScrollbar.OnDown(penID, worldPoint);
+                    //Debug.Log("[TabletPen] ScrollDown");
+                }
             }
-            else if (_activeTabletBtn != null)
+            else
             {
-                _activeTabletBtn.OnStay(penID);
+                if (_activeTabletBtn != null)
+                {
+                    _activeTabletBtn.OnStay(penID);
+
+                }
+                if (_activeSlider != null)
+                {
+                    _activeSlider.OnStay(penID, worldPoint); // Send localPoint every frame
+                    // --- 30 STEP HAPTIC LOGIC ---
+                    // Calculate 0.0 to 1.0 percentage of the slider
+                    float norm = Mathf.InverseLerp(_activeSlider.minValue, _activeSlider.maxValue, _activeSlider.currentValue);
+
+                    // Convert that to a step index (0 to 30)
+                    int currentStep = Mathf.FloorToInt(norm * 30f);
+
+                    // If we moved into a new step, pulse!
+                    if (currentStep != _lastSliderStep)
+                    {
+                        TriggerHapticEvent();
+                        _lastSliderStep = currentStep;
+                    }
+                }
+                if (_activeScrollbar != null)
+                {
+                    _activeScrollbar.OnStay(penID, worldPoint);
+                    
+                }
+
             }
             _wasTouchingTablet = true;
         }
@@ -205,7 +491,11 @@ public class TabletPen : UdonSharpBehaviour
     {
         if (_activeTabletBtn != null)
         {
-            if (_activeTabletBtn == _lastHoveredTabletBtn) _activeTabletBtn.OnUp(penID);
+            if (_activeTabletBtn == _lastHoveredTabletBtn)
+            {
+                _activeTabletBtn.OnUp(penID);
+                PlayScreenTouchClip();
+            }
             else _activeTabletBtn.OnHoverExit(penID);
             _activeTabletBtn = null;
         }
@@ -213,6 +503,14 @@ public class TabletPen : UdonSharpBehaviour
         {
             _lastHoveredTabletBtn.OnHoverExit(penID);
             _lastHoveredTabletBtn = null;
+        }
+        if(_lastHoveredScrollbar != null)
+        {
+            _lastHoveredScrollbar = null;
+        }
+        if (_lastHoveredSlider != null)
+        {
+            _lastHoveredSlider = null;
         }
         _wasTouchingTablet = false;
     }
@@ -258,7 +556,7 @@ public class TabletPen : UdonSharpBehaviour
             _focusedMFDBtn.OnStay(penID);
         }
     }
-
+    
     private void ReleaseFocus()
     {
         if (_focusedKnob != null) _focusedKnob.OnUp(penID);
@@ -279,19 +577,96 @@ public class TabletPen : UdonSharpBehaviour
     }
 
     // Trigger and Audio methods remain the same...
-    public void OnTriggerEnter(Collider other) {
-        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+    //public void OnTriggerEnter(Collider other)
+    //{
+    //    if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+    //    {
+    //        _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
+    //    }
+    //}
+    //public void OnTriggerExit(Collider other)
+    //{
+    //    if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+    //    {
+    //        _zoneCount--; if (_zoneCount <= 0)
+    //        {
+    //            _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
+    //        }
+    //    }
+    //}
+    //public bool OverRideMeshBool = false; 
+    public void OverRideMeshToggle(bool OverRideMeshBool)
+    {
+        if (OverRideMeshBool)
         {
-            _zoneCount++; if (PenMesh != null) PenMesh.SetActive(true);
+            _zoneCount = 1000;
+            //OverRideMeshBool = false;
+        }
+        else
+        {
+            _zoneCount = 0;
+            //OverRideMeshBool = true;
+        }
+
+        //if (_zoneCount <= 0)
+        //{
+        //    _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
+        //}
+    }
+    public void OnTriggerEnter(Collider other)
+    {
+        if (!_localPlayer.IsUserInVR()) return;
+        if (other.name == "PenEnable")
+        {
+            _zoneCount++;
+            RefreshMeshVisibility();
         }
     }
-    public void OnTriggerExit(Collider other) {
-        if (!_localPlayer.IsUserInVR()) return; if (other.name == "PenEnable")
+
+    public void OnTriggerExit(Collider other)
+    {
+        if (!_localPlayer.IsUserInVR()) return;
+        if (other.name == "PenEnable")
         {
-            _zoneCount--; if (_zoneCount <= 0)
-            {
-                _zoneCount = 0; if (PenMesh != null) PenMesh.SetActive(false);
-            }
+            _zoneCount--;
+            if (_zoneCount < 0) _zoneCount = 0;
+            RefreshMeshVisibility();
+        }
+    }
+
+    //public void OverRideMeshToggle(bool OverRideMeshBool)
+    //{
+    //    _zoneCount = OverRideMeshBool ? 1000 : 0;
+    //   // RefreshMeshVisibility();
+    //}
+    public CapsuleCollider CapsuleCol;
+    public void RefreshMeshVisibility()
+    {
+        if (!usePointerMode)
+        {
+           // PenMesh.SetActive(show && !usePointerMode);
+            CapsuleCol.radius = 0.5f;
+            CapsuleCol.height = 2f;
+        }
+        else
+        {
+            CapsuleCol.radius = 0.9f;
+            CapsuleCol.height = 0.5f;
+        }
+
+
+        bool show = _zoneCount > 0;
+        if (PenMesh != null)
+        {
+            PenMesh.SetActive(show && !usePointerMode);
+            //CapsuleCol.radius = 0.5f;
+            //CapsuleCol.height = 2f;
+        }
+        if (PointerMesh != null)
+        {
+            PointerMesh.SetActive(show && usePointerMode);
+            //CapsuleCol.radius = 0.9f;
+            //CapsuleCol.height = 0.5f;
         }
     }
 
@@ -340,5 +715,121 @@ public class TabletPen : UdonSharpBehaviour
         ButtonAudioSource.volume = Random.Range(.9f, 1f);
         ButtonAudioSource.PlayOneShot(SwitchUpClip[Random.Range(0, SwitchUpClip.Length)]);
 
+    }
+    public void PlayScreenTouchClip()
+    {
+        if (ScreenTouchClips == null || ScreenTouchClips.Length == 0) return;
+        ButtonAudioSource.pitch = Random.Range(.95f, 1.05f);
+        ButtonAudioSource.volume = Random.Range(0.99f, 1f);
+        ButtonAudioSource.PlayOneShot(ScreenTouchClips[Random.Range(0, ScreenTouchClips.Length)]);
+    }
+
+    //private void HandlePickupConstraint()
+    //{
+    //    if (IsGripping)
+    //    {
+    //        Debug.Log("[TabletPen] Gripping");
+    //        // If we aren't holding anything, try to grab
+    //        if (_heldPickup == null && Pickup != null)
+    //        {
+    //            Debug.Log("[TabletPen] Found Object");
+    //            TabletPenPickup pickupScript = Pickup.GetComponent<TabletPenPickup>();
+
+    //            // Only grab if the pen is hovering over the pickup and no one else is holding it
+    //            if (pickupScript != null && pickupScript.hoveringPen == this && !pickupScript.isBeingHeld)
+    //            {
+    //                Debug.Log("[TabletPen] PickingUp");
+    //                _heldPickup = pickupScript;
+    //                _heldPickup.OnGrab();
+
+    //                // CALCULATE OFFSET (The "Parent-Constraint" setup)
+    //                // InverseTransformPoint converts the Pickup's world position into "Pen-local" space
+    //                _heldPosOffset = transform.InverseTransformPoint(_heldPickup.transform.position);
+
+    //                // Inverse(PenRotation) * PickupRotation = Local Rotation relative to Pen
+    //                _heldRotOffset = Quaternion.Inverse(transform.rotation) * _heldPickup.transform.rotation;
+
+    //                TriggerHaptic(0.05f, 0.3f);
+    //            }
+    //        }
+
+    //        // APPLY CONSTRAINT (The "Parent-Constraint" update)
+    //        if (_heldPickup != null)
+    //        {
+    //            // Move Pickup to Pen's current position + the recorded offset (rotated by pen's current rot)
+    //            _heldPickup.transform.position = transform.TransformPoint(_heldPosOffset);
+
+    //            // Rotate Pickup to Pen's current rotation + the recorded rotation offset
+    //            _heldPickup.transform.rotation = transform.rotation * _heldRotOffset;
+    //        }
+    //    }
+    //    else
+    //    {
+    //        // Release the pickup
+    //        if (_heldPickup != null)
+    //        {
+    //            _heldPickup.OnRelease();
+    //            _heldPickup = null;
+    //        }
+    //    }
+    //}
+    // ... inside TabletPen class variables ...
+    public TabletPenPickup _hoveredPickup; // The handle the pen is currently touching
+                                           // public TabletPenPickup _heldPickup;    // The handle the pen is actually gripping
+
+    // Add this method anywhere in TabletPen.cs
+    //public void SetHoveredPickup(TabletPenPickup pickup)
+    //{
+    //    // If we are already holding something, don't change the hover target
+    //    if (_heldPickup != null) return;
+    //    _hoveredPickup = pickup;
+    //}
+
+    // Update your HandlePickupConstraint method to look like this:
+    private void HandlePickupConstraint(bool isGripping, bool gripJustPressed)
+    {
+        if (isGripping)
+        {
+            // 1. ATTEMPT TO GRAB
+            if (_heldPickup == null && gripJustPressed && _hoveredPickup != null)
+            {
+                // Ask the pickup if it's available (Base returns !isBeingHeld, Dual returns true if < 2 pens)
+                if (_hoveredPickup.CanBeGrabbed())
+                {
+                    _heldPickup = _hoveredPickup;
+
+                    // We pass 'this' so the pickup knows which pen is holding it
+                    _heldPickup.OnGrab(this);
+
+                    //TriggerHaptic(0.05f, 0.3f);
+                    TriggerHapticEvent();
+                    //Debug.Log("[TabletPen] Successful Grab");
+                }
+            }
+
+            // 2. MOVEMENT
+            // We REMOVED the transform.position/rotation logic from here.
+            // The Pickup script handles its own LateUpdate now.
+        }
+        else
+        {
+            // 3. RELEASE
+            if (_heldPickup != null)
+            {
+                _heldPickup.OnRelease(this);
+                _heldPickup = null;
+            }
+        }
+    }
+    public void SetHoveredPickup(TabletPenPickup pickup)
+    {
+        // Don't change hover targets while we are actively holding something
+       // if (_heldPickup != null) return;
+        _hoveredPickup = pickup;
+    }
+
+    public void TriggerHapticEvent()
+    {
+        TriggerHaptic(HapticDuration, HapticAmplitude, HapticFreq);
     }
 }
