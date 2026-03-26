@@ -1067,6 +1067,87 @@ public class OrbitHelpers : UdonSharpBehaviour
         m22 =  ci;
     }
 
+
+
+
+    public static void JulianDateToUtc(
+        double jd,
+        out int year,
+        out int month,
+        out int day,
+        out int hour,
+        out int minute,
+        out int second)
+    {
+        double z = System.Math.Floor(jd + 0.5);
+        double f = (jd + 0.5) - z;
+
+        double A = z;
+        if (z >= 2299161.0)
+        {
+            double alpha = System.Math.Floor((z - 1867216.25) / 36524.25);
+            A = z + 1 + alpha - System.Math.Floor(alpha / 4.0);
+        }
+
+        double B = A + 1524;
+        double C = System.Math.Floor((B - 122.1) / 365.25);
+        double D = System.Math.Floor(365.25 * C);
+        double E = System.Math.Floor((B - D) / 30.6001);
+
+        double dayFrac = B - D - System.Math.Floor(30.6001 * E) + f;
+        day = (int)System.Math.Floor(dayFrac);
+
+        if (E < 14) month = (int)(E - 1);
+        else month = (int)(E - 13);
+
+        if (month > 2) year = (int)(C - 4716);
+        else year = (int)(C - 4715);
+
+        double fracDay = dayFrac - System.Math.Floor(dayFrac);
+        double totalSeconds = fracDay * 86400.0;
+
+        hour = (int)(totalSeconds / 3600.0);
+        totalSeconds -= hour * 3600.0;
+
+        minute = (int)(totalSeconds / 60.0);
+        totalSeconds -= minute * 60.0;
+
+        second = (int)System.Math.Floor(totalSeconds + 0.5);
+
+        if (second >= 60) { second -= 60; minute += 1; }
+        if (minute >= 60) { minute -= 60; hour += 1; }
+        if (hour >= 24) { hour -= 24; day += 1; }
+    }
+
+    public static bool TryGetSubpointLatLonDeg(
+        GuidanceNavCoreState nav,
+        out double latDeg,
+        out double lonDeg)
+    {
+        latDeg = 0.0;
+        lonDeg = 0.0;
+
+        if (nav == null || !nav.valid) return false;
+
+        Vector3 rE = new Vector3((float)nav.r_x, (float)nav.r_y, (float)nav.r_z);
+        if (rE.sqrMagnitude < 1e-12f) return false;
+
+        Quaternion qE2PF = Quaternion.Inverse(nav.qPF2E);
+        Vector3 rPF = qE2PF * rE;
+        if (rPF.sqrMagnitude < 1e-12f) return false;
+
+        rPF.Normalize();
+
+        double latRad = System.Math.Asin(System.Math.Max(-1.0, System.Math.Min(1.0, rPF.z)));
+        double lonRad = System.Math.Atan2(rPF.y, rPF.x);
+
+        const double RAD2DEG = 180.0 / System.Math.PI;
+        latDeg = latRad * RAD2DEG;
+        lonDeg = lonRad * RAD2DEG;
+
+        return true;
+    }
+
     // -------------------------
     // Utility
     // -------------------------

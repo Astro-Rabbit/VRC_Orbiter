@@ -3,7 +3,37 @@ guid: e175e283de60da44883eb101e032441c
 ModelImporter:
   serializedVersion: 22200
   internalIDToNameTable: []
-  externalObjects: {}
+  externalObjects:
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: CockpitWallMat
+    second: {fileID: 2100000, guid: 8fe92966b02dad64cb86267c5c869917, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: DockingPortDoors
+    second: {fileID: 2100000, guid: ac0a900fa599c064c822358fc6784a38, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: DockingTunnelMat
+    second: {fileID: 2100000, guid: e7b8fe5d9aac5ba46bfa5f47f902b5e8, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: LoungeMat
+    second: {fileID: 2100000, guid: 302b11bc187c63c47bfce4f1fb4af179, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: Material.008
+    second: {fileID: 2100000, guid: d8f8c70f409c13146b90a82e5408dcf3, type: 2}
+  - first:
+      type: UnityEngine:Material
+      assembly: UnityEngine.CoreModule
+      name: OrbiterMat
+    second: {fileID: 2100000, guid: 261dadf3448951b42b20b0c6fe4c590c, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0
@@ -48,7 +78,7 @@ ModelImporter:
     nodeNameCollisionStrategy: 1
     fileIdsGeneration: 2
     swapUVChannels: 0
-    generateSecondaryUV: 0
+    generateSecondaryUV: 1
     useFileUnits: 1
     keepQuads: 0
     weldVertices: 1

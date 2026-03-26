@@ -401,6 +401,7 @@ public class GC_ModeRequestRouter : UdonSharpBehaviour
         if (!HasAuthority() || gc == null) return;
         gc.API_Attitude_HoldHorizon();
         AfterStateChange();
+        Debug.Log("Horizon Hold");
     }
 
     [NetworkCallable]

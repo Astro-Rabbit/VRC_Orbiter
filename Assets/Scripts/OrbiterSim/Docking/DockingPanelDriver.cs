@@ -6,17 +6,9 @@ using VRC.SDKBase;
 using VRC.Udon.Common.Interfaces;
 using VRC.SDK3.UdonNetworkCalling;
 
-
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class DockingPanelDriver : UdonSharpBehaviour
 {
-    // ---------------------------------------------------------------------
-    // Placeholder cover states
-    // ---------------------------------------------------------------------
-    public const byte COVER_CLOSED = 0;
-    public const byte COVER_MOVING = 1;
-    public const byte COVER_OPEN   = 2;
-
     // ---------------------------------------------------------------------
     // References
     // ---------------------------------------------------------------------
@@ -24,26 +16,13 @@ public class DockingPanelDriver : UdonSharpBehaviour
     public SimManager simManager;
     public DockingRuntimeState dock;
     public DockingComputer dockingComp;
-    public StewartPlatformController stewart;
-
-    [Header("UI input registers")]
-    [Tooltip("0 = docking disabled, 1 = docking enabled")]
-    public byte enableDockingSwitchState = 0;
-
-    [Header("Placeholder systems / interlocks")]
-    [Tooltip("Placeholder until real docking cover system exists.")]
-    public byte portCoverState = COVER_CLOSED;
-
-    [Tooltip("Placeholder until real hatch system exists.")]
-    public bool hatchClosed = true;
-
-    [Tooltip("Placeholder until real bay pressure system exists.")]
-    public bool bayDepressurized = true;
+    public DockingOpsController ops;
+    public DockingOccupancyGate occupancyGate;
 
     [Header("Status text")]
     public TMP_Text stageText;
 
-    [Header("Cover status lamps")]
+    [Header("Port status lamps")]
     public Renderer lampCoverClosed;
     public Renderer lampCoverMoving;
     public Renderer lampCoverOpen;
@@ -64,12 +43,12 @@ public class DockingPanelDriver : UdonSharpBehaviour
     // ---------------------------------------------------------------------
     private MaterialPropertyBlock _mpb;
 
-    private byte _lastEnableDockingSwitchState = 255;
-    private byte _lastPortCoverState = 255;
+    private byte _lastPortState = 255;
+    private byte _lastHatchState = 255;
     private byte _lastDockPhase = 255;
     private bool _lastDockActive = false;
-    private bool _lastHatchClosed = false;
-    private bool _lastBayDepressurized = false;
+    private bool _lastAllowDockingCapture = false;
+    private bool _lastAllowStewart = false;
 
     // ---------------------------------------------------------------------
     // Unity
@@ -77,20 +56,17 @@ public class DockingPanelDriver : UdonSharpBehaviour
     void Start()
     {
         _mpb = new MaterialPropertyBlock();
-        ApplyDockingPrepState(true);
         RefreshIndicators(true);
     }
 
     void Update()
     {
-        ApplyDockingPrepState(false);
         RefreshIndicators(false);
     }
 
     // ---------------------------------------------------------------------
     // UI entry points
     // ---------------------------------------------------------------------
-
     private bool HasAuthority()
     {
         if (simManager != null) return simManager.IsSimOwner();
@@ -108,11 +84,14 @@ public class DockingPanelDriver : UdonSharpBehaviour
         SendCustomNetworkEvent(NetworkEventTarget.Owner, ownerEventName);
     }
 
-
-    public void EVT_EnableDockingChanged()
+    public void EVT_PortPressed()
     {
-        ApplyDockingPrepState(true);
-        RefreshIndicators(true);
+        RouteToOwner(nameof(Owner_PortPressed));
+    }
+
+    public void EVT_HatchPressed()
+    {
+        RouteToOwner(nameof(Owner_HatchPressed));
     }
 
     public void EVT_RetractPressed()
@@ -125,79 +104,34 @@ public class DockingPanelDriver : UdonSharpBehaviour
         RouteToOwner(nameof(Owner_Undock));
     }
 
-    // ---------------------------------------------------------------------
-    // Core behavior
-    // ---------------------------------------------------------------------
 
-    private void ApplyDockingPrepState(bool force)
+    public void EVT_AirlockDoorPressed()
     {
-        bool dockingEnabled = (enableDockingSwitchState != 0);
-
-        if (!force && dockingEnabled == (simManager != null && simManager.dockingAllowed))
-        {
-            // still continue to Stewart logic below
-        }
-
-        if (simManager != null)
-            simManager.dockingAllowed = dockingEnabled;
-
-        // Placeholder cover behavior.
-        // Later replace this with real cover controller commands.
-        if (dockingEnabled)
-        {
-            if (portCoverState == COVER_CLOSED)
-                CommandOpenCoverPlaceholder();
-        }
-        else
-        {
-            // Don't auto-close if actively docked.
-            bool activelyDocked = (dock != null && dock.active);
-            if (!activelyDocked && portCoverState == COVER_OPEN)
-                CommandCloseCoverPlaceholder();
-        }
-
-        // Stewart only enabled once cover is fully open and docking is enabled.
-        if (stewart != null)
-            stewart.platformEnabled = dockingEnabled && (portCoverState == COVER_OPEN);
+        RouteToOwner(nameof(Owner_AirlockDoorPressed));
     }
 
-    private void RefreshIndicators(bool force)
+    // ---------------------------------------------------------------------
+    // Owner command handlers
+    // ---------------------------------------------------------------------
+    [NetworkCallable]
+    public void Owner_PortPressed()
     {
-        byte dockPhase = (dock != null) ? dock.phase : DockingRuntimeState.DOCK_NONE;
-        bool dockActive = (dock != null) && dock.active;
+        if (!HasAuthority()) return;
+        if (ops == null) return;
 
-        if (!force &&
-            _lastEnableDockingSwitchState == enableDockingSwitchState &&
-            _lastPortCoverState == portCoverState &&
-            _lastDockPhase == dockPhase &&
-            _lastDockActive == dockActive &&
-            _lastHatchClosed == hatchClosed &&
-            _lastBayDepressurized == bayDepressurized)
-        {
-            return;
-        }
-
-        _lastEnableDockingSwitchState = enableDockingSwitchState;
-        _lastPortCoverState = portCoverState;
-        _lastDockPhase = dockPhase;
-        _lastDockActive = dockActive;
-        _lastHatchClosed = hatchClosed;
-        _lastBayDepressurized = bayDepressurized;
-
-        // Cover lamps
-        SetLamp(lampCoverClosed, portCoverState == COVER_CLOSED);
-        SetLamp(lampCoverMoving, portCoverState == COVER_MOVING);
-        SetLamp(lampCoverOpen,   portCoverState == COVER_OPEN);
-
-        // Action-ready lamps
-        SetLamp(lampReadyToRetract, IsReadyToRetract());
-        SetLamp(lampReadyToUndock,  IsReadyToUndock());
-
-        // Stage text
-        if (stageText != null)
-            stageText.text = ResolveStageText();
+        ops.CommandPortButton();
+        RefreshIndicators(true);
     }
 
+    [NetworkCallable]
+    public void Owner_HatchPressed()
+    {
+        if (!HasAuthority()) return;
+        if (ops == null) return;
+
+        ops.CommandHatchButton();
+        RefreshIndicators(true);
+    }
 
     [NetworkCallable]
     public void Owner_Retract()
@@ -221,21 +155,54 @@ public class DockingPanelDriver : UdonSharpBehaviour
         RefreshIndicators(true);
     }
 
-    // ---------------------------------------------------------------------
-    // State helpers
-    // ---------------------------------------------------------------------
+    [NetworkCallable]
+    public void Owner_AirlockDoorPressed()
+    {
+        if (!HasAuthority()) return;
+        if (ops == null) return;
 
+        ops.CommandAirlockDoorButton();
+        RefreshIndicators(true);
+    }
+
+    // ---------------------------------------------------------------------
+    // UI/state helpers
+    // ---------------------------------------------------------------------
     private void EnsureMPB()
     {
         if (_mpb == null)
             _mpb = new MaterialPropertyBlock();
     }
 
+    private byte GetPortState()
+    {
+        if (ops == null) return DockingOpsController.MECH_CLOSED;
+        return ops.portState;
+    }
+
+    private byte GetHatchState()
+    {
+        if (ops == null) return DockingOpsController.MECH_CLOSED;
+        return ops.hatchState;
+    }
+
+    private bool GetAllowDockingCapture()
+    {
+        return ops != null && ops.allowDockingCapture;
+    }
+
+    private bool GetAllowStewart()
+    {
+        return ops != null && ops.allowStewart;
+    }
+
     private bool IsReadyToRetract()
     {
         if (dock == null) return false;
-        if (enableDockingSwitchState == 0) return false;
-        if (portCoverState != COVER_OPEN) return false;
+        if (ops == null) return false;
+
+        if (!ops.IsPortOpen()) return false;
+        if (!ops.IsHatchClosed()) return false;
 
         return dock.active && dock.phase == DockingRuntimeState.DOCK_SOFT;
     }
@@ -243,9 +210,13 @@ public class DockingPanelDriver : UdonSharpBehaviour
     private bool IsReadyToUndock()
     {
         if (dockingComp == null) return false;
+        if (ops == null) return false;
+
         if (!dockingComp.CanUndock()) return false;
-        if (!hatchClosed) return false;
-        if (!bayDepressurized) return false;
+        if (!ops.IsHatchClosed()) return false;
+        if (occupancyGate != null && occupancyGate.AnyPlayerOutsideCraft()) return false;
+
+        return true;
 
         return true;
     }
@@ -267,41 +238,72 @@ public class DockingPanelDriver : UdonSharpBehaviour
             }
         }
 
-        switch (portCoverState)
+        if (ops == null)
+            return "OFF";
+
+        switch (ops.portState)
         {
-            case COVER_CLOSED: return "CLOSED";
-            case COVER_MOVING: return "MOVING";
-            case COVER_OPEN:   return "OPEN";
+            case DockingOpsController.MECH_CLOSED:
+                return "CLOSED";
+
+            case DockingOpsController.MECH_OPENING:
+            case DockingOpsController.MECH_CLOSING:
+                return "MOVING";
+
+            case DockingOpsController.MECH_OPEN:
+                return "OPEN";
         }
 
-        return "OPEN";
+        return "OFF";
     }
 
-    // ---------------------------------------------------------------------
-    // Placeholder cover control
-    // ---------------------------------------------------------------------
-
-    public void CommandOpenCoverPlaceholder()
+    private void RefreshIndicators(bool force)
     {
-        // Later: talk to a real cover controller.
-        portCoverState = COVER_OPEN;
-    }
+        byte dockPhase = (dock != null) ? dock.phase : DockingRuntimeState.DOCK_NONE;
+        bool dockActive = (dock != null) && dock.active;
 
-    public void CommandCloseCoverPlaceholder()
-    {
-        // Later: talk to a real cover controller.
-        portCoverState = COVER_CLOSED;
-    }
+        byte portState = GetPortState();
+        byte hatchState = GetHatchState();
+        bool allowDockingCapture = GetAllowDockingCapture();
+        bool allowStewart = GetAllowStewart();
 
-    public void SetCoverMovingPlaceholder()
-    {
-        portCoverState = COVER_MOVING;
+        if (!force &&
+            _lastPortState == portState &&
+            _lastHatchState == hatchState &&
+            _lastDockPhase == dockPhase &&
+            _lastDockActive == dockActive &&
+            _lastAllowDockingCapture == allowDockingCapture &&
+            _lastAllowStewart == allowStewart)
+        {
+            return;
+        }
+
+        _lastPortState = portState;
+        _lastHatchState = hatchState;
+        _lastDockPhase = dockPhase;
+        _lastDockActive = dockActive;
+        _lastAllowDockingCapture = allowDockingCapture;
+        _lastAllowStewart = allowStewart;
+
+        // Port lamps
+        SetLamp(lampCoverClosed, portState == DockingOpsController.MECH_CLOSED);
+        SetLamp(lampCoverMoving,
+            portState == DockingOpsController.MECH_OPENING ||
+            portState == DockingOpsController.MECH_CLOSING);
+        SetLamp(lampCoverOpen, portState == DockingOpsController.MECH_OPEN);
+
+        // Action-ready lamps
+        SetLamp(lampReadyToRetract, IsReadyToRetract());
+        SetLamp(lampReadyToUndock, IsReadyToUndock());
+
+        // Stage text
+        if (stageText != null)
+            stageText.text = ResolveStageText();
     }
 
     // ---------------------------------------------------------------------
     // Lamp helper
     // ---------------------------------------------------------------------
-
     private void SetLamp(Renderer r, bool active)
     {
         if (r == null) return;

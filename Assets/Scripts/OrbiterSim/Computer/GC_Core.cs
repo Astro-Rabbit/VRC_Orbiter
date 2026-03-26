@@ -685,7 +685,11 @@ public class GC_Core : UdonSharpBehaviour
             {
                 Quaternion qTarget;
                 if (!TryBuildHorizonHoldTarget(out qTarget))
-                    break;
+                    {
+                        Debug.Log("failed to build horizon Target");
+                        break;
+                    }
+                    
 
                 _modeWritesAtt = true;
                 _modeAttCmd = CraftCommandState.ATT_CMD_ATTITUDE_TARGET;
@@ -1709,6 +1713,7 @@ public class GC_Core : UdonSharpBehaviour
                 runtime.activeProgramId = GC_RuntimeState.PROG_DOCK_ALIGN_PORTS;
                 return;
 
+
             default:
                 runtime.activeProgramId = GC_RuntimeState.PROG_NONE;
                 return;
@@ -1937,6 +1942,7 @@ public class GC_Core : UdonSharpBehaviour
 
     public void API_Attitude_HoldHorizon()
     {
+        Debug.Log("HoldHorizon Requested");
         runtime.activeModeId = GC_RuntimeState.MODE_HOLD_HORIZON;
         runtime.modeStartTime = nav.t;
     }

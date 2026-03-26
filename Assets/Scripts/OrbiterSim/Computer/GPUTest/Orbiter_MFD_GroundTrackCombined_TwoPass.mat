@@ -28,7 +28,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MapTex:
-        m_Texture: {fileID: 2800000, guid: 526c02e1e4fda614ba768aaed8747252, type: 3}
+        m_Texture: {fileID: 2800000, guid: 7fb6ce60ca4afcf48a814cf7ba33be26, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _TrackTex:
@@ -37,30 +37,31 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _A: 6771000
+    - _A: 4537328
     - _AltDisplayScale: 1000000
-    - _ArgP: 6.2440586
-    - _BodyRadius: 6371000
-    - _E: 0.005000008
-    - _Inc: 0.009915541
+    - _ArgP: 6.2728176
+    - _BodyRadius: 1737400
+    - _E: 0.010006169
+    - _Inc: 0.009998669
     - _LonOffset: 0
     - _MapAspect: 2
-    - _MarkerRadius: 0.005
+    - _MarkerRadius: 0.008
     - _MarkerSoftness: 0.002
-    - _Mu: 3.9860045e+14
-    - _Nu0: 1.099954
-    - _RAAN: 0.04104208
+    - _Mu: 4.9048694e+12
+    - _Nu0: 0.18740824
+    - _RAAN: 0.00091645255
     - _SampleCount: 256
     - _SampleStepSec: 45
     - _ShowCurrentMarker: 1
-    - _T0: 962.8484
+    - _T0: 633.8897
     - _TrackSampleCount: 256
     - _TrackSoftness: 0.0015
     - _TrackWidth: 0.002
     m_Colors:
-    - _BodyOmega: {r: 0, g: 0.000029006356, b: 0.00006690385, a: 0}
-    - _BodyQPF2E: {r: -0.17822699, g: -0.097437575, b: -0.4696974, a: 0.85914224}
+    - _BodyOmega: {r: -0.000000089373636, g: -0.00000022657719, b: 0.000002650532,
+        a: 0}
+    - _BodyQPF2E: {r: 0.039936945, g: -0.022424832, b: 0.13535997, a: 0.9897372}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _MarkerColor: {r: 1, g: 0.92156863, b: 0.015686275, a: 1}
-    - _TrackColor: {r: 0, g: 1, b: 0, a: 1}
+    - _MarkerColor: {r: 0.015686274, g: 0.41653576, b: 1, a: 1}
+    - _TrackColor: {r: 0, g: 1, b: 0.3462386, a: 1}
   m_BuildTextureStacks: []

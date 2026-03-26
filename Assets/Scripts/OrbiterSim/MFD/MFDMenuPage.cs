@@ -6,7 +6,17 @@ using VRC.Udon;
 
 public class MFDMenuPage : MFDPage
 {
+    [Header("Menu Entries")]
     public string[] pageNames; // ordered page list after MENU page
+
+    [Header("Optional Logo")]
+    public Texture2D logoTexture;
+    
+    [Tooltip("Logo placement in display UV space (xmin, ymin, xmax, ymax).")]
+    public Vector4 logoRectUv = new Vector4(0.32f, 0.32f, 0.68f, 0.68f);
+
+    [Tooltip("Tint applied to the logo image.")]
+    public Color logoTint = Color.white;
 
     private const int BUTTONS_PER_SIDE = 5;
 
@@ -33,17 +43,49 @@ public class MFDMenuPage : MFDPage
             return;
         }
 
-        // Page IDs are assumed to follow MENU in array order:
-        // pageNames[0] -> page ID 1
-        // pageNames[1] -> page ID 2
-        // ...
         display.SetPage((byte)(pageArrayIndex + 1));
     }
 
     public override void DrawDisplay(MFD display)
     {
+        display.ClearGraphics();
         display.ClearText();
 
+        DrawLogo(display);
+        DrawBrandText(display); 
+
+        DrawMenuLabels(display);
+    }
+
+    private void DrawLogo(MFD display)
+    {
+        if (logoTexture == null) {
+            display.ClearImagePanel();
+            return;
+        }
+
+        display.SetImagePanel(
+            logoTexture,
+            logoRectUv,
+            new Vector4(0.004f, 0.004f, 0.996f, 0.996f),
+            logoTint
+        );
+    }
+
+    private void DrawBrandText(MFD display)
+    {
+        // Centered under logo for 48 columns:
+        // "MFD System"                length 10 -> col 19
+        // "A.S.P.E.R.B AVIONICS"      length 20 -> col 14
+        // "V1.0"                      length 4  -> col 22
+
+        display.DrawText("MFD System", 17, 19, Color.green);
+        display.DrawText("A.S.P.E.R.B AVIONICS", 18, 14, Color.green);
+        display.DrawText("V1.0", 19, 22, Color.green);
+    }
+
+    private void DrawMenuLabels(MFD display)
+    {
         if (pageNames == null) {
             return;
         }
@@ -60,11 +102,9 @@ public class MFDMenuPage : MFDPage
             }
 
             if (i < BUTTONS_PER_SIDE) {
-                // Left side
                 display.DrawVerticalText(name, i * 5, 0, Color.white);
             }
             else {
-                // Right side
                 int rightIndex = i - BUTTONS_PER_SIDE;
                 display.DrawVerticalText(name, rightIndex * 5, MFD.TEXT_COLUMNS - 1, Color.white);
             }
