@@ -1,7 +1,7 @@
 using UdonSharp;
 using UnityEngine;
 using VRC.SDKBase;
-
+using VRC.SDK3.UdonNetworkCalling;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class CraftNetState : UdonSharpBehaviour
 {
@@ -17,9 +17,11 @@ public class CraftNetState : UdonSharpBehaviour
     [Header("Optional local mirrors")]
     public DockingRuntimeState dock;
     public DockingComputer dockingComp;
+    public GuidanceNavContactsState contactsState;
+    public GuidanceNavContactsComputer contactsComp;
 
     [Header("Identity")]
-    public int craftId = 0;
+    public byte craftId = 0;
 
     [Header("Publish rate")]
     [Tooltip("Core/meta publish rate (Hz). Set low (e.g. 1-5). 0 disables periodic publishing (use ForcePublishCore).")]
@@ -39,6 +41,10 @@ public class CraftNetState : UdonSharpBehaviour
     [Tooltip("Network/server time when the latest mode change was published.")]
     public double modeChangeNetT = 0.0;
 
+    [Header("Read-only (target selection mirrors synced)")]
+    public int selectedStationIndex = -1;
+    public int selectedStationDockPortIndex = -1;
+
     [Header("Read-only (docking mirrors synced)")]
     public byte dockPhase = 0;
     public int dockStationIndex = -1;
@@ -56,7 +62,7 @@ public class CraftNetState : UdonSharpBehaviour
 
     // --- synced core ---
     [UdonSynced] private int _rev;
-    [UdonSynced] private int _craftId;
+    [UdonSynced] private byte _craftId;
     [UdonSynced] private byte _mode;
     [UdonSynced] private byte _primaryBodyId;
 
@@ -88,6 +94,10 @@ public class CraftNetState : UdonSharpBehaviour
     [UdonSynced] private Vector3 _dockRelPos_SB;
     [UdonSynced] private Quaternion _dock_qCraftToStation;
 
+    // --- synced target selection ---
+    [UdonSynced] private byte _selectedStationIndex = 255;
+    [UdonSynced] private byte _selectedStationDockPortIndex = 255;
+
     [Header("Read-only handoff ack")]
     public int handoffEstablishedTxnId = -1;
 
@@ -113,6 +123,10 @@ public class CraftNetState : UdonSharpBehaviour
         modeChangeNetT = _modeChangeNetT;
         ownershipTransferHardLocked = _ownershipTransferHardLocked;    
         handoffEstablishedTxnId = _handoffEstablishedTxnId;    
+
+
+        ApplySyncedTargetSelectionToLocal();
+
     }
 
     public byte GetMode() => _mode;
@@ -226,11 +240,14 @@ public class CraftNetState : UdonSharpBehaviour
 
         ownershipTransferHardLocked = _ownershipTransferHardLocked;
 
-        if (bumpRevision) _rev++;
 
         mode = _mode;
         primaryBodyId = _primaryBodyId;
         handoffEstablishedTxnId = _handoffEstablishedTxnId;
+
+        ApplySyncedTargetSelectionToLocal();
+
+        if (bumpRevision) _rev++;
 
         RequestSerialization();
         _appliedRev = _rev;
@@ -255,6 +272,8 @@ public class CraftNetState : UdonSharpBehaviour
         dockRetractT0 = _dockRetractT0;
         dockRelPos_SB = _dockRelPos_SB;
         dock_qCraftToStation = _dock_qCraftToStation;
+
+        ApplySyncedTargetSelectionToLocal();
 
         if (_rev == _appliedRev) return;
         _appliedRev = _rev;
@@ -423,6 +442,83 @@ public class CraftNetState : UdonSharpBehaviour
         handoffEstablishedTxnId = txnId;
     }
 
+    private const byte NONE_BYTE = 255;
+
+    private byte EncodeIndexOrNone(int value)
+    {
+        if (value < 0 || value >= 255) return NONE_BYTE;
+        return (byte)value;
+    }
+
+    private int DecodeIndexOrNone(byte value)
+    {
+        return (value == NONE_BYTE) ? -1 : (int)value;
+    }
+
+    private int GetStationCount()
+    {
+        if (contactsComp == null || contactsComp.stations == null) return 0;
+        return contactsComp.stations.Length;
+    }
+
+    private int GetDockPortCountForStation(int stationIndex)
+    {
+        if (contactsComp == null || contactsComp.stations == null) return 0;
+        if (stationIndex < 0 || stationIndex >= contactsComp.stations.Length) return 0;
+
+        StationStateModel st = contactsComp.stations[stationIndex];
+        if (st == null) return 0;
+
+        return st.dockingPortCount;
+    }
+
+    private void ApplySyncedTargetSelectionToLocal()
+    {
+        int stationIndex = DecodeIndexOrNone(_selectedStationIndex);
+        int stationPortIndex = DecodeIndexOrNone(_selectedStationDockPortIndex);
+
+        selectedStationIndex = stationIndex;
+        selectedStationDockPortIndex = stationPortIndex;
+
+        if (contactsState != null)
+        {
+            contactsState.selectedStationIndex = stationIndex;
+            contactsState.selectedStationDockPortIndex = stationPortIndex;
+            contactsState.selectedCraftDockPortIndex = 0;
+        }
+    }
+
+    public void OwnerCommitTargetSelection(int requestedStationIndex, int requestedStationDockPortIndex, bool forcePublish = true)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (!HasSimAuthority()) return;
+
+        int stationCount = GetStationCount();
+
+        int stationIndex = requestedStationIndex;
+        int stationPortIndex = requestedStationDockPortIndex;
+
+        if (stationIndex < 0 || stationIndex >= stationCount)
+        {
+            stationIndex = -1;
+            stationPortIndex = -1;
+        }
+        else
+        {
+            int portCount = GetDockPortCountForStation(stationIndex);
+
+            if (stationPortIndex < 0 || stationPortIndex >= portCount)
+                stationPortIndex = -1;
+        }
+
+        _selectedStationIndex = EncodeIndexOrNone(stationIndex);
+        _selectedStationDockPortIndex = EncodeIndexOrNone(stationPortIndex);
+
+        ApplySyncedTargetSelectionToLocal();
+
+        if (forcePublish)
+            ForcePublishCore();
+    }
     public void AdoptModeImmediate(byte adoptedMode, byte adoptedPrimaryBodyId)
     {
         if (!Networking.IsOwner(gameObject)) return;
@@ -446,5 +542,20 @@ public class CraftNetState : UdonSharpBehaviour
         prevPrimaryBodyId = _prevPrimaryBodyId;
         modeChangeNetT = _modeChangeNetT;
     }
+
+    [NetworkCallable]
+    public void Net_RequestSelectedStation(int requestedStationIndex)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        OwnerCommitTargetSelection(requestedStationIndex, -1, true);
+    }
+
+    [NetworkCallable]
+    public void Net_RequestSelectedStationPort(int requestedStationIndex, int requestedStationDockPortIndex)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        OwnerCommitTargetSelection(requestedStationIndex, requestedStationDockPortIndex, true);
+    }
+
 
 }

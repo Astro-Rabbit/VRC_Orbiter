@@ -439,6 +439,7 @@ public class MFDTransferPage : MFDPage
             dv = solver.bestDvMag;
         } else if (solver.autoValid) {
             dv = solver.autoDvMag;
+
         }
 
         if (dv <= 0.0f) return "DV  ----";
