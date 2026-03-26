@@ -19,13 +19,9 @@ public class OrbitAnalyzer : UdonSharpBehaviour
     private double m10, m11, m12;
     private double m20, m21, m22;
 
-    private double lastEpochT0 = Double.NegativeInfinity;
-
     void Update()
     {
-        if (conic != null && conic.epochT0 != lastEpochT0) {
-            UpdateInfo();
-        }
+        UpdateInfo();
     }
 
     public void UpdateInfo()
@@ -33,8 +29,6 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         if (conic == null) {
             return;
         }
-
-        lastEpochT0 = conic.epochT0;
 
         a = conic.aMeters;
         e = conic.e;

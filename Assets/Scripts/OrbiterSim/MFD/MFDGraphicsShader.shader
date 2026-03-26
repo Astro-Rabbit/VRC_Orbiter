@@ -28,11 +28,12 @@ Shader "Unlit/MFDGraphicsShader"
             #define MAX_SHAPES 256
 
             sampler2D _FontAtlas;
+            float4 _FontAtlas_TexelSize;
             float _FontSdfEdge;
             float _FontSdfSoftness;
 
-            float4 atlasRects[127 - 32];
-            float4 charRects[127 - 32];
+            float4 atlasRects[127 - 32 + 1];
+            float4 charRects[127 - 32 + 1];
 
             uniform int charGrid[24 * 48];
             uniform float3 charColors[24 * 48];
@@ -190,17 +191,15 @@ Shader "Unlit/MFDGraphicsShader"
                 }
             }
 
-            float SampleFontSdf(float2 atlasUv)
+            float drawGlyph(int c, float gx, float gy)
             {
-                return tex2D(_FontAtlas, atlasUv).a;
-            }
-
-            float DrawGlyph(int c, float gx, float gy)
-            {
-                // special case hack to be able to make ^ look like an upside down V for drawing arrows
                 if (c == 0x5E) {
+                    // special case hack to be able to make ^ look like an upside down V for drawing arrows
                     c = 0x56;
                     gy = 1.0 - gy;
+                } else if (c == 0xB0) {
+                    // degree symbol
+                    c = 0xFF;
                 }
 
                 float4 atlasRect = atlasRects[c - 32];
@@ -212,16 +211,23 @@ Shader "Unlit/MFDGraphicsShader"
                 float cx = (gx - charRect.x) / charRect.z;
                 float cy = 1.0 - (charRect.y - gy)/charRect.w;
                 if (cx < 0 || cx > 1 || cy < 0 || cy > 1) {
-                    return 0.0;
+                    return _FontSdfEdge;
                 }
 
                 float2 atlasUv;
                 atlasUv.x = lerp(atlasRect.x, atlasRect.z, cx);
                 atlasUv.y = lerp(atlasRect.y, atlasRect.w, cy);
 
-                float sdf = SampleFontSdf(atlasUv);
+                float sdf = tex2D(_FontAtlas, atlasUv).a;
 
-                return smoothstep(_FontSdfEdge - _FontSdfSoftness, _FontSdfEdge + _FontSdfSoftness, sdf);
+                return _FontSdfEdge - sdf;
+            }
+
+            float antialias(float sdf)
+            {
+                float2 grad = float2(ddx(sdf), ddy(sdf));
+                float pixelDist = sdf / length(grad);
+                return clamp(0.5 - pixelDist, 0.0, 1.0);
             }
 
             fixed4 frag (v2f input) : SV_Target
@@ -232,9 +238,9 @@ Shader "Unlit/MFDGraphicsShader"
 
                 float3 color = float3(0, 0, 0);
                 for (int i = 0; i < shapeCount; i++) {
-                    if (abs(shape(p, i)) < lineWidth) {
-                        color = shapeColors[i];
-                    }
+                    float alpha = antialias(abs(shape(p, i)) - lineWidth);
+                    color *= 1.0 - alpha;
+                    color += shapeColors[i] * alpha;
                 }
 
                 int row = (int)((1.0 - input.uv.y) * TEXT_ROWS);
@@ -249,10 +255,9 @@ Shader "Unlit/MFDGraphicsShader"
                 float gx = input.uv.x*TEXT_COLUMNS - col;
                 float gy = (1.0 - input.uv.y)*TEXT_ROWS - row;
 
-                float glyph = DrawGlyph(c, gx, 1.0 - gy);
-                if (glyph > 0.0) {
-                    color = charColors[index] * glyph;
-                }
+                float glyph = antialias(drawGlyph(c, gx, 1.0 - gy));
+                color *= 1.0 - glyph;
+                color += charColors[index] * glyph;
 
                 fixed4 res = fixed4(color, 1.0);
                 // apply fog
