@@ -5,6 +5,13 @@ Shader "Unlit/MFDGraphicsShader"
         _FontAtlas ("Font Atlas", 2D) = "white" {}
         _FontSdfEdge ("Font SDF Edge", Float) = 0.5
         _FontSdfSoftness ("Font SDF Softness", Float) = 0.06
+
+        _ImageTex ("Optional Image", 2D) = "black" {}
+        _ImageEnabled ("Image Enabled", Float) = 0
+        _ImageRect ("Image Rect UV", Vector) = (0,0,1,1)
+        _ImageUvRect ("Image Source UV Rect", Vector) = (0,0,1,1)
+        _ImageTint ("Image Tint", Color) = (1,1,1,1)
+
     }
 
     SubShader
@@ -34,6 +41,15 @@ Shader "Unlit/MFDGraphicsShader"
 
             float4 atlasRects[127 - 32 + 1];
             float4 charRects[127 - 32 + 1];
+
+            sampler2D _ImageTex;
+            float _ImageEnabled;
+            float4 _ImageRect;   // xmin, ymin, xmax, ymax in display UV
+            float4 _ImageUvRect; // umin, vmin, umax, vmax in source image UV
+            float4 _ImageTint;
+            float4 _ImageTex_TexelSize;
+
+
 
             uniform int charGrid[24 * 48];
             uniform float3 charColors[24 * 48];
@@ -230,6 +246,30 @@ Shader "Unlit/MFDGraphicsShader"
                 return clamp(0.5 - pixelDist, 0.0, 1.0);
             }
 
+
+            float4 SampleOptionalImage(float2 uv)
+            {
+                if (_ImageEnabled < 0.5)
+                    return float4(0,0,0,0);
+
+                float2 rectMin = _ImageRect.xy;
+                float2 rectMax = _ImageRect.zw;
+
+                if (uv.x < rectMin.x || uv.x > rectMax.x || uv.y < rectMin.y || uv.y > rectMax.y)
+                    return float4(0,0,0,0);
+
+                float2 localUv = (uv - rectMin) / max(rectMax - rectMin, float2(1e-6, 1e-6));
+                float2 imageUv = lerp(_ImageUvRect.xy, _ImageUvRect.zw, localUv);
+
+                // Pull sampling half a texel inward to avoid border bleed
+                float2 halfTexel = 0.5 * _ImageTex_TexelSize.xy;
+                imageUv = clamp(imageUv, _ImageUvRect.xy + halfTexel, _ImageUvRect.zw - halfTexel);
+
+                float4 img = tex2D(_ImageTex, imageUv) * _ImageTint;
+                return img;
+            }
+
+
             fixed4 frag (v2f input) : SV_Target
             {
                 const float lineWidth = .005;
@@ -237,6 +277,11 @@ Shader "Unlit/MFDGraphicsShader"
                 float2 p = 2*(input.uv - .5);
 
                 float3 color = float3(0, 0, 0);
+
+                float4 img = SampleOptionalImage(input.uv);
+
+                color.rbg = lerp(color.rgb, img.rgb, saturate(img.a));
+
                 for (int i = 0; i < shapeCount; i++) {
                     float alpha = antialias(abs(shape(p, i)) - lineWidth);
                     color *= 1.0 - alpha;
