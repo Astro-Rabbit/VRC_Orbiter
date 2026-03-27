@@ -51,11 +51,12 @@ public class TabletTimeControl : UdonSharpBehaviour
     public void WarpUp()
     {
         if (!CanControl()) return;
+        if (simManager == null) return;
         if (clock == null) return;
 
         double current = clock.timeScale;
         double next = GetNextHigherWarp(current);
-        clock.SetTimeScale(next);
+        simManager.SetRequestedWarp(next);
 
         RefreshUI(true);
     }
@@ -63,11 +64,12 @@ public class TabletTimeControl : UdonSharpBehaviour
     public void WarpDown()
     {
         if (!CanControl()) return;
+        if (simManager == null) return;
         if (clock == null) return;
 
         double current = clock.timeScale;
         double next = GetNextLowerWarp(current);
-        clock.SetTimeScale(next);
+        simManager.SetRequestedWarp(next);
 
         RefreshUI(true);
     }
@@ -75,11 +77,13 @@ public class TabletTimeControl : UdonSharpBehaviour
     public void WarpTo1x()
     {
         if (!CanControl()) return;
-        if (clock == null) return;
+        if (simManager == null) return;
 
-        clock.SetTimeScale(1.0);
+        simManager.SetRequestedWarp(1.0);
         RefreshUI(true);
     }
+
+
 
     private void RefreshUI(bool forceButtonRefresh)
     {
@@ -133,11 +137,15 @@ public class TabletTimeControl : UdonSharpBehaviour
     {
         if (warpText == null) return;
 
-        double warp = 1.0;
+        double actualWarp = 1.0;
         if (clock != null)
-            warp = clock.timeScale;
+            actualWarp = clock.timeScale;
 
-        warpText.text = "WARP: " + FormatWarp(warp);
+        double allowedWarp = actualWarp;
+        if (simManager != null && simManager.warpPolicy != null)
+            allowedWarp = simManager.warpPolicy.currentAllowedTimeScale;
+
+        warpText.text = "WARP: " + FormatWarp(actualWarp) + " / ALLOW: " + FormatWarp(allowedWarp);
     }
 
     private void ApplyButtonState(TabletButton btn, bool enabledState)

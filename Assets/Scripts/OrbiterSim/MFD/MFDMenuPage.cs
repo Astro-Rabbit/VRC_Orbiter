@@ -79,9 +79,9 @@ public class MFDMenuPage : MFDPage
         // "A.S.P.E.R.B AVIONICS"      length 20 -> col 14
         // "V1.0"                      length 4  -> col 22
 
-        display.DrawText("MFD System", 17, 19, Color.green);
-        display.DrawText("A.S.P.E.R.B AVIONICS", 18, 14, Color.green);
-        display.DrawText("V1.0", 19, 22, Color.green);
+        display.DrawText("MFD System", 14, 19, Color.green);
+        display.DrawText("A.S.P.E.R.B AVIONICS", 15, 14, Color.green);
+        display.DrawText("V1.0", 16, 22, Color.green);
     }
 
     private void DrawMenuLabels(MFD display)

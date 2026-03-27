@@ -32,6 +32,7 @@ public class GC_Core : UdonSharpBehaviour
     public BodyCatalog bodies;
     public ThrusterCatalog thrusters;
     public GC_NodePlanNetState nodeNet;
+    public CraftNetState craftNet;
 
     [Header("Optional docking contacts (for docking helper APIs)")]
     public GuidanceNavContactsState contacts;
@@ -77,10 +78,39 @@ public class GC_Core : UdonSharpBehaviour
     public double rtn_rTol = 1e-6;
     public double rtn_hTol = 1e-9;
 
+
+    [Header("Nav update policy")]
+    public float slowNavMinIntervalSec = 0.10f;   // 10 Hz default
+    public bool forceSlowNavEveryTick = false;
+
+    private double _lastSlowNavBuildT = double.NegativeInfinity;
+    private byte _lastSlowNavPrimaryId = 255;
+    private bool _slowNavDirty = true;
+
+
+    [Header("Slow nav cadence by craft sim mode")]
+    public float slowNavIntervalRailsSec = 0.20f;       // 5 Hz
+    public float slowNavIntervalIntegratedSec = 0.05f;  // 20 Hz
+    public float slowNavIntervalDockedSec = 0.50f;      // 2 Hz
+
     [Header("Optional displays")]
     public OrreryController orrery;
     public OrreryCraftOrbitRibbon orreryCraftOrbitRibbon;
     public OrreryCraftDirectionMarkers orreryCraftDirectionMarkers;
+
+    [Header("Display throttles")]
+    public float orreryHz = 10f;
+    public float ribbonHz = 4f;
+    public float markersHz = 10f;
+
+    [Header("Alert throttle")]
+    public float alertsHz = 8f;
+
+    private float _nextOrreryTickTime = 0f;
+    private float _nextRibbonTickTime = 0f;
+    private float _nextMarkersTickTime = 0f;
+    private float _nextAlertsTickTime = 0f;
+
 
     // Executor schedule (frozen once when a node is selected)
     private double _exec_tExec = 0.0;
@@ -147,6 +177,25 @@ public class GC_Core : UdonSharpBehaviour
     private Vector3 _execTranslate_B;
     private byte _execRcsMode;
 
+
+
+    [Header("Node timing cache")]
+    public bool forceNodeTimingRefreshEveryTick = true;
+    private bool _anyArmedNodeExists = false;
+
+    private bool _nodeTimingCacheValid = false;
+    private double _nodeTimingCacheNowT = 0.0;
+
+    private bool _nextArmedNodeValid = false;
+    private int _nextArmedNodeIndex = -1;
+    private double _nextArmedNodeTriggerTime = 0.0;
+    private double _nextArmedNodeTimeToGo = 0.0;
+
+    private bool _selectedNodeTimingValid = false;
+    private double _selectedNodeTriggerTime = 0.0;
+    private double _selectedNodeTimeToGo = 0.0;
+
+
     // --------------------
     // Unity Loop
     // --------------------
@@ -168,9 +217,16 @@ public class GC_Core : UdonSharpBehaviour
         intent.commandSource = 1;
 
         // 2) Build nav snapshot.
-        BuildNavCoreSnapshot();
+        BuildNavFastSnapshot();
+        UpdateSlowNavModeDirtyFlag();
+        if (ShouldRebuildSlowNav())
+            BuildNavSlowAnalytics();
+
+        RefreshNodeTimingCache();
         UpdateSelectedNodeNavExport();
-        UpdateAlerts();
+
+        if (ShouldRunThrottled(ref _nextAlertsTickTime, alertsHz))
+            UpdateAlerts();
 
         // 3) Acquire manual inputs.
         BuildManualDraftFromManualState();
@@ -188,38 +244,19 @@ public class GC_Core : UdonSharpBehaviour
         ArbitrateAndWriteIntent();
 
         UpdateActiveProgramIndicator();
-
-        if (orrery != null)
-            orrery.TickOrrery();
-
-        if (orreryCraftOrbitRibbon != null)
-            orreryCraftOrbitRibbon.TickRibbon();
-
-        if (orreryCraftDirectionMarkers != null)
-        {
-            orreryCraftDirectionMarkers.TickMarkers();
-
-            if (orrery != null)
-            {
-                Vector3 clipCenterWorld;
-                float clipRadiusWorld;
-                orrery.GetCurrentClipSphereWorld(out clipCenterWorld, out clipRadiusWorld);
-                orreryCraftDirectionMarkers.ApplyClipVolumeParams(clipCenterWorld, clipRadiusWorld);
-            }
-        }
+        TickDisplaysThrottled();
     }
 
     // =====================================================================
     // 2) NAV SNAPSHOT
     // =====================================================================
 
-    private void BuildNavCoreSnapshot()
+    private void BuildNavFastSnapshot()
     {
         // Time
         nav.t = ephem.t;
         nav.jd = ephem.jd;
 
-        // dt from mission time
         if (double.IsNaN(_lastT)) nav.dt = 0.0;
         else
         {
@@ -239,7 +276,10 @@ public class GC_Core : UdonSharpBehaviour
         nav.wB_z = craftAtt.wz;
 
         // Primary selection
+        byte prevPrimary = nav.primaryId;
         nav.primaryId = craft.primaryBodyId;
+        if (nav.primaryId != prevPrimary)
+            _slowNavDirty = true;
 
         // Primary constants
         nav.muPrimary = bodies.GetMu(nav.primaryId);
@@ -256,24 +296,22 @@ public class GC_Core : UdonSharpBehaviour
 
         nav.qPF2E = bodies.GetBodyFixedToInertial(nav.primaryId);
 
-        // Primary equator basis in E (+Z is north)
+        // Primary equator basis in E
         nav.Ieq_E = nav.qPF2E * Vector3.right;
         nav.Jeq_E = nav.qPF2E * Vector3.up;
         nav.Keq_E = nav.qPF2E * Vector3.forward;
 
-        // Primary-relative craft state (still expressed in E basis)
+        // Primary-relative state
         bodies.ToPrimaryRelative(nav.primaryId, craft,
             out nav.r_x, out nav.r_y, out nav.r_z,
             out nav.v_x, out nav.v_y, out nav.v_z);
 
-        // Magnitudes
         nav.rMag = System.Math.Sqrt(nav.r_x * nav.r_x + nav.r_y * nav.r_y + nav.r_z * nav.r_z);
         double v2 = nav.v_x * nav.v_x + nav.v_y * nav.v_y + nav.v_z * nav.v_z;
         nav.vMag = System.Math.Sqrt(v2);
 
         nav.valid = (nav.muPrimary > 0.0 && nav.rMag > 0.0);
 
-        // RTN basis
         Vector3 rHat, tHat, nHat;
         bool rtnOk = OrbitHelpers.TryBuildRTNBasis(
             nav.r_x, nav.r_y, nav.r_z,
@@ -295,7 +333,20 @@ public class GC_Core : UdonSharpBehaviour
             nav.valid = false;
         }
 
-        // Conic + invariants
+        nav.lastBuildTime = nav.t;
+    }
+
+    private void BuildNavSlowAnalytics()
+    {
+        if (!nav.valid)
+        {
+            ClearSlowNavAnalytics();
+            _lastSlowNavBuildT = nav.t;
+            _lastSlowNavPrimaryId = nav.primaryId;
+            _slowNavDirty = false;
+            return;
+        }
+
         double aMeters, eMag, iRad, raanRad, argpRad, nuRad;
         double hx, hy, hz;
         double ex, ey, ez;
@@ -312,59 +363,319 @@ public class GC_Core : UdonSharpBehaviour
             out ex, out ey, out ez,
             out rMeters, out vMetersPerSec, out specificEnergy);
 
-        if (conicOk)
+        if (!conicOk)
         {
-            nav.a = aMeters;
-            nav.e = eMag;
-            nav.energy = specificEnergy;
+            ClearSlowNavAnalytics();
+            nav.valid = false;
+            _lastSlowNavBuildT = nav.t;
+            _lastSlowNavPrimaryId = nav.primaryId;
+            _slowNavDirty = false;
+            return;
+        }
 
-            nav.h_E = new Vector3((float)hx, (float)hy, (float)hz);
-            nav.hMag = System.Math.Sqrt(hx * hx + hy * hy + hz * hz);
+        nav.a = aMeters;
+        nav.e = eMag;
+        nav.energy = specificEnergy;
 
-            nav.eVec_E = new Vector3((float)ex, (float)ey, (float)ez);
+        nav.h_E = new Vector3((float)hx, (float)hy, (float)hz);
+        nav.hMag = System.Math.Sqrt(hx * hx + hy * hy + hz * hz);
+        nav.eVec_E = new Vector3((float)ex, (float)ey, (float)ez);
+        nav.p = (nav.muPrimary > 0.0) ? (nav.hMag * nav.hMag / nav.muPrimary) : 0.0;
 
-            nav.p = (nav.muPrimary > 0.0) ? (nav.hMag * nav.hMag / nav.muPrimary) : 0.0;
+        nav.iInertialRad = iRad;
+        nav.raanInertialRad = raanRad;
+        nav.argpInertialRad = argpRad;
+        nav.nuRad = nuRad;
 
+        double iEq, raanEq, argpEq;
+        bool angOk = OrbitHelpers.TryConvertAnglesToBodyEquatorial(
+            hx, hy, hz,
+            ex, ey, ez,
+            nav.qPF2E,
+            eTol, nTol, hTol,
+            out iEq, out raanEq, out argpEq);
 
-            nav.iInertialRad = iRad;
-            nav.raanInertialRad = raanRad;
-            nav.argpInertialRad = argpRad;
-
-            // Convert (i, Ω, ω) into primary-equatorial reference plane (+Z north).
-            double iEq, raanEq, argpEq;
-            bool angOk = OrbitHelpers.TryConvertAnglesToBodyEquatorial(
-                hx, hy, hz,
-                ex, ey, ez,
-                nav.qPF2E,
-                eTol, nTol, hTol,
-                out iEq, out raanEq, out argpEq);
-
-            if (angOk)
-            {
-                nav.iRad = iEq;
-                nav.raanRad = raanEq;
-                nav.argpRad = argpEq;
-            }
-            else
-            {
-                nav.iRad = iRad;
-                nav.raanRad = raanRad;
-                nav.argpRad = argpRad;
-            }
-
-            nav.nuRad = nuRad;
+        if (angOk)
+        {
+            nav.iRad = iEq;
+            nav.raanRad = raanEq;
+            nav.argpRad = argpEq;
         }
         else
         {
-            nav.valid = false;
-            nav.a = nav.e = nav.energy = nav.p = 0.0;
-            nav.h_E = Vector3.forward; nav.hMag = 0.0;
-            nav.eVec_E = Vector3.zero;
-            nav.iRad = nav.raanRad = nav.argpRad = nav.nuRad = 0.0;
+            nav.iRad = iRad;
+            nav.raanRad = raanRad;
+            nav.argpRad = argpRad;
         }
 
-        nav.lastBuildTime = nav.t;
+        _lastSlowNavBuildT = nav.t;
+        _lastSlowNavPrimaryId = nav.primaryId;
+        _slowNavDirty = false;
     }
+
+    private void ClearSlowNavAnalytics()
+    {
+        nav.a = 0.0;
+        nav.e = 0.0;
+        nav.energy = 0.0;
+        nav.p = 0.0;
+
+        nav.h_E = Vector3.forward;
+        nav.hMag = 0.0;
+        nav.eVec_E = Vector3.zero;
+
+        nav.iInertialRad = 0.0;
+        nav.raanInertialRad = 0.0;
+        nav.argpInertialRad = 0.0;
+
+        nav.iRad = 0.0;
+        nav.raanRad = 0.0;
+        nav.argpRad = 0.0;
+        nav.nuRad = 0.0;
+    }
+
+    private bool ShouldRebuildSlowNav()
+    {
+        if (forceSlowNavEveryTick) return true;
+        if (_slowNavDirty) return true;
+        if (nav.primaryId != _lastSlowNavPrimaryId) return true;
+        if (double.IsNegativeInfinity(_lastSlowNavBuildT)) return true;
+
+        double dt = nav.t - _lastSlowNavBuildT;
+        return dt >= (double)GetCurrentSlowNavIntervalSec();
+    }
+
+
+    private float GetCurrentSlowNavIntervalSec()
+    {
+        if (forceSlowNavEveryTick) return 0f;
+
+        byte simMode = CraftNetState.MODE_RAILS;
+
+        if (craftNet != null)
+            simMode = craftNet.mode;
+        else if (craft != null)
+        {
+            // fallback assumption if net mirror is missing
+            simMode = CraftNetState.MODE_RAILS;
+        }
+
+        switch (simMode)
+        {
+            case CraftNetState.MODE_INTEGRATED:
+                return slowNavIntervalIntegratedSec;
+
+            case CraftNetState.MODE_DOCKED:
+                return slowNavIntervalDockedSec;
+
+            case CraftNetState.MODE_RAILS:
+            default:
+                return slowNavIntervalRailsSec;
+        }
+    }
+
+
+    private byte _lastObservedCraftSimMode = 255;
+
+    private void UpdateSlowNavModeDirtyFlag()
+    {
+        byte simMode = (craftNet != null) ? craftNet.mode : CraftNetState.MODE_RAILS;
+
+        if (simMode != _lastObservedCraftSimMode)
+        {
+            _lastObservedCraftSimMode = simMode;
+            _slowNavDirty = true;
+        }
+    }
+
+    private void EnsureSlowNavFreshForNodeTiming()
+    {
+        if (ShouldRebuildSlowNav())
+            BuildNavSlowAnalytics();
+    }
+
+
+    private bool ShouldRunThrottled(ref float nextTime, float hz)
+    {
+        if (hz <= 0f)
+            return false;
+
+        float now = Time.time;
+
+        if (now >= nextTime)
+        {
+            float minDt = 1f / hz;
+            nextTime = now + minDt;
+            return true;
+        }
+
+        return false;
+    }
+
+    private void TickDisplaysThrottled()
+    {
+        if (orrery != null && ShouldRunThrottled(ref _nextOrreryTickTime, orreryHz))
+        {
+            orrery.TickOrrery();
+        }
+
+        if (orreryCraftOrbitRibbon != null && ShouldRunThrottled(ref _nextRibbonTickTime, ribbonHz))
+        {
+            orreryCraftOrbitRibbon.TickRibbon();
+        }
+
+        if (orreryCraftDirectionMarkers != null && ShouldRunThrottled(ref _nextMarkersTickTime, markersHz))
+        {
+            orreryCraftDirectionMarkers.TickMarkers();
+
+            if (orrery != null)
+            {
+                Vector3 clipCenterWorld;
+                float clipRadiusWorld;
+                orrery.GetCurrentClipSphereWorld(out clipCenterWorld, out clipRadiusWorld);
+                orreryCraftDirectionMarkers.ApplyClipVolumeParams(clipCenterWorld, clipRadiusWorld);
+            }
+        }
+    }
+
+    private void RefreshNodeTimingCache()
+    {
+        _nodeTimingCacheValid = false;
+        _nodeTimingCacheNowT = 0.0;
+
+        _anyArmedNodeExists = false;
+
+        _nextArmedNodeValid = false;
+        _nextArmedNodeIndex = -1;
+        _nextArmedNodeTriggerTime = 0.0;
+        _nextArmedNodeTimeToGo = 0.0;
+
+        _selectedNodeTimingValid = false;
+        _selectedNodeTriggerTime = 0.0;
+        _selectedNodeTimeToGo = 0.0;
+
+        if (plan == null || nav == null) return;
+        if (plan.status == null) return;
+
+        double nowT = nav.t;
+
+        int n = plan.maxNodes;
+        if (plan.status.Length < n) n = plan.status.Length;
+
+        if (n <= 0)
+        {
+            _nodeTimingCacheValid = true;
+            _nodeTimingCacheNowT = nowT;
+            return;
+        }
+
+        bool needAnomalyTiming = false;
+
+        for (int i = 0; i < n; i++)
+        {
+            byte st = plan.status[i];
+            if (st == NodePlanState.STATUS_EMPTY) continue;
+
+            if (st == NodePlanState.STATUS_ARMED)
+                _anyArmedNodeExists = true;
+
+            if (plan.trigType != null &&
+                i < plan.trigType.Length &&
+                plan.trigType[i] == NodePlanState.TRIG_TRUE_ANOMALY)
+            {
+                needAnomalyTiming = true;
+            }
+        }
+
+        if (needAnomalyTiming)
+            EnsureSlowNavFreshForNodeTiming();
+
+        double bestT = 0.0;
+        int bestIdx = -1;
+
+        int selectedIdx = -1;
+        if (modeParams != null)
+            selectedIdx = (int)modeParams.selectedNodeIndex;
+
+        for (int i = 0; i < n; i++)
+        {
+            byte st = plan.status[i];
+            if (st == NodePlanState.STATUS_EMPTY) continue;
+
+            double trigT;
+            if (!TryComputeNodeTriggerTime(i, nowT, out trigT))
+                continue;
+
+            if (st == NodePlanState.STATUS_ARMED && trigT > nowT)
+            {
+                if (bestIdx < 0 || trigT < bestT)
+                {
+                    bestIdx = i;
+                    bestT = trigT;
+                }
+            }
+
+            if (i == selectedIdx)
+            {
+                _selectedNodeTimingValid = true;
+                _selectedNodeTriggerTime = trigT;
+                _selectedNodeTimeToGo = trigT - nowT;
+            }
+        }
+
+        if (bestIdx >= 0)
+        {
+            _nextArmedNodeValid = true;
+            _nextArmedNodeIndex = bestIdx;
+            _nextArmedNodeTriggerTime = bestT;
+            _nextArmedNodeTimeToGo = bestT - nowT;
+        }
+
+        _nodeTimingCacheValid = true;
+        _nodeTimingCacheNowT = nowT;
+    }
+
+    private bool TryComputeNodeTriggerTime(int idx, double nowT, out double triggerTime)
+    {
+        triggerTime = 0.0;
+
+        if (plan == null) return false;
+        if (idx < 0 || idx >= plan.maxNodes) return false;
+        if (plan.status == null || idx >= plan.status.Length) return false;
+        if (plan.status[idx] == NodePlanState.STATUS_EMPTY) return false;
+
+        if (plan.trigType == null || idx >= plan.trigType.Length) return false;
+
+        if (plan.trigType[idx] == NodePlanState.TRIG_TIME)
+        {
+            if (plan.triggerTime == null || idx >= plan.triggerTime.Length) return false;
+            triggerTime = plan.triggerTime[idx];
+            return true;
+        }
+
+        if (plan.trigType[idx] == NodePlanState.TRIG_TRUE_ANOMALY)
+        {
+            if (!nav.valid) return false;
+            if (plan.triggerNuRad == null || idx >= plan.triggerNuRad.Length) return false;
+
+            double dt;
+            bool ok = OrbitHelpers.TryTimeToTrueAnomaly(
+                nav.a, nav.e, nav.muPrimary,
+                nav.nuRad,
+                plan.triggerNuRad[idx],
+                eTol,
+                out dt);
+
+            if (!ok) return false;
+            if (dt < 0.0) dt = 0.0;
+
+            triggerTime = nowT + dt;
+            return true;
+        }
+
+        return false;
+    }
+
 
     private void UpdateSelectedNodeNavExport()
     {
@@ -504,34 +815,20 @@ public class GC_Core : UdonSharpBehaviour
             alerts.nodeRemainingDV_mps = nav.selectedNodeRemainingDV_mps;
         }
 
-        bool anyArmed = false;
-        if (plan != null && plan.status != null)
-        {
-            int n = plan.maxNodes;
-            if (plan.status.Length < n) n = plan.status.Length;
+        alerts.cond_armedNodeExists = _anyArmedNodeExists;
 
-            for (int i = 0; i < n; i++)
-            {
-                if (plan.status[i] == NodePlanState.STATUS_ARMED)
-                {
-                    anyArmed = true;
-                    break;
-                }
-            }
-        }
-
-        alerts.cond_armedNodeExists = anyArmed;
-
-        if (anyArmed && runtime != null && !runtime.autoExecuteArmedNodes)
+        if (_anyArmedNodeExists && runtime != null && !runtime.autoExecuteArmedNodes)
             alerts.cond_nodeAutoExecuteDisabled = true;
 
-        double tGo;
-        if (TryGetNextArmedNodeTimeToGo(out tGo))
+        if (_nextArmedNodeValid)
         {
-            alerts.nodeTimeToGoSec = tGo;
+            alerts.nodeTimeToGoSec = _nextArmedNodeTimeToGo;
 
-            if (tGo >= 0.0 && tGo <= alerts.nodeSoonLeadSec)
+            if (_nextArmedNodeTimeToGo >= 0.0 &&
+                _nextArmedNodeTimeToGo <= alerts.nodeSoonLeadSec)
+            {
                 alerts.cond_nodeSoon = true;
+            }
         }
         else
         {
@@ -539,38 +836,6 @@ public class GC_Core : UdonSharpBehaviour
         }
     }
 
-    private bool TryGetNextArmedNodeTimeToGo(out double tGoSec)
-    {
-        tGoSec = 0.0;
-
-        if (plan == null || nav == null) return false;
-        if (plan.status == null) return false;
-
-        int best = -1;
-        double bestT = 0.0;
-        double nowT = nav.t;
-
-        int n = plan.maxNodes;
-        if (plan.status.Length < n) n = plan.status.Length;
-
-        for (int i = 0; i < n; i++)
-        {
-            if (plan.status[i] != NodePlanState.STATUS_ARMED) continue;
-
-            double t = ComputeNodeTriggerTime(i, nowT);
-
-            if (best < 0 || t < bestT)
-            {
-                best = i;
-                bestT = t;
-            }
-        }
-
-        if (best < 0) return false;
-
-        tGoSec = bestT - nowT;
-        return true;
-    }
 
     // =====================================================================
     // 3) MANUAL INPUT ACQUISITION
@@ -1201,10 +1466,10 @@ public class GC_Core : UdonSharpBehaviour
         }
 
         // WAIT: find next armed node and decide when to start slewing
+        // WAIT: use cached next armed node timing
         if (runtime.executorPhase == GC_RuntimeState.EXEC_PHASE_WAIT)
         {
-            int next = FindBestNextNodeIndex(nowT);
-            if (next < 0)
+            if (!_nextArmedNodeValid)
             {
                 runtime.activeExecutorId = GC_RuntimeState.EXEC_NONE;
                 runtime.executorNodeIndex = -1;
@@ -1212,7 +1477,8 @@ public class GC_Core : UdonSharpBehaviour
                 return;
             }
 
-            double tExec = ComputeNodeTriggerTime(next, nowT);
+            int next = _nextArmedNodeIndex;
+            double tExec = _nextArmedNodeTriggerTime;
 
             float tBurn = 0f;
             if (plan.burnDurationSec != null && next >= 0 && next < plan.burnDurationSec.Length)
@@ -1227,7 +1493,10 @@ public class GC_Core : UdonSharpBehaviour
                 tBurnEnd = tBurnStart + (double)tBurn;
             }
 
-            float slewLead = plan.preSlewLeadSec[next];
+            float slewLead = 0f;
+            if (plan.preSlewLeadSec != null && next >= 0 && next < plan.preSlewLeadSec.Length)
+                slewLead = Mathf.Max(0f, plan.preSlewLeadSec[next]);
+
             double tSlewStart = tBurnStart - (double)slewLead;
 
             if (nowT >= tSlewStart)
@@ -1271,23 +1540,12 @@ public class GC_Core : UdonSharpBehaviour
 
         byte axisToPoint = ClampAxis012(plan.bodyAxisToPoint[idx]);
 
-        double tExecNow = ComputeNodeTriggerTime(idx, nowT);
-
         float tBurnNow = 0f;
         float burnThrottle01 = 0f;
         if (plan.burnDurationSec != null && idx < plan.burnDurationSec.Length)
             tBurnNow = Mathf.Max(0f, plan.burnDurationSec[idx]);
         if (plan.burnThrottle01 != null && idx < plan.burnThrottle01.Length)
             burnThrottle01 = Mathf.Clamp01(plan.burnThrottle01[idx]);
-
-        double tBurnStartNow = tExecNow - 0.5 * (double)tBurnNow;
-        double tBurnEndNow = tExecNow + 0.5 * (double)tBurnNow;
-
-        if (tBurnNow > 0f && tBurnStartNow < nowT)
-        {
-            tBurnStartNow = nowT;
-            tBurnEndNow = tBurnStartNow + (double)tBurnNow;
-        }
 
         float postHold = Mathf.Max(0f, plan.postHoldSec[idx]);
 
@@ -1374,44 +1632,9 @@ public class GC_Core : UdonSharpBehaviour
         }
     }
 
-    private int FindBestNextNodeIndex(double nowT)
-    {
-        int best = -1;
-        double bestT = 0.0;
 
-        for (int i = 0; i < plan.maxNodes; i++)
-        {
-            if (plan.status[i] != NodePlanState.STATUS_ARMED) continue;
 
-            double t = ComputeNodeTriggerTime(i, nowT);
-            if (t <= nowT) continue;
 
-            if (best < 0 || t < bestT)
-            {
-                best = i;
-                bestT = t;
-            }
-        }
-        return best;
-    }
-
-    private double ComputeNodeTriggerTime(int idx, double nowT)
-    {
-        if (plan.trigType[idx] == NodePlanState.TRIG_TIME)
-            return plan.triggerTime[idx];
-
-        double dt;
-        bool ok = OrbitHelpers.TryTimeToTrueAnomaly(
-            nav.a, nav.e, nav.muPrimary,
-            nav.nuRad,
-            plan.triggerNuRad[idx],
-            eTol,
-            out dt);
-
-        if (!ok) return nowT;
-        if (dt < 0.0) dt = 0.0;
-        return nowT + dt;
-    }
 
     private void BeginExecutorForNode(int idx, double nowT, double tExec, double tBurnStart, double tBurnEnd)
     {

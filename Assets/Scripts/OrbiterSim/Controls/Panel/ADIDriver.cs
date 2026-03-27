@@ -285,21 +285,40 @@ public class ADIDriver : UdonSharpBehaviour
         Quaternion qBE = nav.qBE;
         Quaternion qEB = Quaternion.Inverse(qBE);
 
-        Vector3 That_B = -(qEB * nav.That_E);
-        Vector3 Rhat_B = -(qEB * nav.Rhat_E);
-        Vector3 Nhat_B = qEB * nav.Nhat_E;
+        // Keep the center pointing the same as before
+        Vector3 T_B = -(qEB * nav.That_E);   // prograde
+        Vector3 R_B = -(qEB * nav.Rhat_E);   // radial in
+        Vector3 N_B =  (qEB * nav.Nhat_E);   // normal
 
-        That_B.Normalize();
-        Rhat_B.Normalize();
-        Nhat_B.Normalize();
+        if (T_B.sqrMagnitude < 1e-10f || R_B.sqrMagnitude < 1e-10f || N_B.sqrMagnitude < 1e-10f)
+            return Quaternion.identity;
 
-        // Build reference frame in body space
-        Quaternion qRefInBody = Quaternion.LookRotation(That_B, Nhat_B);
+        T_B.Normalize();
+        R_B.Normalize();
+        N_B.Normalize();
 
-        // FDAI ball shows reference frame relative to vehicle
-        Quaternion qDisplay = Quaternion.Inverse(qRefInBody);
+        // Rebuild an orthonormal, right-handed basis.
+        // We want:
+        //   local +Z -> prograde
+        //   local +X -> radial in
+        //   therefore local +Y must be -normal for a right-handed frame
+        //
+        // Because in RTN: R x T = N
+        // so X x Z = R x T = N
+        // but Unity requires X x Y = Z, equivalently Y = Z x X = T x R = -N
 
-        return qDisplay;
+        Vector3 up_B = -N_B;
+
+        // Make sure up is orthogonal to forward
+        up_B = (up_B - Vector3.Dot(up_B, T_B) * T_B).normalized;
+
+        if (up_B.sqrMagnitude < 1e-10f)
+            return Quaternion.identity;
+
+        Quaternion qRefInBody = Quaternion.LookRotation(T_B, up_B);
+
+        // Ball shows reference frame relative to vehicle
+        return Quaternion.Inverse(qRefInBody);
     }
 
 

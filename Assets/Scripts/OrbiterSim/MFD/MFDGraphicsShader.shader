@@ -11,6 +11,7 @@ Shader "Unlit/MFDGraphicsShader"
         _ImageRect ("Image Rect UV", Vector) = (0,0,1,1)
         _ImageUvRect ("Image Source UV Rect", Vector) = (0,0,1,1)
         _ImageTint ("Image Tint", Color) = (1,1,1,1)
+
     }
 
     SubShader
@@ -23,10 +24,12 @@ Shader "Unlit/MFDGraphicsShader"
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
+            // make fog work
             #pragma multi_compile_fog
 
             #include "UnityCG.cginc"
 
+            // Must match values in MFD.cs
             #define TEXT_ROWS 24
             #define TEXT_COLUMNS 48
             #define MAX_SHAPES 256
@@ -36,6 +39,9 @@ Shader "Unlit/MFDGraphicsShader"
             float _FontSdfEdge;
             float _FontSdfSoftness;
 
+            float4 atlasRects[127 - 32 + 1];
+            float4 charRects[127 - 32 + 1];
+
             sampler2D _ImageTex;
             float _ImageEnabled;
             float4 _ImageRect;   // xmin, ymin, xmax, ymax in display UV
@@ -44,8 +50,6 @@ Shader "Unlit/MFDGraphicsShader"
             float4 _ImageTex_TexelSize;
 
 
-            float4 atlasRects[127 - 32 + 1];
-            float4 charRects[127 - 32 + 1];
 
             uniform int charGrid[24 * 48];
             uniform float3 charColors[24 * 48];
@@ -76,23 +80,32 @@ Shader "Unlit/MFDGraphicsShader"
                 return o;
             }
 
+            // Copyright © 2015 Inigo Quilez
+            // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
             float sdfEllipse(float2 p, float2 ab)
             {
-                p = abs(p);
+                // symmetry
+                p = abs( p );
 
+                // find root with Newton solver
                 float2 q = ab*(p-ab);
                 float w = (q.x<q.y)? 1.570796327 : 0.0;
                 for (int i = 0; i < 5; i++) {
                     float2 cs = float2(cos(w),sin(w));
-                    float2 u = ab*float2(cs.x,cs.y);
+                    float2 u = ab*float2( cs.x,cs.y);
                     float2 v = ab*float2(-cs.y,cs.x);
                     w = w + dot(p-u,v)/(dot(p-u,u)+dot(v,v));
                 }
-
+                
+                // compute final point and distance
                 float d = length(p-ab*float2(cos(w),sin(w)));
+                
+                // return signed distance
                 return (dot(p/ab,p/ab)>1.0) ? d : -d;
             }
 
+            // Copyright © 2019 Inigo Quilez
+            // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
             float sdParabola(float2 pos, float k )
             {
                 pos.x = abs(pos.x);
@@ -111,11 +124,15 @@ Shader "Unlit/MFDGraphicsShader"
                 return length(d) * sign(d.x);
             }
 
-            float sdfHyperbola(float2 p, float k)
+            // Copyright © 2023 Inigo Quilez
+            // Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions: The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+            float sdfHyperbola(float2 p, float k) // k in (0,inf)
             {
+                // symmetry and rotation
                 p = abs(p);
                 p = float2(p.x-p.y,p.x+p.y)/sqrt(2.0);
 
+                // distance to y(x)=k/x by finding t in such that t⁴ - xt³ + kyt - k² = 0
                 float x2 = p.x*p.x/16.0;
                 float y2 = p.y*p.y/16.0;
                 float r = k*(4.0*k - p.x*p.y)/12.0;
@@ -133,7 +150,10 @@ Shader "Unlit/MFDGraphicsShader"
                 float b = k*p.y - x2*p.x*2.0;
                 float t = p.x/4.0 - w + sqrt(2.0*x2 - u + b/w/4.0);
 
+                // distance from t
                 float d = length(p-float2(t,k/t));
+
+                // sign
                 return p.x*p.y < k ? d : -d;
             }
 
@@ -157,14 +177,17 @@ Shader "Unlit/MFDGraphicsShader"
                 float4 data = shapeData2[index];
 
                 if (pe <= 0) {
+                    // Line rendering
                     return sdfLine(p, data.xy, data.zw);
                 } else {
+                    // Conic rendering
                     float e = data.x;
                     float omega = data.y;
                     float2 offset = data.zw;
                     float s = sin(-omega);
                     float c = cos(-omega);
 
+                    // rotate coords so conic vertex is on the bottom
                     p -= offset;
                     float2 pr = float2(p.x*c - p.y*s, p.y*c + p.x*s);
 
@@ -174,6 +197,7 @@ Shader "Unlit/MFDGraphicsShader"
                         float minor = sqrt(ap * pe);
 
                         float2 center = float2(0, major - pe);
+
                         return sdfEllipse(pr - center, float2(minor, major));
                     } else if (e > 1) {
                         return 1;
@@ -222,6 +246,7 @@ Shader "Unlit/MFDGraphicsShader"
                 return clamp(0.5 - pixelDist, 0.0, 1.0);
             }
 
+
             float4 SampleOptionalImage(float2 uv)
             {
                 if (_ImageEnabled < 0.5)
@@ -244,34 +269,32 @@ Shader "Unlit/MFDGraphicsShader"
                 return img;
             }
 
+
             fixed4 frag (v2f input) : SV_Target
             {
                 const float lineWidth = .005;
 
                 float2 p = 2*(input.uv - .5);
 
-                // Base background stays black unless image contributes.
-                float4 accum = float4(0, 0, 0, 1);
+                float3 color = float3(0, 0, 0);
 
-                // Optional generic image layer
                 float4 img = SampleOptionalImage(input.uv);
-                accum.rgb = lerp(accum.rgb, img.rgb, saturate(img.a));
 
-                // Existing shape path
+                color.rbg = lerp(color.rgb, img.rgb, saturate(img.a));
+
                 for (int i = 0; i < shapeCount; i++) {
                     float alpha = antialias(abs(shape(p, i)) - lineWidth);
                     color *= 1.0 - alpha;
                     color += shapeColors[i] * alpha;
                 }
 
-                // Existing text path
                 int row = (int)((1.0 - input.uv.y) * TEXT_ROWS);
                 int col = (int)(input.uv.x * TEXT_COLUMNS);
 
                 int index = row*TEXT_COLUMNS + col;
                 int c = (int)charGrid[index];
                 if (c == 0) {
-                    c = 0x20;
+                    c = 0x20; // space
                 }
 
                 float gx = input.uv.x*TEXT_COLUMNS - col;
@@ -281,8 +304,9 @@ Shader "Unlit/MFDGraphicsShader"
                 color *= 1.0 - glyph;
                 color += charColors[index] * glyph;
 
-                fixed4 res = fixed4(accum.rgb, 1.0);
-                UNITY_APPLY_FOG(input.fogCoord, res);
+                fixed4 res = fixed4(color, 1.0);
+                // apply fog
+                UNITY_APPLY_FOG(i.fogCoord, res);
                 return res;
             }
             ENDCG

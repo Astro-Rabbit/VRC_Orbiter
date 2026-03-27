@@ -162,7 +162,33 @@ public class DockingOpsController : UdonSharpBehaviour
     public bool allowStewart = false;
 
 
+    // ---------------------------------------------------------------------
+    // Local animation anchors
+    // These are NOT synced. They are rebuilt from synced state changes.
+    // ---------------------------------------------------------------------
+    private float _portLocalFrom01 = 0f;
+    private float _portLocalTo01 = 0f;
+    private float _portLocalStartTime = 0f;
+    private float _portLocalDuration = 0f;
+    private byte _lastLocalPortState = 255;
+    private byte _lastLocalPortStartPosQ = 255;
+    private ushort _lastLocalPortStartTick = 65535;
 
+    private float _hatchLocalFrom01 = 0f;
+    private float _hatchLocalTo01 = 0f;
+    private float _hatchLocalStartTime = 0f;
+    private float _hatchLocalDuration = 0f;
+    private byte _lastLocalHatchState = 255;
+    private byte _lastLocalHatchStartPosQ = 255;
+    private ushort _lastLocalHatchStartTick = 65535;
+
+    private float _airlockLocalFrom01 = 0f;
+    private float _airlockLocalTo01 = 0f;
+    private float _airlockLocalStartTime = 0f;
+    private float _airlockLocalDuration = 0f;
+    private byte _lastLocalAirlockState = 255;
+    private byte _lastLocalAirlockStartPosQ = 255;
+    private ushort _lastLocalAirlockStartTick = 65535;
 
     // ---------------------------------------------------------------------
     // Thresholds / debug
@@ -189,9 +215,14 @@ public class DockingOpsController : UdonSharpBehaviour
     // ---------------------------------------------------------------------
     void Start()
     {
-        portPos01 = EvaluateMechanismPosition(portState, portStartPosQ, portStartTick, portFullTravelSeconds);
-        hatchPos01 = EvaluateMechanismPosition(hatchState, hatchStartPosQ, hatchStartTick, hatchFullTravelSeconds);
-        airlockDoorPos01 = EvaluateMechanismPosition(airlockDoorState, airlockDoorStartPosQ, airlockDoorStartTick, airlockDoorFullTravelSeconds);
+        RebuildLocalPortAnimation();
+        RebuildLocalHatchAnimation();
+        RebuildLocalAirlockAnimation();
+
+        portPos01 = EvaluateLocalMechanismPosition(portState, _portLocalFrom01, _portLocalTo01, _portLocalStartTime, _portLocalDuration);
+        hatchPos01 = EvaluateLocalMechanismPosition(hatchState, _hatchLocalFrom01, _hatchLocalTo01, _hatchLocalStartTime, _hatchLocalDuration);
+        airlockDoorPos01 = EvaluateLocalMechanismPosition(airlockDoorState, _airlockLocalFrom01, _airlockLocalTo01, _airlockLocalStartTime, _airlockLocalDuration);
+
         ApplyPortTransforms();
         ApplyHatchTransforms();
         ApplyAirlockDoorTransform();
@@ -208,9 +239,13 @@ public class DockingOpsController : UdonSharpBehaviour
     void Update()
     {
         // 1) Evaluate current mechanism positions locally from synced state
-        portPos01 = EvaluateMechanismPosition(portState, portStartPosQ, portStartTick, portFullTravelSeconds);
-        hatchPos01 = EvaluateMechanismPosition(hatchState, hatchStartPosQ, hatchStartTick, hatchFullTravelSeconds);
-        airlockDoorPos01 = EvaluateMechanismPosition(airlockDoorState, airlockDoorStartPosQ, airlockDoorStartTick, airlockDoorFullTravelSeconds);
+        // 1) Rebuild local animation anchors only when synced state changed
+        RefreshLocalAnimationAnchorsIfNeeded();
+
+        // 2) Evaluate current mechanism positions from local realtime anchors
+        portPos01 = EvaluateLocalMechanismPosition(portState, _portLocalFrom01, _portLocalTo01, _portLocalStartTime, _portLocalDuration);
+        hatchPos01 = EvaluateLocalMechanismPosition(hatchState, _hatchLocalFrom01, _hatchLocalTo01, _hatchLocalStartTime, _hatchLocalDuration);
+        airlockDoorPos01 = EvaluateLocalMechanismPosition(airlockDoorState, _airlockLocalFrom01, _airlockLocalTo01, _airlockLocalStartTime, _airlockLocalDuration);
         // 2) Owner finalizes discrete states when travel completes
         if (HasAuthority())
         {
@@ -248,9 +283,14 @@ public class DockingOpsController : UdonSharpBehaviour
 
     public override void OnDeserialization()
     {
-        portPos01 = EvaluateMechanismPosition(portState, portStartPosQ, portStartTick, portFullTravelSeconds);
-        hatchPos01 = EvaluateMechanismPosition(hatchState, hatchStartPosQ, hatchStartTick, hatchFullTravelSeconds);
-        airlockDoorPos01 = EvaluateMechanismPosition(airlockDoorState, airlockDoorStartPosQ, airlockDoorStartTick, airlockDoorFullTravelSeconds);
+        RebuildLocalPortAnimation();
+        RebuildLocalHatchAnimation();
+        RebuildLocalAirlockAnimation();
+
+        portPos01 = EvaluateLocalMechanismPosition(portState, _portLocalFrom01, _portLocalTo01, _portLocalStartTime, _portLocalDuration);
+        hatchPos01 = EvaluateLocalMechanismPosition(hatchState, _hatchLocalFrom01, _hatchLocalTo01, _hatchLocalStartTime, _hatchLocalDuration);
+        airlockDoorPos01 = EvaluateLocalMechanismPosition(airlockDoorState, _airlockLocalFrom01, _airlockLocalTo01, _airlockLocalStartTime, _airlockLocalDuration);
+
         UpdateDerivedOutputs();
         ApplyPortTransforms();
         ApplyHatchTransforms();
@@ -260,6 +300,24 @@ public class DockingOpsController : UdonSharpBehaviour
         _lastAppliedHatchPos01 = hatchPos01;
         _lastAppliedAirlockDoorPos01 = airlockDoorPos01;
 
+    }
+
+
+    private float EvaluateLocalMechanismPosition(byte state, float from01, float to01, float localStartTime, float duration)
+    {
+        if (state == MECH_CLOSED) return 0f;
+        if (state == MECH_OPEN) return 1f;
+
+        if (duration <= 0.0001f)
+            return to01;
+
+        float elapsed = Time.realtimeSinceStartup - localStartTime;
+        float t = Mathf.Clamp01(elapsed / duration);
+
+        // smootherstep
+        t = t * t * t * (t * (t * 6f - 15f) + 10f);
+
+        return Mathf.Lerp(from01, to01, t);
     }
 
     // ---------------------------------------------------------------------
@@ -560,6 +618,7 @@ public class DockingOpsController : UdonSharpBehaviour
         {
             float duration = Mathf.Max(0.0001f, (1f - startPos01) * fullTravelSeconds);
             float t = Mathf.Clamp01(elapsed / duration);
+            t = t * t * t * (t * (t * 6f - 15f) + 10f);
             return Mathf.Lerp(startPos01, 1f, t);
         }
 
@@ -567,10 +626,138 @@ public class DockingOpsController : UdonSharpBehaviour
         {
             float duration = Mathf.Max(0.0001f, startPos01 * fullTravelSeconds);
             float t = Mathf.Clamp01(elapsed / duration);
+            t = t * t * t * (t * (t * 6f - 15f) + 10f);
             return Mathf.Lerp(startPos01, 0f, t);
         }
 
         return startPos01;
+    }
+
+
+
+    private void RefreshLocalAnimationAnchorsIfNeeded()
+    {
+        if (_lastLocalPortState != portState ||
+            _lastLocalPortStartPosQ != portStartPosQ ||
+            _lastLocalPortStartTick != portStartTick)
+        {
+            RebuildLocalPortAnimation();
+        }
+
+        if (_lastLocalHatchState != hatchState ||
+            _lastLocalHatchStartPosQ != hatchStartPosQ ||
+            _lastLocalHatchStartTick != hatchStartTick)
+        {
+            RebuildLocalHatchAnimation();
+        }
+
+        if (_lastLocalAirlockState != airlockDoorState ||
+            _lastLocalAirlockStartPosQ != airlockDoorStartPosQ ||
+            _lastLocalAirlockStartTick != airlockDoorStartTick)
+        {
+            RebuildLocalAirlockAnimation();
+        }
+    }
+
+    private void RebuildLocalPortAnimation()
+    {
+        _lastLocalPortState = portState;
+        _lastLocalPortStartPosQ = portStartPosQ;
+        _lastLocalPortStartTick = portStartTick;
+
+        BuildLocalAnimation(
+            portState,
+            portStartPosQ,
+            portStartTick,
+            portFullTravelSeconds,
+            ref _portLocalFrom01,
+            ref _portLocalTo01,
+            ref _portLocalStartTime,
+            ref _portLocalDuration
+        );
+    }
+
+    private void RebuildLocalHatchAnimation()
+    {
+        _lastLocalHatchState = hatchState;
+        _lastLocalHatchStartPosQ = hatchStartPosQ;
+        _lastLocalHatchStartTick = hatchStartTick;
+
+        BuildLocalAnimation(
+            hatchState,
+            hatchStartPosQ,
+            hatchStartTick,
+            hatchFullTravelSeconds,
+            ref _hatchLocalFrom01,
+            ref _hatchLocalTo01,
+            ref _hatchLocalStartTime,
+            ref _hatchLocalDuration
+        );
+    }
+
+    private void RebuildLocalAirlockAnimation()
+    {
+        _lastLocalAirlockState = airlockDoorState;
+        _lastLocalAirlockStartPosQ = airlockDoorStartPosQ;
+        _lastLocalAirlockStartTick = airlockDoorStartTick;
+
+        BuildLocalAnimation(
+            airlockDoorState,
+            airlockDoorStartPosQ,
+            airlockDoorStartTick,
+            airlockDoorFullTravelSeconds,
+            ref _airlockLocalFrom01,
+            ref _airlockLocalTo01,
+            ref _airlockLocalStartTime,
+            ref _airlockLocalDuration
+        );
+    }
+
+    private void BuildLocalAnimation(
+        byte state,
+        byte startPosQ,
+        ushort startTick,
+        float fullTravelSeconds,
+        ref float localFrom01,
+        ref float localTo01,
+        ref float localStartTime,
+        ref float localDuration)
+    {
+        if (state == MECH_CLOSED)
+        {
+            localFrom01 = 0f;
+            localTo01 = 0f;
+            localStartTime = Time.realtimeSinceStartup;
+            localDuration = 0f;
+            return;
+        }
+
+        if (state == MECH_OPEN)
+        {
+            localFrom01 = 1f;
+            localTo01 = 1f;
+            localStartTime = Time.realtimeSinceStartup;
+            localDuration = 0f;
+            return;
+        }
+
+        float startPos01 = DequantizeByte01(startPosQ);
+        float currentPos01 = EvaluateMechanismPosition(state, startPosQ, startTick, fullTravelSeconds);
+
+        if (state == MECH_OPENING)
+        {
+            localFrom01 = currentPos01;
+            localTo01 = 1f;
+            localDuration = Mathf.Max(0.0001f, (1f - currentPos01) * fullTravelSeconds);
+            localStartTime = Time.realtimeSinceStartup;
+            return;
+        }
+
+        // MECH_CLOSING
+        localFrom01 = currentPos01;
+        localTo01 = 0f;
+        localDuration = Mathf.Max(0.0001f, currentPos01 * fullTravelSeconds);
+        localStartTime = Time.realtimeSinceStartup;
     }
 
     private void OwnerFinalizeCompletedMotion()
@@ -677,17 +864,14 @@ public class DockingOpsController : UdonSharpBehaviour
     // ---------------------------------------------------------------------
     private void UpdateDerivedOutputs()
     {
-        // This is the external "docking system allowed/armed" gate.
-        // Do NOT drop it just because dock.active became true, or softlock/retract/hardlock flow breaks.
-        allowDockingCapture =
-            IsPortOpen() &&
-            IsHatchClosed();
+        bool dockActive = IsAnyDockActive();
+        bool portOpen = IsPortOpen();
 
-        // Stewart probably should still turn off once docking is active.
-        allowStewart =
-            IsPortOpen() &&
-            IsHatchClosed() &&
-            !IsAnyDockActive();
+        // Both of these are tied only to:
+        // - active dock, or
+        // - port open
+        allowDockingCapture = dockActive || portOpen;
+        allowStewart = dockActive || portOpen;
     }
 
     private void PublishOutputsToExternalSystems()
@@ -705,7 +889,7 @@ public class DockingOpsController : UdonSharpBehaviour
     // Utilities
     // ---------------------------------------------------------------------
 
-    private const float NET_TICK_HZ = 20f;
+    private const float NET_TICK_HZ = 60f;
     private const float INV_255 = 1f / 255f;
 
     private byte Quantize01ToByte(float x)
@@ -726,9 +910,20 @@ public class DockingOpsController : UdonSharpBehaviour
 
     private float SecondsSinceNetTick(ushort startTick)
     {
-        int nowTick = Mathf.FloorToInt(GetSharedTimeSeconds() * NET_TICK_HZ) & 0xFFFF;
-        int delta = (nowTick - startTick) & 0xFFFF;
-        return delta / NET_TICK_HZ;
+        float nowTicksFloat = GetSharedTimeSeconds() * NET_TICK_HZ;
+
+        int nowWholeTicks = Mathf.FloorToInt(nowTicksFloat);
+        float nowFracTick = nowTicksFloat - nowWholeTicks;
+
+        int nowWrapped = nowWholeTicks & 0xFFFF;
+        int deltaWrapped = (nowWrapped - (int)startTick) & 0xFFFF;
+
+        // Interpret as recent forward time difference.
+        // For door motion, real deltas should always be small and positive.
+        if (deltaWrapped > 32767)
+            deltaWrapped -= 65536;
+
+        return (deltaWrapped + nowFracTick) / NET_TICK_HZ;
     }
 
 
