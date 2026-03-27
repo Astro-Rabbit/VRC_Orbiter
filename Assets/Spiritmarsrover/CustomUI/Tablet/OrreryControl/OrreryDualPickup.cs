@@ -24,9 +24,12 @@ public class OrreryDualPickup : TabletPenPickup
 
     public GameObject orrery;
     private float initialHandDistance;
-    private Vector3 initialOrreryScale;
+    //private Vector3 initialOrreryScale;
     public float minScale = 0.1f;
     public float maxScale = 5.0f;
+
+    public OrreryController orreryController;
+    private float initialZoomDecades;
 
     public override bool CanBeGrabbed()
     {
@@ -61,7 +64,8 @@ public class OrreryDualPickup : TabletPenPickup
             // --- CAPTURE BASELINES ---
             // 1. Scale
             initialHandDistance = Vector3.Distance(pen1.transform.position, pen2.transform.position);
-            initialOrreryScale = orrery.transform.localScale;
+            //initialOrreryScale = orrery.transform.localScale;
+            initialZoomDecades = orreryController.manualZoomDecades;
 
             // 2. Combined Rotation (Steering Wheel)
             Vector3 mid = (pen1.transform.position + pen2.transform.position) * 0.5f;
@@ -207,21 +211,35 @@ public class OrreryDualPickup : TabletPenPickup
 
     private void HandleTwoHanded()
     {
-        // --- SCALING LOGIC ---
-        float currentHandDistance = Vector3.Distance(pen1.transform.position, pen2.transform.position);
+        //// --- SCALING LOGIC ---
+        //float currentHandDistance = Vector3.Distance(pen1.transform.position, pen2.transform.position);
 
-        // Ratio: current distance / initial distance
+        //// Ratio: current distance / initial distance
+        //float scaleFactor = currentHandDistance / initialHandDistance;
+
+        //// Apply factor to the starting scale
+        //Vector3 targetScale = initialOrreryScale * scaleFactor;
+
+        //// Clamp to prevent the orrery from becoming too small or too huge
+        //float clampedX = Mathf.Clamp(targetScale.x, minScale, maxScale);
+        //float clampedY = Mathf.Clamp(targetScale.y, minScale, maxScale);
+        //float clampedZ = Mathf.Clamp(targetScale.z, minScale, maxScale);
+
+        //orrery.transform.localScale = new Vector3(clampedX, clampedY, clampedZ);
+
+        // --- ZOOM LOGIC ---
+        float currentHandDistance = Vector3.Distance(pen1.transform.position, pen2.transform.position);
+        if (currentHandDistance < 0.001f) currentHandDistance = 0.001f;
+
+        // Calculate the ratio of movement
         float scaleFactor = currentHandDistance / initialHandDistance;
 
-        // Apply factor to the starting scale
-        Vector3 targetScale = initialOrreryScale * scaleFactor;
+        // Convert the physical hand ratio into logarithmic "Decades" 
+        // (e.g., pulling hands twice as far apart adds ~0.3 to the zoom decade)
+        float zoomDelta = Mathf.Log10(scaleFactor);
 
-        // Clamp to prevent the orrery from becoming too small or too huge
-        float clampedX = Mathf.Clamp(targetScale.x, minScale, maxScale);
-        float clampedY = Mathf.Clamp(targetScale.y, minScale, maxScale);
-        float clampedZ = Mathf.Clamp(targetScale.z, minScale, maxScale);
-
-        orrery.transform.localScale = new Vector3(clampedX, clampedY, clampedZ);
+        // Apply to the controller
+        orreryController.manualZoomDecades = initialZoomDecades + zoomDelta;
 
         // --- OPTIONAL: TWO-HANDED ROTATION ---
         // --- 2. STEERING (Rotation) ---
