@@ -62,7 +62,7 @@ public class TabletPenPickup : UdonSharpBehaviour
     // This tells the pen "I am a pickup you can interact with" 
     // when the pen's collider enters this object's trigger.
 
-    private void OnTriggerEnter(Collider other)
+    public virtual void OnTriggerEnter(Collider other)
     {
         if (other == null) return;
 
@@ -74,7 +74,7 @@ public class TabletPenPickup : UdonSharpBehaviour
         }
     }
 
-    private void OnTriggerExit(Collider other)
+    public virtual void OnTriggerExit(Collider other)
     {
         if (other == null) return;
 
