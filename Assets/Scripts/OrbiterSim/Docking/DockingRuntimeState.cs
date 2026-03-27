@@ -112,6 +112,19 @@ public class DockingRuntimeState : UdonSharpBehaviour
         // Keep qMate as-configured (do NOT reset it here)
     }
 
+
+    public static string DockPhaseName(byte phase)
+    {
+        switch (phase)
+        {
+            case DockingRuntimeState.DOCK_NONE:    return "NONE";
+            case DockingRuntimeState.DOCK_SOFT:    return "SOFT";
+            case DockingRuntimeState.DOCK_RETRACT: return "RETRACT";
+            case DockingRuntimeState.DOCK_HARD:    return "HARD";
+        }
+        return "UNKNOWN(" + phase + ")";
+    }
+
     public void CommandRetract()
     {
         retractCommanded = true;

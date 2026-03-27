@@ -1,11 +1,7 @@
 ﻿using UdonSharp;
 using System;
-using System.Text;
 using UnityEngine;
-using TMPro;
 using VRC.SDKBase;
-using VRC.SDK3.UdonNetworkCalling;
-using VRC.Udon.Common.Interfaces;
 
 public enum ButtonSide
 {
@@ -28,6 +24,13 @@ public class MFD : UdonSharpBehaviour
 
     public const int TEXT_ROWS = 24;
     public const int TEXT_COLUMNS = 48;
+
+    [Header("Optional image panel")]
+    public Texture imageTex;
+    public bool imageEnabled = false;
+    public Vector4 imageRectUv = new Vector4(0, 0, 1, 1);
+    public Vector4 imageSourceUv = new Vector4(0, 0, 1, 1);
+    public Color imageTint = Color.white;
 
     private float[] charGrid; // Unity materials don't support uploading int arrays for some reason
     private Color[] charColors;
@@ -79,6 +82,8 @@ public class MFD : UdonSharpBehaviour
 
         currentPage = core.pageList[currentPageId];
         currentPage.AddDisplay(this);
+
+        ClearImagePanel();
         Redraw();
     }
 
@@ -105,8 +110,10 @@ public class MFD : UdonSharpBehaviour
     private void OnPageIdChange()
     {
         currentPage.RemoveDisplay(this);
+
         ClearGraphics();
         ClearText();
+        ClearImagePanel();
 
         currentPage = core.pageList[currentPageId];
         currentPage.AddDisplay(this);
@@ -115,8 +122,8 @@ public class MFD : UdonSharpBehaviour
 
     public void ClearText()
     {
-        // Trying to avoid long loops inside Udon
         charGrid = new float[TEXT_ROWS * TEXT_COLUMNS];
+        charColors = new Color[TEXT_ROWS * TEXT_COLUMNS];
     }
 
     public void ClearGraphics()
@@ -126,19 +133,29 @@ public class MFD : UdonSharpBehaviour
 
     public void DrawText(string text, int row, int col, Color color)
     {
+        if (text == null) return;
+        if (row < 0 || row >= TEXT_ROWS) return;
+        if (col >= TEXT_COLUMNS) return;
+
         int len = text.Length;
         for (int i = 0; i < len && i + col < TEXT_COLUMNS; i++) {
-            charGrid[row*TEXT_COLUMNS + i + col] = (float)text[i];
-            charColors[row*TEXT_COLUMNS + i + col] = color;
+            if (i + col < 0) continue;
+            charGrid[row * TEXT_COLUMNS + i + col] = (float)text[i];
+            charColors[row * TEXT_COLUMNS + i + col] = color;
         }
     }
 
     public void DrawVerticalText(string text, int row, int col, Color color)
     {
+        if (text == null) return;
+        if (col < 0 || col >= TEXT_COLUMNS) return;
+        if (row >= TEXT_ROWS) return;
+
         int len = text.Length;
         for (int i = 0; i < len && i + row < TEXT_ROWS; i++) {
-            charGrid[(i + row)*TEXT_COLUMNS + col] = (float)text[i];
-            charColors[(i + row)*TEXT_COLUMNS + col] = color;
+            if (i + row < 0) continue;
+            charGrid[(i + row) * TEXT_COLUMNS + col] = (float)text[i];
+            charColors[(i + row) * TEXT_COLUMNS + col] = color;
         }
     }
 
@@ -166,7 +183,6 @@ public class MFD : UdonSharpBehaviour
         shapeData2[shapeCount] = new Vector4(a.x, a.y, b.x, b.y);
 
         shapeCount++;
-
     }
 
     private void Redraw()
@@ -177,15 +193,26 @@ public class MFD : UdonSharpBehaviour
 
     private void FlushDrawCommands()
     {
-        // Upload text data to screen material
+        // Text
         graphicsMaterial.SetFloatArray("charGrid", charGrid);
         graphicsMaterial.SetColorArray("charColors", charColors);
 
-        // Upload graphics shape data to screen material
+        // Vector graphics
         graphicsMaterial.SetColorArray("shapeColors", shapeColors);
         graphicsMaterial.SetFloatArray("shapeData1", shapeData1);
         graphicsMaterial.SetVectorArray("shapeData2", shapeData2);
         graphicsMaterial.SetInt("shapeCount", shapeCount);
+
+        // Optional image panel
+        graphicsMaterial.SetFloat("_ImageEnabled", imageEnabled ? 1f : 0f);
+
+        if (imageTex != null) {
+            graphicsMaterial.SetTexture("_ImageTex", imageTex);
+        }
+
+        graphicsMaterial.SetVector("_ImageRect", imageRectUv);
+        graphicsMaterial.SetVector("_ImageUvRect", imageSourceUv);
+        graphicsMaterial.SetColor("_ImageTint", imageTint);
     }
 
     public override void OnDeserialization()
@@ -195,18 +222,16 @@ public class MFD : UdonSharpBehaviour
 
     public static string FormatNumber(string title, double num)
     {
-        string[] suffixes = new[] {"", "k", "M", "G", "T"};
+        string[] suffixes = new[] { "", "k", "M", "G", "T" };
 
         int i;
         for (i = 0; i < 5; i++) {
             if (Math.Abs(num) <= 1000) {
                 break;
             }
-
             num /= 1000.0;
         }
 
-        // 999.9 Teranumbers of RAM oughta be enough for anyone, eh?
         if (i == 5) {
             return "";
         }
@@ -233,6 +258,24 @@ public class MFD : UdonSharpBehaviour
 
     public static string FormatPercent(string title, double ratio)
     {
-        return title.PadRight(4) + (ratio*100).ToString("0.0").PadLeft(5) + "%";
+        return title.PadRight(4) + (ratio * 100).ToString("0.0").PadLeft(5) + "%";
+    }
+
+    public void SetImagePanel(Texture tex, Vector4 rectUv, Vector4 sourceUv, Color tint)
+    {
+        imageTex = tex;
+        imageRectUv = rectUv;
+        imageSourceUv = sourceUv;
+        imageTint = tint;
+        imageEnabled = (tex != null);
+    }
+
+    public void ClearImagePanel()
+    {
+        imageTex = null;
+        imageEnabled = false;
+        imageRectUv = new Vector4(0, 0, 1, 1);
+        imageSourceUv = new Vector4(0, 0, 1, 1);
+        imageTint = Color.white;
     }
 }

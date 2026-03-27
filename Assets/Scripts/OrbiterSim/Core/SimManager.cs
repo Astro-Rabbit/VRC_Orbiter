@@ -65,6 +65,7 @@ public class SimManager : UdonSharpBehaviour
     public EphemerisSystem ephem;
     public BodyCatalog bodies;
     public ConicFitter conicFitter;
+    public TimeWarpPolicy warpPolicy;
 
     [Header("Rails objects")]
     public StationPropSystem[] railObjects;
@@ -407,6 +408,12 @@ public class SimManager : UdonSharpBehaviour
             //    - owner integrated does nothing here (FixedUpdate owns it)
             if (!ownerMutationBlocked || !isOwner)
                 TickCraft_UpdateSide(Tmission, Tview, tRenderNet, isOwner);
+        }
+
+
+        if (isOwner && !ownerMutationBlocked && !freezeActive)
+        {
+            EnforceWarpPolicyPassive();
         }
 
         // -----------------------------------------------------------------
@@ -1397,6 +1404,66 @@ public class SimManager : UdonSharpBehaviour
         isRestarting = false;
     }
 
+
+    public double ComputeAllowedWarp()
+    {
+        double allowed = 1.0;
+
+        if (warpPolicy != null)
+        {
+            warpPolicy.bodies = bodies;
+            warpPolicy.craft = craft;
+            warpPolicy.contacts = contactsState;
+            allowed = warpPolicy.EvaluateAllowedTimeScale();
+        }
+        else if (clock != null)
+        {
+            allowed = clock.timeScale;
+        }
+
+        // Hard mode cap stays in manager.
+        if (netCore != null && netCore.mode == MODE_INTEGRATED)
+            allowed = 1.0;
+
+        if (allowed < 0.0) allowed = 0.0;
+
+        if (warpPolicy != null)
+            warpPolicy.currentAllowedTimeScale = allowed;
+
+        return allowed;
+    }
+
+    public void ApplyRequestedWarpNow()
+    {
+        if (clock == null) return;
+        if (!IsSimOwner()) return;
+
+        double allowed = ComputeAllowedWarp();
+
+        if (clock.timeScale != allowed)
+            clock.SetTimeScale(allowed);
+    }
+
+    public void EnforceWarpPolicyPassive()
+    {
+        if (clock == null) return;
+        if (!IsSimOwner()) return;
+
+        double allowed = ComputeAllowedWarp();
+
+        // Passive enforcement only forces downward.
+        if (clock.timeScale > allowed)
+            clock.SetTimeScale(allowed);
+    }
+
+    public void SetRequestedWarp(double newWarp)
+    {
+        if (warpPolicy == null) return;
+        if (!IsSimOwner()) return;
+
+        warpPolicy.SetRequestedTimeScale(newWarp);
+        ApplyRequestedWarpNow();
+    }
 
     // -------------------------------------------------------------------------
     // Small helpers

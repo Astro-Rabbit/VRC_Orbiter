@@ -75,6 +75,10 @@ public class DockingComputer : UdonSharpBehaviour
 
     private double _recaptureBlockedUntil = -1.0;
 
+    private byte _dbgLastOwnerPhase = 255;
+    private byte _dbgLastRemoteNetPhase = 255;
+    private byte _dbgLastRemotePresentedPhase = 255;
+    private int _dbgLastRetractBucket = -999;
 
     private bool HasSimAuthority()
     {
@@ -204,6 +208,23 @@ public class DockingComputer : UdonSharpBehaviour
 
         StationStateModel st = stations[stIdx];
         if (st == null || !st.valid) { ForceUndock(); return; }
+
+
+        if (dock.phase != _dbgLastOwnerPhase)
+        {
+            Debug.Log(
+                "[Docking][OWNER] phase=" + DockPhaseName(dock.phase) +
+                " active=" + dock.active +
+                " retractCmd=" + dock.retractCommanded +
+                " retractS=" + dock.retractS.ToString("F3") +
+                " tNow=" + tNow.ToString("F3") +
+                " station=" + dock.dockedStationIndex +
+                " sport=" + dock.stationPortIndex +
+                " cport=" + dock.craftPortIndex
+            );
+            _dbgLastOwnerPhase = dock.phase;
+        }
+
 
         suggestKillControls = true;
 
@@ -453,6 +474,21 @@ public class DockingComputer : UdonSharpBehaviour
         // If retract is in progress or hard, compute target and interpolate by time (deterministic)
         byte phase = netCore.dockPhase;
 
+
+        if (phase != _dbgLastRemotePresentedPhase)
+        {
+            Debug.Log(
+                "[Docking][REMOTE][PRESENT] phase=" + DockPhaseName(phase) +
+                " tNow=" + tNow.ToString("F3") +
+                " retractT0=" + netCore.dockRetractT0.ToString("F3") +
+                " station=" + netCore.dockStationIndex +
+                " sport=" + netCore.dockStationPortIndex +
+                " cport=" + netCore.dockCraftPortIndex
+            );
+            _dbgLastRemotePresentedPhase = phase;
+        }
+
+
         if (phase == DockingRuntimeState.DOCK_SOFT)
         {
             ApplyDockedKinematics(st, rel0, q0);
@@ -567,6 +603,19 @@ public class DockingComputer : UdonSharpBehaviour
         requestUndock = false;
 
         if (log) Debug.Log("[Docking] ExecuteUndockRelease -> released from current docked pose.");
+    }
+
+
+    public static string DockPhaseName(byte phase)
+    {
+        switch (phase)
+        {
+            case DockingRuntimeState.DOCK_NONE:    return "NONE";
+            case DockingRuntimeState.DOCK_SOFT:    return "SOFT";
+            case DockingRuntimeState.DOCK_RETRACT: return "RETRACT";
+            case DockingRuntimeState.DOCK_HARD:    return "HARD";
+        }
+        return "UNKNOWN(" + phase + ")";
     }
 
 }

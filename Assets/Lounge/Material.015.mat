@@ -7,13 +7,12 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: OrbiterMat
-  m_Shader: {fileID: 4800000, guid: 61dfaeeda7ef44742b40324ecd77f87c, type: 3}
+  m_Name: Material.015
+  m_Shader: {fileID: 4800000, guid: cc6f91d2b31e3e4408db75c7c6a5f034, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
   - _BICUBIC_SAMPLING_ON
-  - _NORMALMAP_ON
   - _REFLECTIONS_ON
   - _SPECULAR_HIGHLIGHTS_ON
   m_InvalidKeywords: []
@@ -23,8 +22,7 @@ Material:
   m_CustomRenderQueue: 2000
   stringTagMap:
     RenderType: Opaque
-  disabledShaderPasses:
-  - ALWAYS
+  disabledShaderPasses: []
   m_LockedProperties: 
   m_SavedProperties:
     serializedVersion: 3
@@ -38,7 +36,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _BumpMap:
-        m_Texture: {fileID: 2800000, guid: 6855201c703a13c4eb7666269f3c532c, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _ColorGradingLUT:
@@ -138,15 +136,15 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: 6a2bd035284ef79458fb4e016bf1b321, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MetallicGlossMap:
-        m_Texture: {fileID: 2800000, guid: b8b228effeff7d34a92131d7348a3b79, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MetallicMap:
-        m_Texture: {fileID: 2800000, guid: b8b228effeff7d34a92131d7348a3b79, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NoiseTexSSR:
@@ -154,7 +152,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NormalMap:
-        m_Texture: {fileID: 2800000, guid: 6855201c703a13c4eb7666269f3c532c, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _OcclusionMap:
@@ -194,7 +192,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _RoughnessMap:
-        m_Texture: {fileID: 2800000, guid: 846024efd5cc5b644a792f47f0ac9c7b, type: 3}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _ThicknessMap:
@@ -246,7 +244,7 @@ Material:
     - _ContrastDet: 1
     - _ContrastEmiss: 1
     - _ContrastPost: 1
-    - _Culling: 0
+    - _Culling: 2
     - _Cutoff: 0.5
     - _DetailMainTexBlend: 2
     - _DetailMainTexStrength: 1
@@ -304,7 +302,7 @@ Material:
     - _LightVolumeSpecularity: 0
     - _LightVolumeSpecularityStrength: 1
     - _MaterialDebugMode: 0
-    - _MaterialResetCheck: 1
+    - _MaterialResetCheck: 0
     - _MaxHeightSteps: 16
     - _Metallic: 0
     - _MetallicChannel: 2
@@ -364,9 +362,9 @@ Material:
     - _SSRStrength: 1
     - _SSRToggle: 0
     - _SampleCustomLUT: 0
-    - _SampleMetallic: 1
+    - _SampleMetallic: 0
     - _SampleOcclusion: 0
-    - _SampleRoughness: 1
+    - _SampleRoughness: 0
     - _Saturation: 1
     - _SaturationDet: 1
     - _SaturationEmiss: 1
@@ -446,7 +444,7 @@ Material:
     - _ZTest: 4
     - _ZWrite: 1
     m_Colors:
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _Color: {r: 0.9063354, g: 0.36648056, b: 0, a: 1}
     - _DetailColor: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
     - _LTCGI_DiffuseColor: {r: 1, g: 1, b: 1, a: 1}
