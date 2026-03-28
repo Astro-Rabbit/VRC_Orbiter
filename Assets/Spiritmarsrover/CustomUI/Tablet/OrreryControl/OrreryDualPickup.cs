@@ -31,6 +31,9 @@ public class OrreryDualPickup : TabletPenPickup
     public OrreryController orreryController;
     private float initialZoomDecades;
 
+    //[UdonSynced(UdonSyncMode.None)]
+    //public bool VRPickuped;
+
     public override bool CanBeGrabbed()
     {
         // Returns true if there is at least one empty slot
@@ -40,8 +43,13 @@ public class OrreryDualPickup : TabletPenPickup
     public override void OnGrab(TabletPen pen)
     {
         //Debug.Log("[OrreryDualPickup] OnGrab Starting");
-        if (!Networking.IsOwner(gameObject)) Networking.SetOwner(Networking.LocalPlayer, gameObject);
-       // Debug.Log("[OrreryDualPickup] OnGrab: Owner " + Networking.LocalPlayer);
+        if (!Networking.IsOwner(gameObject))
+        {
+            Networking.SetOwner(Networking.LocalPlayer, gameObject);
+            Networking.SetOwner(Networking.LocalPlayer, orrery);
+        }
+       // VRPickuped = true;
+        // Debug.Log("[OrreryDualPickup] OnGrab: Owner " + Networking.LocalPlayer);
         isTransitioningToOneHand = false;
 
         if (pen1 == null)
@@ -108,6 +116,10 @@ public class OrreryDualPickup : TabletPenPickup
     //}
     public override void OnRelease(TabletPen pen)
     {
+        //if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        //{
+        //    VRPickuped = false;
+        //}
         if (pen1 == pen)
         {
             if (pen2 != null)
@@ -209,6 +221,8 @@ public class OrreryDualPickup : TabletPenPickup
     }
     private Quaternion initialHandRot; // Combined orientation of both hands at grab
 
+    [UdonSynced(UdonSyncMode.Smooth)]
+    public float _zoom;
     private void HandleTwoHanded()
     {
         //// --- SCALING LOGIC ---
@@ -239,7 +253,8 @@ public class OrreryDualPickup : TabletPenPickup
         float zoomDelta = Mathf.Log10(scaleFactor);
 
         // Apply to the controller
-        orreryController.manualZoomDecades = initialZoomDecades + zoomDelta;
+        _zoom = initialZoomDecades + zoomDelta;
+        orreryController.manualZoomDecades = _zoom;
 
         // --- OPTIONAL: TWO-HANDED ROTATION ---
         // --- 2. STEERING (Rotation) ---
@@ -302,5 +317,18 @@ public class OrreryDualPickup : TabletPenPickup
            // Debug.Log("[OrreryDualPickup] OnTriggerExit");
             pen.SetHoveredPickup(null);
         }
+    }
+
+    public override void OnDeserialization()
+    {
+        orreryController.manualZoomDecades = _zoom;
+        //if (VRPickuped)
+        //{
+        //    //TabletPickupCol.enabled = false;
+        //}
+        //else
+        //{
+        //    //TabletPickupCol.enabled = true;
+        //}
     }
 }
