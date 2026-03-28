@@ -72,6 +72,13 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         oz = m02*ix + m12*iy + m22*iz;
     }
 
+    public void PerifocalToEcliptic(double ix, double iy, double iz, out double ox, out double oy, out double oz)
+    {
+        ox = m00*ix + m01*iy + m02*iz;
+        oy = m10*ix + m11*iy + m12*iz;
+        oz = m20*ix + m21*iy + m22*iz;
+    }
+
     // Perform the minimum rotation to align the given orbit with this orbit
     // and output the direction of the rotated periapsis in the perifocal frame
     // of this orbit
