@@ -27,12 +27,15 @@ public enum RendezvousTutorialClip
     DockPage,
     MatchInfo,
     MatchTime,
-    // }
     MatchDir,
     MatchBurn,
     FinishBurn,
     TargetDir,
     TargetBurn,
+    // }
+    FinalDir,
+    FinalBurn,
+    Final,
 }
 
 public class RendezvousTutorial : UdonSharpBehaviour
@@ -47,8 +50,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public SimClock clock;
     public CraftStateModel craft;
     public GuidanceNavContactsState navContactsState;
+    public AttitudeControllerPD pd;
     public GC_Core gc;
     public TMP_Text output;
+    public GameObject nextButton;
 
     [Header("Settings")]
     public int targetIndex = 2;
@@ -63,8 +68,8 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public double dirInLim = 2.0;
     public double dirOutLim = 3.0;
     public double interceptTimeLim = 300;
-    public double velMatchInLim = 10.0;
-    public double velMatchOutLim = 20.0;
+    public float velMatchInLim = 10.0f;
+    public float velMatchOutLim = 50.0f;
 
     [Header("Sticky Condition Flags")]
     public bool planeAligned = false;
@@ -98,6 +103,18 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
         clip = SelectClip();
         output.text = ((RendezvousTutorialClip)clip).ToString();
+
+        switch (clip) {
+        case (int)RendezvousTutorialClip.Intro:
+        case (int)RendezvousTutorialClip.AlignInfo:
+        case (int)RendezvousTutorialClip.TransferInfo:
+        case (int)RendezvousTutorialClip.MatchInfo:
+            nextButton.SetActive(true);
+            break;
+        default:
+            nextButton.SetActive(false);
+            break;
+        }
     }
 
     private int SelectClip()
@@ -109,7 +126,28 @@ public class RendezvousTutorial : UdonSharpBehaviour
         bool executing = execPhase != GC_RuntimeState.EXEC_PHASE_NONE && execPhase != GC_RuntimeState.EXEC_PHASE_WAIT;
 
         if (proximity) {
+            if (!PageOpened(dockingPage)) {
+                if (PageOpened(menuPage)) {
+                    return (int)RendezvousTutorialClip.DockPage;
+                } else {
+                    return (int)RendezvousTutorialClip.MenuPage;
+                }
+            }
 
+            if (velocityMatched) {
+                if (gc.intent.mainThrottle01 > 0) {
+                    return (int)RendezvousTutorialClip.FinishBurn;
+                }
+                if (!pointingDir || gc.runtime.activeProgramId != GC_RuntimeState.PROG_DOCK_POINT_PORT) {
+                    return (int)RendezvousTutorialClip.TargetDir;
+                }
+                return (int)RendezvousTutorialClip.TargetBurn;
+            }
+
+            if (!pointingDir || gc.runtime.activeProgramId != GC_RuntimeState.PROG_RELVEL_RETRO) {
+                return (int)RendezvousTutorialClip.MatchDir;
+            }
+            return (int)RendezvousTutorialClip.MatchBurn;
         }
 
         if (onFlyby) {
@@ -230,12 +268,27 @@ public class RendezvousTutorial : UdonSharpBehaviour
             onFlyby = false;
         }
 
-        if (dockingPage.portSelected && correctTarget && execDone) {
+        if (dockingPage.hasTarget && correctTarget && execDone) {
             if (dockingPage.range < proximityInLim) {
                 proximity = true;
             } else if (dockingPage.range > proximityOutLim) {
                 proximity = false;
             }
+
+            if (dockingPage.portSelected) {
+                if (dockingPage.speed < velMatchInLim) {
+                    velocityMatched = true;
+                } else if (dockingPage.speed > velMatchOutLim) {
+                    velocityMatched = false;
+                }
+            }
+        }
+
+        float dirErr = (float)(180.0 / Math.PI) * pd.attErr_B.magnitude;
+        if (dirErr < dirInLim) {
+            pointingDir = true;
+        } else if (dirErr > dirOutLim) {
+            pointingDir = false;
         }
     }
 
