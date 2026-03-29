@@ -14,9 +14,10 @@ public class MFDAlignPage : MFDPage
     public OrbitAnalyzer src;
     public OrbitAnalyzer tgt;
     public GC_Core gc;
+    public RendezvousTutorial tutorial;
 
     [Header("Display Data")]
-    bool hasTarget = false;
+    public bool hasTarget = false;
     public double ascTime;
     public double descTime;
     public double currentTime;
@@ -96,7 +97,11 @@ public class MFDAlignPage : MFDPage
 
     public void UploadBurn(bool ascending)
     {
-        gc.API_Node_CreateAtTime(ascending ? anBurn : dnBurn, (ascending ? ascTime : descTime) + currentTime);
+        double burnTime = (ascending ? ascTime : descTime) + currentTime;
+        gc.API_Node_CreateAtTime(ascending ? anBurn : dnBurn, burnTime);
+
+        // TODO: come up with a less ugly way of detecting this in the tutorial
+        tutorial.OnAlignNodeCreate(burnTime);
     }
 
     public override void OnButton(MFD display, ButtonSide side, int num)
@@ -104,7 +109,6 @@ public class MFDAlignPage : MFDPage
         if (side == ButtonSide.Bottom && num == 2) {
             display.SetPage((byte)MFDPageID.Menu);
         } else if (side == ButtonSide.Top) {
-            Debug.Log("top side");
             if (num == 1) {
                 UploadBurn(true);
             } else if (num == 3) {

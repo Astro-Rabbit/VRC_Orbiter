@@ -25,6 +25,8 @@ public class MFDTransferPage : MFDPage
     // for calculating position and velocity at burn time
     public ConicPropagator propagator;
 
+    public RendezvousTutorial tutorial;
+
     [Header("Display Data")]
     public bool hasTarget = false;
     public double tgtPx;
@@ -317,6 +319,9 @@ public class MFDTransferPage : MFDPage
         } else {
             solver.autoStatus = TransferSolver.AUTO_ERR;
         }
+
+        // TODO: come up with a less ugly way of detecting this in the tutorial
+        tutorial.OnTransferNodeCreate(solver.autoBurnTime, solver.autoEncounterTime);
     }
 
     public override void DrawDisplay(MFD display)
