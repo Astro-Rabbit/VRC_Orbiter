@@ -16,7 +16,6 @@ public enum RendezvousTutorialClip
     AlignInfo,
     AlignNode,
     NodeAuto,
-    // }
     AlignTime,
     AlignExec,
     TransferPage,
@@ -28,6 +27,7 @@ public enum RendezvousTutorialClip
     DockPage,
     MatchInfo,
     MatchTime,
+    // }
     MatchDir,
     MatchBurn,
     FinishBurn,
@@ -63,12 +63,15 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public double dirInLim = 2.0;
     public double dirOutLim = 3.0;
     public double interceptTimeLim = 300;
+    public double velMatchInLim = 10.0;
+    public double velMatchOutLim = 20.0;
 
     [Header("Sticky Condition Flags")]
     public bool planeAligned = false;
     public bool onFlyby = false;
     public bool proximity = false;
     public bool pointingDir = false;
+    public bool velocityMatched = false;
 
     public bool hasAlignNode = false;
     public bool hasTransferNode = false;
@@ -82,6 +85,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
     private double nodeBurnTime;
     private double transferInterceptTime;
     private bool correctTarget;
+    private int execPhase;
 
     void Start()
     {
@@ -102,12 +106,25 @@ public class RendezvousTutorial : UdonSharpBehaviour
             return (int)RendezvousTutorialClip.Intro;
         }
 
+        bool executing = execPhase != GC_RuntimeState.EXEC_PHASE_NONE && execPhase != GC_RuntimeState.EXEC_PHASE_WAIT;
+
         if (proximity) {
 
         }
 
         if (onFlyby) {
+            if (!PageOpened(dockingPage)) {
+                if (PageOpened(menuPage)) {
+                    return (int)RendezvousTutorialClip.DockPage;
+                } else {
+                    return (int)RendezvousTutorialClip.MenuPage;
+                }
+            }
 
+            if (!readyMatch) {
+                return (int)RendezvousTutorialClip.MatchInfo;
+            }
+            return (int)RendezvousTutorialClip.MatchTime;
         }
 
         if (planeAligned) {
@@ -118,6 +135,23 @@ public class RendezvousTutorial : UdonSharpBehaviour
                     return (int)RendezvousTutorialClip.MenuPage;
                 }
             }
+
+            if (!readyTransfer) {
+                return (int)RendezvousTutorialClip.TransferInfo;
+            }
+            if (!transferPage.solver.autoValid) {
+                return (int)RendezvousTutorialClip.TransferCalc;
+            }
+            if (!hasTransferNode) {
+                return (int)RendezvousTutorialClip.TransferNode;
+            }
+            if (!gc.runtime.autoExecuteArmedNodes) {
+                return (int)RendezvousTutorialClip.NodeAuto;
+            }
+            if (!executing) {
+                return (int)RendezvousTutorialClip.TransferTime;
+            }
+            return (int)RendezvousTutorialClip.TransferExec;
         }
 
         if (!correctTarget) {
@@ -149,7 +183,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
         if (!gc.runtime.autoExecuteArmedNodes) {
             return (int)RendezvousTutorialClip.NodeAuto;
         }
-        return (int)RendezvousTutorialClip.AlignTime;
+        if (!executing) {
+            return (int)RendezvousTutorialClip.AlignTime;
+        }
+        return (int)RendezvousTutorialClip.AlignExec;
     }
 
     private bool PageOpened(MFDPage page)
@@ -166,9 +203,12 @@ public class RendezvousTutorial : UdonSharpBehaviour
     // Conditions based on continuous variables that need hysteresis on their threshold are updated here
     void UpdateStickyConditions()
     {
+        double time = clock.simTime;
         correctTarget = navContactsState.selectedStationIndex == targetIndex;
+        execPhase = gc.runtime.executorPhase;
+        bool execDone = execPhase == GC_RuntimeState.EXEC_PHASE_NONE || execPhase == GC_RuntimeState.EXEC_PHASE_POST;
 
-        if (alignPage.hasTarget && correctTarget) {
+        if (alignPage.hasTarget && correctTarget && execDone) {
             double inclination = 180.0 / Math.PI * alignPage.inclination;
             if (inclination < alignInLim) {
                 planeAligned = true;
@@ -177,7 +217,20 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
         }
 
-        if (dockingPage.portSelected && correctTarget) {
+        if (hasAlignNode && execDone && time > nodeBurnTime) {
+            hasAlignNode = false;
+        }
+
+        // Ideally we'd actually check if we got a flyby, but this is much easier to implement for now
+        if (hasTransferNode && execDone && time > nodeBurnTime) {
+            hasTransferNode = false;
+            onFlyby = true;
+        }
+        if (onFlyby && time > transferInterceptTime + interceptTimeLim) {
+            onFlyby = false;
+        }
+
+        if (dockingPage.portSelected && correctTarget && execDone) {
             if (dockingPage.range < proximityInLim) {
                 proximity = true;
             } else if (dockingPage.range > proximityOutLim) {
@@ -205,6 +258,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
         onFlyby = false;
         proximity = false;
         pointingDir = false;
+        velocityMatched = false;
 
         hasAlignNode = false;
         hasTransferNode = false;
