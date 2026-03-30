@@ -871,7 +871,9 @@ public class DockingOpsController : UdonSharpBehaviour
         // - active dock, or
         // - port open
         allowDockingCapture = dockActive || portOpen;
-        allowStewart = dockActive || portOpen;
+
+        bool portFullyOpenDiscrete = (portState == MECH_OPEN);
+        allowStewart = dockActive || portFullyOpenDiscrete;
     }
 
     private void PublishOutputsToExternalSystems()

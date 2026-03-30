@@ -195,6 +195,7 @@ public class GC_Core : UdonSharpBehaviour
     private double _selectedNodeTriggerTime = 0.0;
     private double _selectedNodeTimeToGo = 0.0;
 
+    [HideInInspector] public float nodeAutoExecuteKnobValue;
 
     // --------------------
     // Unity Loop
@@ -514,17 +515,17 @@ public class GC_Core : UdonSharpBehaviour
 
     private void TickDisplaysThrottled()
     {
-        if (orrery != null && ShouldRunThrottled(ref _nextOrreryTickTime, orreryHz))
+        if (orrery != null)
         {
             orrery.TickOrrery();
         }
 
-        if (orreryCraftOrbitRibbon != null && ShouldRunThrottled(ref _nextRibbonTickTime, ribbonHz))
+        if (orreryCraftOrbitRibbon != null)
         {
             orreryCraftOrbitRibbon.TickRibbon();
         }
 
-        if (orreryCraftDirectionMarkers != null && ShouldRunThrottled(ref _nextMarkersTickTime, markersHz))
+        if (orreryCraftDirectionMarkers != null)
         {
             orreryCraftDirectionMarkers.TickMarkers();
 
@@ -1022,10 +1023,22 @@ public class GC_Core : UdonSharpBehaviour
             {
                 if (contacts == null || !contacts.fullValid0) break;
 
-                Vector3 dv_E = new Vector3((float)contacts.dvx_E0, (float)contacts.dvy_E0, (float)contacts.dvz_E0);
-                if (dv_E.sqrMagnitude < 1e-10f) break;
+                // contacts dv is stored as station - craft.
+                // For the user-facing "with relative velocity" mode we want
+                // craft relative to station, i.e. craft - station = -dv.
+                Vector3 dv_stationMinusCraft_E = new Vector3(
+                    (float)contacts.dvx_E0,
+                    (float)contacts.dvy_E0,
+                    (float)contacts.dvz_E0
+                );
+                if (dv_stationMinusCraft_E.sqrMagnitude < 1e-10f) break;
 
-                Vector3 dir_E = (runtime.activeModeId == GC_RuntimeState.MODE_RELVEL_RETROGRADE) ? (-dv_E) : dv_E;
+                Vector3 craftRelVel_E = -dv_stationMinusCraft_E;
+
+                Vector3 dir_E = (runtime.activeModeId == GC_RuntimeState.MODE_RELVEL_PROGRADE)
+                    ? craftRelVel_E
+                    : -craftRelVel_E;
+
                 dir_E.Normalize();
 
                 _modeWritesAtt = true;
@@ -1943,6 +1956,15 @@ public class GC_Core : UdonSharpBehaviour
         }
     }
 
+
+
+    public void API_Node_ApplyAutoExecuteKnob()
+    {
+        if (runtime == null) return;
+
+        // 0 = MANUAL, 1 = AUTO
+        runtime.autoExecuteArmedNodes = (nodeAutoExecuteKnobValue >= 0.5f);
+    }
 
     public bool API_Node_TryGetTimeToGo(int i, out double tGoSec)
     {

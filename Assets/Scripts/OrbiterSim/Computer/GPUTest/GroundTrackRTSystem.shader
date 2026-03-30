@@ -289,7 +289,8 @@ Shader "Orbiter/MFD/GroundTrackCombined_TwoPass"
 
             Cull Off
             ZWrite Off
-            Blend SrcAlpha OneMinusSrcAlpha
+            ZTest Always
+            Blend Off
 
             CGPROGRAM
             #pragma target 3.0
@@ -454,7 +455,7 @@ Shader "Orbiter/MFD/GroundTrackCombined_TwoPass"
                 rgb = lerp(rgb, _MarkerColor.rgb, saturate(markerAlpha * _MarkerColor.a));
 
                 float outA = max(baseCol.a, max(lineAlpha * _TrackColor.a, markerAlpha * _MarkerColor.a));
-                return fixed4(rgb, outA);
+                return fixed4(rgb, 1.0);
             }
             ENDCG
         }

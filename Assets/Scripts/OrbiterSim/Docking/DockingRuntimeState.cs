@@ -76,6 +76,11 @@ public class DockingRuntimeState : UdonSharpBehaviour
     public Vector3 targetRelPos_SB = Vector3.zero;
     public Quaternion target_qCraftToStation = Quaternion.identity;
 
+
+    [Header("Retract start pose (runtime only, station body frame)")]
+    public Vector3 retractStartRelPos_SB = Vector3.zero;
+    public Quaternion retractStart_qCraftToStation = Quaternion.identity;
+
     [Header("Debug")]
     public bool debugLatched = false;
 
@@ -109,6 +114,8 @@ public class DockingRuntimeState : UdonSharpBehaviour
         debugLatched = false;
         retractCommanded = false;
 
+        retractStartRelPos_SB = Vector3.zero;
+        retractStart_qCraftToStation = Quaternion.identity;
         // Keep qMate as-configured (do NOT reset it here)
     }
 

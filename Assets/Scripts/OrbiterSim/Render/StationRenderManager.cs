@@ -64,7 +64,12 @@ public class StationRenderManager : UdonSharpBehaviour
     [Tooltip("Rotation smoothing gain in 1/seconds. Higher = tighter.")]
     public float rotationLerpRate = 12f;
 
+    [Header("Debug transition/render")]
+    public bool debugTransitionRender = false;
+    public float debugTransitionRenderLogWindowSeconds = 0.50f;
 
+    private byte _dbgLastPresentedMode = CraftNetState.MODE_RAILS;
+    private double _dbgLogUntilNet = -1.0;
 
     [Header("Debug")]
     public bool logSwitches = false;
@@ -92,6 +97,8 @@ public class StationRenderManager : UdonSharpBehaviour
             return;
         }
         
+        DebugMaybeOpenTransitionWindow();
+
         if (contacts == null || craftCG == null || stationRenderRoots == null) return;
         int n = stationRenderRoots.Length;
         if (n == 0) return;
@@ -185,6 +192,18 @@ public class StationRenderManager : UdonSharpBehaviour
     {
         if (newIndex == _activeIndex && ((_active && newIndex >= 0) || (!_active && newIndex < 0)))
             return;
+
+        if (DebugInWindow())
+        {
+            Debug.Log(
+                "[StationRenderDbg] SetActiveStation " +
+                "old=" + _activeIndex +
+                " new=" + newIndex +
+                " wasActive=" + _active +
+                " poseInit=" + _poseInitialized
+            );
+        }
+
 
         // Disable all
         for (int i = 0; i < stationRenderRoots.Length; i++)
@@ -370,5 +389,38 @@ public class StationRenderManager : UdonSharpBehaviour
         if (m < 1e-8f) return fallback;
         return v / m;
     }
+
+
+    private void DebugMaybeOpenTransitionWindow()
+    {
+        if (!debugTransitionRender) return;
+        if (simManager == null) return;
+        if (simManager.IsSimOwner()) return;
+        if (contacts == null) return;
+        if (simManager.clock == null || simManager.netCore == null) return;
+
+        double tRender = simManager.clock.GetCachedRemoteRenderTime();
+        byte presentedMode = simManager.netCore.GetPresentedMode(tRender);
+
+        if (_dbgLastPresentedMode == CraftNetState.MODE_INTEGRATED &&
+            presentedMode == CraftNetState.MODE_RAILS)
+        {
+            _dbgLogUntilNet = tRender + (double)debugTransitionRenderLogWindowSeconds;
+            Debug.Log("[StationRenderDbg] presented transition INTEGRATED -> RAILS");
+        }
+
+        _dbgLastPresentedMode = presentedMode;
+    }
+
+    private bool DebugInWindow()
+    {
+        if (!debugTransitionRender) return false;
+        if (simManager == null || simManager.clock == null) return false;
+        if (simManager.IsSimOwner()) return false;
+
+        double tRender = simManager.clock.GetCachedRemoteRenderTime();
+        return tRender <= _dbgLogUntilNet;
+    }
+
 
 }

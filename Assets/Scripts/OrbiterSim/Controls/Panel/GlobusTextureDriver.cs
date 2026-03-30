@@ -180,7 +180,7 @@ public class GlobusTextureDriver : UdonSharpBehaviour
         else
             centerDirOS.Normalize();
 
-        Quaternion qTex = Quaternion.FromToRotation(centerDirOS, _displayDirAuthoredTex);
+        Quaternion qTex = BuildTextureRotation(centerDirOS, _displayDirAuthoredTex);
 
         globeMaterial.SetVector("_GlobeRot", new Vector4(qTex.x, qTex.y, qTex.z, qTex.w));
         globeMaterial.SetColor("_Tint", tint);
@@ -336,6 +336,59 @@ public class GlobusTextureDriver : UdonSharpBehaviour
             return Vector3.forward;
 
         return vTexGeo.normalized;
+    }
+
+
+    private Quaternion BuildTextureRotation(Vector3 srcDir, Vector3 dstDir)
+    {
+        srcDir.Normalize();
+        dstDir.Normalize();
+
+        // Authored-texture north pole direction in authored-texture frame.
+        // In texGeo, north is +Y. After calibration/longitude offsets, that axis
+        // must be rotated into authored-texture space the same way as the map.
+        Vector3 authoredNorth = _currentGeoToAuthoredTex * Vector3.up;
+
+        Vector3 srcUp = GetLocalNorthTangent(srcDir, authoredNorth);
+        Vector3 dstUp = GetLocalNorthTangent(dstDir, authoredNorth);
+
+        Quaternion qSrc = Quaternion.LookRotation(srcDir, srcUp);
+        Quaternion qDst = Quaternion.LookRotation(dstDir, dstUp);
+
+        return qDst * Quaternion.Inverse(qSrc);
+    }
+
+    private Vector3 GetLocalNorthTangent(Vector3 surfaceDir, Vector3 authoredNorth)
+    {
+        // Project geographic north onto the tangent plane at surfaceDir.
+        Vector3 northTangent = authoredNorth - surfaceDir * Vector3.Dot(authoredNorth, surfaceDir);
+
+        if (northTangent.sqrMagnitude > 1e-10f)
+            return northTangent.normalized;
+
+        // Pole fallback: north is undefined here, so derive a stable tangent from a
+        // secondary authored axis. In texGeo, lon 0 on equator is +Z.
+        Vector3 authoredLon0 = _currentGeoToAuthoredTex * Vector3.forward;
+        Vector3 fallback = authoredLon0 - surfaceDir * Vector3.Dot(authoredLon0, surfaceDir);
+
+        if (fallback.sqrMagnitude > 1e-10f)
+        {
+            // Build a pseudo-north from the fallback east-like axis so that
+            // LookRotation still gets a consistent up vector.
+            Vector3 east = fallback.normalized;
+            Vector3 north = Vector3.Cross(surfaceDir, east);
+            if (north.sqrMagnitude > 1e-10f)
+                return north.normalized;
+        }
+
+        // Last-ditch fallback.
+        Vector3 c = Vector3.Cross(surfaceDir, Vector3.right);
+        if (c.sqrMagnitude < 1e-10f)
+            c = Vector3.Cross(surfaceDir, Vector3.up);
+
+        Vector3 east2 = c.normalized;
+        Vector3 north2 = Vector3.Cross(surfaceDir, east2);
+        return north2.normalized;
     }
 
     private Vector3 LatLonDegToSimBodyDir(float latDeg, float lonDeg)

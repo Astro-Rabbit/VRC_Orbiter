@@ -38,9 +38,25 @@ public class MFDKnob : UdonSharpBehaviour
 
     void Start()
     {
-        // If owner and value is still default zero-ish, initialize from startingValue.
-        // This avoids overwriting a networked value on non-owners.
-        if (Networking.IsOwner(gameObject) && Mathf.Approximately(_currentValue, 0f))
+        if (Networking.IsOwner(gameObject))
+        {
+            // If this is the first initialization (no valid value yet),
+            // force starting value.
+            if (!Networking.IsNetworkSettled)
+            {
+                _currentValue = Mathf.Clamp(startingValue, minValue, maxValue);
+                RequestSerialization();
+            }
+            else
+            {
+                // Clamp whatever came from network
+                _currentValue = Mathf.Clamp(_currentValue, minValue, maxValue);
+            }
+        }
+
+        // Fallback for non-owners or edge cases:
+        // if value is still default-ish, use startingValue
+        if (Mathf.Approximately(_currentValue, 0f) && !Mathf.Approximately(startingValue, 0f))
         {
             _currentValue = Mathf.Clamp(startingValue, minValue, maxValue);
         }
@@ -154,7 +170,7 @@ public class MFDKnob : UdonSharpBehaviour
 
         _currentValue = newValue;
         ApplyValue();
-        //RequestSerialization();
+        RequestSerialization();
     }
 
     //public void OnStayDesktop(int id, Quaternion currentCameraRotation)

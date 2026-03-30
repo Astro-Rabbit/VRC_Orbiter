@@ -8,6 +8,7 @@ public class TimeWarpPolicy : UdonSharpBehaviour
     public BodyCatalog bodies;
     public CraftStateModel craft;
     public GuidanceNavContactsState contacts;
+    public CraftNetState netState;
 
     [Header("Requested warp")]
     [Tooltip("Warp the pilot wants. Actual applied warp may be lower due to caps.")]
@@ -26,16 +27,29 @@ public class TimeWarpPolicy : UdonSharpBehaviour
     [Tooltip("Max allowed warp for each zone row.")]
     public double[] bodyZoneMaxWarp;
 
-    [Header("Station zones")]
+    [Header("Station gates")]
     public bool stationCapsEnabled = true;
 
-    [Tooltip("Outer station zone radius (m).")]
+    [Tooltip("Outer gate max range (m). Gate can apply only inside this range.")]
     public double outerStationRangeMeters = 10000.0;
-    public double outerStationMaxWarp = 10.0;
 
-    [Tooltip("Inner station zone radius (m).")]
+    [Tooltip("Outer gate max score in seconds. score = range / relVel.")]
+    public double outerStationScoreSeconds = 120.0;
+
+    [Tooltip("Outer gate warp cap.")]
+    public double outerStationMaxWarp = 50.0;
+
+    [Tooltip("Inner gate max range (m). Gate can apply only inside this range.")]
     public double innerStationRangeMeters = 1000.0;
-    public double innerStationMaxWarp = 1.0;
+
+    [Tooltip("Inner gate max score in seconds. score = range / relVel.")]
+    public double innerStationScoreSeconds = 30.0;
+
+    [Tooltip("Inner gate warp cap.")]
+    public double innerStationMaxWarp = 10.0;
+
+    [Tooltip("Small velocity floor to avoid divide-by-zero and huge scores at tiny rel speed.")]
+    public double stationRelativeSpeedFloorMps = 0.01;
 
     [Header("Debug")]
     public double currentBodyCap = double.PositiveInfinity;
@@ -52,6 +66,9 @@ public class TimeWarpPolicy : UdonSharpBehaviour
 
     public int nearestStationIndex = -1;
     public double nearestStationRangeMeters = double.PositiveInfinity;
+    public double nearestStationRelativeSpeedMps = 0.0;
+    public double nearestStationScoreSeconds = double.PositiveInfinity;
+
     public int activeStationZone = 0; // 0 none, 1 outer, 2 inner
 
     public void SetRequestedTimeScale(double newScale)
@@ -104,7 +121,54 @@ public class TimeWarpPolicy : UdonSharpBehaviour
 
         nearestStationIndex = -1;
         nearestStationRangeMeters = double.PositiveInfinity;
+        nearestStationRelativeSpeedMps = 0.0;
+        nearestStationScoreSeconds = double.PositiveInfinity;
         activeStationZone = 0;
+    }
+
+    private bool IsDocked()
+    {
+        if (netState == null) return false;
+        return netState.mode == CraftNetState.MODE_DOCKED;
+    }
+
+    private double GetStationRelativeSpeedMps(int stationIndex)
+    {
+        if (contacts == null) return 0.0;
+        if (stationIndex < 0) return 0.0;
+
+        double vx = 0.0;
+        double vy = 0.0;
+        double vz = 0.0;
+        bool found = false;
+
+        // Check full slot 0
+        if (contacts.fullValid0 && contacts.fullStationIndex0 == stationIndex)
+        {
+            vx = contacts.dvx_E0;
+            vy = contacts.dvy_E0;
+            vz = contacts.dvz_E0;
+            found = true;
+        }
+
+        // Check full slot 1
+        if (!found && contacts.fullValid1 && contacts.fullStationIndex1 == stationIndex)
+        {
+            vx = contacts.dvx_E1;
+            vy = contacts.dvy_E1;
+            vz = contacts.dvz_E1;
+            found = true;
+        }
+
+        if (!found)
+        {
+            // Not promoted → no velocity info → treat as slow
+            return 0.0;
+        }
+
+        // magnitude
+        double speed = System.Math.Sqrt(vx * vx + vy * vy + vz * vz);
+        return speed;
     }
 
     private double GetBodyCap()
@@ -158,6 +222,10 @@ public class TimeWarpPolicy : UdonSharpBehaviour
     private double GetStationCap()
     {
         if (!stationCapsEnabled) return double.PositiveInfinity;
+
+        // Docked craft: no station gating at all.
+        if (IsDocked()) return double.PositiveInfinity;
+
         if (contacts == null) return double.PositiveInfinity;
         if (contacts.valid == null || contacts.range_m == null) return double.PositiveInfinity;
 
@@ -184,20 +252,45 @@ public class TimeWarpPolicy : UdonSharpBehaviour
         nearestStationIndex = bestIdx;
         nearestStationRangeMeters = bestRange;
 
-        if (bestRange <= innerStationRangeMeters)
+        double relSpeed = GetStationRelativeSpeedMps(bestIdx);
+        if (relSpeed < 0.0) relSpeed = -relSpeed;
+
+        nearestStationRelativeSpeedMps = relSpeed;
+
+        double denom = relSpeed;
+        if (denom < stationRelativeSpeedFloorMps) denom = stationRelativeSpeedFloorMps;
+
+        double scoreSeconds = bestRange / denom;
+        nearestStationScoreSeconds = scoreSeconds;
+
+        double bestCap = double.PositiveInfinity;
+        int bestZone = 0;
+
+        // Outer gate
+        if (bestRange <= outerStationRangeMeters && scoreSeconds <= outerStationScoreSeconds)
         {
-            stationCapActive = true;
-            activeStationZone = 2;
-            return innerStationMaxWarp;
+            bestCap = outerStationMaxWarp;
+            bestZone = 1;
         }
 
-        if (bestRange <= outerStationRangeMeters)
+        // Inner gate
+        if (bestRange <= innerStationRangeMeters && scoreSeconds <= innerStationScoreSeconds)
         {
-            stationCapActive = true;
-            activeStationZone = 1;
-            return outerStationMaxWarp;
+            if (innerStationMaxWarp < bestCap)
+            {
+                bestCap = innerStationMaxWarp;
+                bestZone = 2;
+            }
         }
 
-        return double.PositiveInfinity;
+        if (bestZone != 0)
+        {
+            stationCapActive = true;
+            activeStationZone = bestZone;
+        }
+
+        return bestCap;
     }
+
+
 }
