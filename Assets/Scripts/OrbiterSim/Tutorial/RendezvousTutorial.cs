@@ -7,7 +7,6 @@ using TMPro;
 
 public enum RendezvousTutorialClip
 {
-    // {
     Intro,
     MenuPage,
     TargetPage,
@@ -16,14 +15,12 @@ public enum RendezvousTutorialClip
     AlignInfo,
     AlignNode,
     NodeAuto,
-    AlignTime,
-    AlignExec,
+    NodeTime,
+    NodeExec,
     TransferPage,
     TransferInfo,
     TransferCalc,
     TransferNode,
-    TransferTime,
-    TransferExec,
     DockPage,
     MatchInfo,
     MatchTime,
@@ -32,10 +29,8 @@ public enum RendezvousTutorialClip
     FinishBurn,
     TargetDir,
     TargetBurn,
-    // }
-    FinalDir,
-    FinalBurn,
-    Final,
+    RestOfTheOwl,
+    Outro,
 }
 
 public class RendezvousTutorial : UdonSharpBehaviour
@@ -53,7 +48,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public AttitudeControllerPD pd;
     public GC_Core gc;
     public TMP_Text output;
-    public GameObject nextButton;
+    public GameObject continueButton;
 
     [Header("Settings")]
     public int targetIndex = 2;
@@ -68,8 +63,8 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public double dirInLim = 2.0;
     public double dirOutLim = 3.0;
     public double interceptTimeLim = 300;
-    public float velMatchInLim = 10.0f;
-    public float velMatchOutLim = 50.0f;
+    public float velMatchInLim = 20.0f;
+    public float velMatchOutLim = 200.0f;
 
     [Header("Sticky Condition Flags")]
     public bool planeAligned = false;
@@ -109,10 +104,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
         case (int)RendezvousTutorialClip.AlignInfo:
         case (int)RendezvousTutorialClip.TransferInfo:
         case (int)RendezvousTutorialClip.MatchInfo:
-            nextButton.SetActive(true);
+            continueButton.SetActive(true);
             break;
         default:
-            nextButton.SetActive(false);
+            continueButton.SetActive(false);
             break;
         }
     }
@@ -187,9 +182,9 @@ public class RendezvousTutorial : UdonSharpBehaviour
                 return (int)RendezvousTutorialClip.NodeAuto;
             }
             if (!executing) {
-                return (int)RendezvousTutorialClip.TransferTime;
+                return (int)RendezvousTutorialClip.NodeTime;
             }
-            return (int)RendezvousTutorialClip.TransferExec;
+            return (int)RendezvousTutorialClip.NodeExec;
         }
 
         if (!correctTarget) {
@@ -222,9 +217,9 @@ public class RendezvousTutorial : UdonSharpBehaviour
             return (int)RendezvousTutorialClip.NodeAuto;
         }
         if (!executing) {
-            return (int)RendezvousTutorialClip.AlignTime;
+            return (int)RendezvousTutorialClip.NodeTime;
         }
-        return (int)RendezvousTutorialClip.AlignExec;
+        return (int)RendezvousTutorialClip.NodeExec;
     }
 
     private bool PageOpened(MFDPage page)
@@ -275,12 +270,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
                 proximity = false;
             }
 
-            if (dockingPage.portSelected) {
-                if (dockingPage.speed < velMatchInLim) {
-                    velocityMatched = true;
-                } else if (dockingPage.speed > velMatchOutLim) {
-                    velocityMatched = false;
-                }
+            if (dockingPage.speed < velMatchInLim) {
+                velocityMatched = true;
+            } else if (dockingPage.speed > velMatchOutLim) {
+                velocityMatched = false;
             }
         }
 
@@ -322,7 +315,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
         readyMatch = false;
     }
 
-    public void Next()
+    public void Continue()
     {
         switch (clip) {
         case (int)RendezvousTutorialClip.Intro:
