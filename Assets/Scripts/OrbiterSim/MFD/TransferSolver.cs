@@ -26,7 +26,7 @@ public class TransferSolver : UdonSharpBehaviour
     public double minTimeOfFlightSec = 120.0;
     public double burnSearchMaxSec = 21600.0;      // 6 hr
     public double encounterSearchMaxSec = 21600.0; // 6 hr
-    public double dvCapMps = 1000.0;
+    public double dvCapMps = 11000.0;
 
     [Header("Auto State (read-only)")]
     public byte autoStatus = AUTO_IDLE;

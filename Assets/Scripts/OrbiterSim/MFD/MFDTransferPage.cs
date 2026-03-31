@@ -363,7 +363,6 @@ public class MFDTransferPage : MFDPage
         display.ClearText();
 
         double now = clock.simTime;
-        //Color planColor = autoShowSolution && autoValid ? Color.cyan : Color.green;
         Color planColor = Color.green;
 
         display.DrawText(MFD.FormatPercent("STP", stepRatio), 2, 19, Color.green);

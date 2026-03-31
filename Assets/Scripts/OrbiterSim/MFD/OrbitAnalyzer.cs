@@ -93,12 +93,23 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         double cz = other.m02*m12 - other.m12*m02;
 
         double cdot = other.m00*cx + other.m10*cy + other.m20*cz;
-        cdot /= cx*cx + cy*cy + cz*cz;
+        double div = cx*cx + cy*cy + cz*cz;
 
-        // rotated periapsis direction
-        double rx = other.m00*dot + cx*cdot*(1 - dot) + cy*other.m20 - cz*other.m10;
-        double ry = other.m10*dot + cy*cdot*(1 - dot) + cz*other.m00 - cx*other.m20;
-        double rz = other.m20*dot + cz*cdot*(1 - dot) + cx*other.m10 - cy*other.m00;
+        double rx, ry, rz;
+        if (div > 1e-30) {
+            cdot /= div;
+
+            // rotated periapsis direction
+            rx = other.m00*dot + cx*cdot*(1 - dot) + cy*other.m20 - cz*other.m10;
+            ry = other.m10*dot + cy*cdot*(1 - dot) + cz*other.m00 - cx*other.m20;
+            rz = other.m20*dot + cz*cdot*(1 - dot) + cx*other.m10 - cy*other.m00;
+        } else {
+            // TODO: This seemed to be triggered pretty often in practice even with a 0.6 degree inclination.
+            // Why is that?
+            rx = other.m00;
+            ry = other.m10;
+            rz = other.m20;
+        }
 
         // project to perifocal frame for this orbit (z should always be zero so it's left out)
         px = rx*m00 + ry*m10 + rz*m20;

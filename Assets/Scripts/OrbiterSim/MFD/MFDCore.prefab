@@ -703,6 +703,8 @@ MonoBehaviour:
   src: {fileID: 7088621204662201330}
   tgt: {fileID: 6195667392185332091}
   gc: {fileID: 0}
+  tutorial: {fileID: 0}
+  hasTarget: 0
   ascTime: 0
   descTime: 0
   currentTime: 0
@@ -979,6 +981,7 @@ MonoBehaviour:
   solver: {fileID: 279027433865367991}
   fitter: {fileID: 6900009514466072649}
   propagator: {fileID: 7336448340245304807}
+  tutorial: {fileID: 0}
   hasTarget: 0
   tgtPx: 0
   tgtPy: 0
@@ -1219,9 +1222,11 @@ MonoBehaviour:
   - 3
   - 10
   lateralScaleIndex: 2
+  hasTarget: 0
   portSelected: 0
   range: 0
   closure: 0
+  speed: 0
   offsetX: 0
   offsetY: 0
   angleX: 0
@@ -1703,7 +1708,7 @@ MonoBehaviour:
   minTimeOfFlightSec: 120
   burnSearchMaxSec: 21600
   encounterSearchMaxSec: 21600
-  dvCapMps: 1000
+  dvCapMps: 11000
   autoStatus: 0
   autoValid: 0
   autoBurnTime: 0
