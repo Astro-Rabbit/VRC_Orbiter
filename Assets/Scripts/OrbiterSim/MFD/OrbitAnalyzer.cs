@@ -72,6 +72,13 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         oz = m02*ix + m12*iy + m22*iz;
     }
 
+    public void PerifocalToEcliptic(double ix, double iy, double iz, out double ox, out double oy, out double oz)
+    {
+        ox = m00*ix + m01*iy + m02*iz;
+        oy = m10*ix + m11*iy + m12*iz;
+        oz = m20*ix + m21*iy + m22*iz;
+    }
+
     // Perform the minimum rotation to align the given orbit with this orbit
     // and output the direction of the rotated periapsis in the perifocal frame
     // of this orbit
@@ -86,12 +93,23 @@ public class OrbitAnalyzer : UdonSharpBehaviour
         double cz = other.m02*m12 - other.m12*m02;
 
         double cdot = other.m00*cx + other.m10*cy + other.m20*cz;
-        cdot /= cx*cx + cy*cy + cz*cz;
+        double div = cx*cx + cy*cy + cz*cz;
 
-        // rotated periapsis direction
-        double rx = other.m00*dot + cx*cdot*(1 - dot) + cy*other.m20 - cz*other.m10;
-        double ry = other.m10*dot + cy*cdot*(1 - dot) + cz*other.m00 - cx*other.m20;
-        double rz = other.m20*dot + cz*cdot*(1 - dot) + cx*other.m10 - cy*other.m00;
+        double rx, ry, rz;
+        if (div > 1e-30) {
+            cdot /= div;
+
+            // rotated periapsis direction
+            rx = other.m00*dot + cx*cdot*(1 - dot) + cy*other.m20 - cz*other.m10;
+            ry = other.m10*dot + cy*cdot*(1 - dot) + cz*other.m00 - cx*other.m20;
+            rz = other.m20*dot + cz*cdot*(1 - dot) + cx*other.m10 - cy*other.m00;
+        } else {
+            // TODO: This seemed to be triggered pretty often in practice even with a 0.6 degree inclination.
+            // Why is that?
+            rx = other.m00;
+            ry = other.m10;
+            rz = other.m20;
+        }
 
         // project to perifocal frame for this orbit (z should always be zero so it's left out)
         px = rx*m00 + ry*m10 + rz*m20;

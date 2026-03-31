@@ -41,13 +41,23 @@ Material:
     - _BaseAlpha: 0
     - _DarkFinalAlpha: 1
     - _DarkFresnelStrength: 0.21
-    - _DarkReflectStrength: 0.3
+    - _DarkReflectStrength: 0.09
     - _DetailNormalStrength: 0
     - _DetailTiling: 6
     - _EdgeDarken: 0.145
-    - _FresnelPower: 4
-    - _FresnelStrength: 1.43
+    - _FresnelPower: 5.5
+    - _FresnelStrength: 0.5
+    - _GridEdgeBias: 1.01
+    - _GridEdgeBiasPower: 1.5
+    - _GridEnable: 1
+    - _GridIntensity: 0.528
+    - _GridLineWidth: 0.001
+    - _GridRateIntensityBoost: 1.41
+    - _GridRateWidthBoost: 5
+    - _GridScale: 50
+    - _GridUVSelect: 0.629
     - _ImperfectionStrength: 0.074
+    - _MotionRate: 0
     - _NormalStrength: 0.05
     - _ReflectionFresnelBoost: 0.7
     - _ReflectionStrength: 1
@@ -59,7 +69,7 @@ Material:
     - _VignetteEnd: 0.314
     - _VignetteHardness: 2.47
     - _VignetteStart: 0
-    - _VignetteStrength: 0
+    - _VignetteStrength: 0.07
     - _VignetteSurfaceDarken: 1
     - _VignetteTargetAlpha: 1
     - _VignetteTintBlend: 1
@@ -68,6 +78,7 @@ Material:
     - _DarkFinalColor: {r: 0, g: 0, b: 0, a: 1}
     - _FresnelColor: {r: 0.85, g: 0.95, b: 1, a: 1}
     - _GlassTint: {r: 0, g: 0, b: 0, a: 1}
+    - _GridColor: {r: 1, g: 0.58867174, b: 0, a: 1}
     - _TintedGlassColor: {r: 0.6603774, g: 0.17755428, b: 0.1953638, a: 1}
     - _VignetteTintColor: {r: 0.03, g: 0, b: 0.049999982, a: 1}
   m_BuildTextureStacks: []

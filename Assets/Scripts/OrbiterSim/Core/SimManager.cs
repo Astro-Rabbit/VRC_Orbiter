@@ -722,6 +722,9 @@ public class SimManager : UdonSharpBehaviour
 
         if (netAtt != null)
             netAtt.PublishAttitude();
+
+        if (conicFitter != null)
+            conicFitter.Fit(craft.primaryBodyId, clock.Now());
     }
 
     // -------------------------------------------------------------------------

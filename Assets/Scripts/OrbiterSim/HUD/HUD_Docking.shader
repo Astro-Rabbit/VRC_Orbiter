@@ -135,7 +135,7 @@ Shader "HUD/CollimatedDock"
         _DockTReticleEndcapHeight ("Dock T Endcap Height", Float) = 0.010
         _DockTReticleYOffset ("Dock T Reticle Y Offset", Float) = 0.000
 
-
+        _DockPortIndex ("Dock Port Index", Float) = -1
     }
 
     SubShader
@@ -432,6 +432,8 @@ Shader "HUD/CollimatedDock"
             float _DockTReticleEndcapWidth;
             float _DockTReticleEndcapHeight;
             float _DockTReticleYOffset;
+
+            float _DockPortIndex;
 
             struct appdata
             {
@@ -971,6 +973,128 @@ Shader "HUD/CollimatedDock"
             }
 
 
+            float DrawUnsignedIntGeneric(float2 uvh, float2 center, float glyphHeight, int value)
+            {
+                value = max(value, 0);
+
+                int d0 = value % 10;
+                int d1 = (value / 10) % 10;
+                int d2 = (value / 100) % 10;
+
+                bool show2 = (value >= 100);
+                bool show1 = (value >= 10);
+
+                float w2 = show2 ? glyphHeight * GetDigitAspect(d2) : 0.0;
+                float w1 = show1 ? glyphHeight * GetDigitAspect(d1) : 0.0;
+                float w0 = glyphHeight * GetDigitAspect(d0);
+
+                float totalWidth = w2 + w1 + w0;
+                float cursor = -0.5 * totalWidth;
+
+                float a = 0.0;
+
+                if (show2)
+                {
+                    float2 c = center + float2(cursor + 0.5 * w2, 0.0);
+                    a += DrawGlyphRect(uvh, c, w2, glyphHeight, GetDigitUV(d2));
+                    cursor += w2;
+                }
+
+                if (show1)
+                {
+                    float2 c = center + float2(cursor + 0.5 * w1, 0.0);
+                    a += DrawGlyphRect(uvh, c, w1, glyphHeight, GetDigitUV(d1));
+                    cursor += w1;
+                }
+
+                {
+                    float2 c = center + float2(cursor + 0.5 * w0, 0.0);
+                    a += DrawGlyphRect(uvh, c, w0, glyphHeight, GetDigitUV(d0));
+                }
+
+                return a;
+            }
+
+
+            float DrawDockFixedReadout(float2 uvh)
+            {
+                float hud = 0.0;
+
+                float2 anchor = float2(-0.50, 0.42);
+                float rowH = 0.060;
+                float labelValueGap = 0.090;
+
+                float textH = _DockTextHeight;
+
+                // ----------------------------
+                // PORT row
+                // ----------------------------
+                float2 portLabelCenter = anchor;
+                float2 portValueCenter = anchor + float2(labelValueGap + 0.010, 0.0);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    portLabelCenter,
+                    textH,
+                    4,
+                    15, 14, 17, 19, -1
+                );
+
+                if (_DockPortIndex >= 0.0)
+                {
+                    hud += DrawUnsignedIntGeneric(
+                        uvh,
+                        portValueCenter,
+                        textH,
+                        (int)(_DockPortIndex + 0.5)
+                    );
+                }
+
+                // ----------------------------
+                // CLS row
+                // ----------------------------
+                float2 clsLabelCenter = anchor + float2(0.0, -rowH);
+                float2 clsValueCenter = anchor + float2(labelValueGap + 0.020, -rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    clsLabelCenter,
+                    textH,
+                    3,
+                    2, 11, 18, -1, -1
+                );
+
+                hud += DrawSignedFixed2Generic(
+                    uvh,
+                    clsValueCenter,
+                    textH,
+                    _DockClosureMps
+                );
+
+                // ----------------------------
+                // RNG row
+                // ----------------------------
+                float2 rngLabelCenter = anchor + float2(0.0, -2.0 * rowH);
+                float2 rngValueCenter = anchor + float2(labelValueGap, -2.0 * rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    rngLabelCenter,
+                    textH,
+                    3,
+                    17, 13, 6, -1, -1
+                );
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    rngValueCenter,
+                    textH,
+                    _DockRangeMeters
+                );
+
+                return hud;
+            }
+
             fixed4 fragHud(v2f i) : SV_Target
             {
                 float3 ray_B = normalize(i.worldPos - _WorldSpaceCameraPos.xyz);
@@ -981,6 +1105,12 @@ Shader "HUD/CollimatedDock"
 
                 float hud = 0.0;
 
+                if (_DockValid > 0.5)
+                {
+                    hud += DrawDockFixedReadout(uvh);
+                }
+
+
                 if (_DockReticleMode > 0.5)
                     hud += DrawDockTReticle(uvh);
                 else
@@ -988,17 +1118,17 @@ Shader "HUD/CollimatedDock"
 
                 if (_DockValid > 0.5)
                 {
-                    float2 rngLabelCenter = float2(-0.38, 0.28);
-                    float2 rngValueCenter = float2(-0.20, 0.28);
+                    // float2 rngLabelCenter = float2(-0.38, 0.28);
+                    // float2 rngValueCenter = float2(-0.20, 0.28);
 
-                    float2 clsLabelCenter = float2(-0.38, 0.22);
-                    float2 clsValueCenter = float2(-0.20, 0.22);
+                    // float2 clsLabelCenter = float2(-0.38, 0.22);
+                    // float2 clsValueCenter = float2(-0.20, 0.22);
 
-                    hud += DrawUpperLabel(uvh, rngLabelCenter, _DockTextHeight, 3, 17, 13, 6, -1, -1);
-                    hud += DrawUnsignedFixed2Generic(uvh, rngValueCenter, _DockTextHeight, _DockRangeMeters);
+                    // hud += DrawUpperLabel(uvh, rngLabelCenter, _DockTextHeight, 3, 17, 13, 6, -1, -1);
+                    // hud += DrawUnsignedFixed2Generic(uvh, rngValueCenter, _DockTextHeight, _DockRangeMeters);
 
-                    hud += DrawUpperLabel(uvh, clsLabelCenter, _DockTextHeight, 3, 2, 11, 18, -1, -1);
-                    hud += DrawSignedFixed2Generic(uvh, clsValueCenter, _DockTextHeight, _DockClosureMps);
+                    // hud += DrawUpperLabel(uvh, clsLabelCenter, _DockTextHeight, 3, 2, 11, 18, -1, -1);
+                    // hud += DrawSignedFixed2Generic(uvh, clsValueCenter, _DockTextHeight, _DockClosureMps);
 
                     if (_DockRelVelValid > 0.5)
                     {

@@ -37,205 +37,191 @@ Shader "Orbiter/CanopyGlass_Base"
         _VignetteHardness ("Vignette Hardness", Range(0.25, 8.0)) = 2.0
 
         [Header(Dark State)]
-        _DarkFinalColor ("Dark Final Color", Color) = (0.0, 0.0, 0.0, 1.0)
+        _DarkFinalColor ("Dark Final Color", Color) = (0,0,0,1)
         _DarkFinalAlpha ("Dark Final Alpha", Range(0.0, 1.0)) = 1.0
         _DarkReflectStrength ("Dark Reflect Strength", Range(0.0, 2.0)) = 0.0
         _DarkFresnelStrength ("Dark Fresnel Strength", Range(0.0, 2.0)) = 0.0
+
+        [Header(Hex Grid)]
+        _GridEnable ("Grid Enable", Range(0.0, 1.0)) = 1.0
+        _GridUVSelect ("Grid UV Select (0=UV0, 1=UV1)", Range(0.0, 1.0)) = 0.0
+        _GridScale ("Grid Scale", Float) = 14.0
+        _GridLineWidth ("Grid Line Width", Range(0.001, 0.08)) = 0.01
+        _GridRateWidthBoost ("Grid Rate Width Boost", Range(0.0, 5.0)) = 1.5
+        _GridIntensity ("Grid Intensity", Range(0.0, 1.0)) = 0.05
+        _GridRateIntensityBoost ("Grid Rate Intensity Boost", Range(0.0, 5.0)) = 0.4
+        _GridColor ("Grid Color", Color) = (0.75, 0.88, 1.0, 1.0)
+
+        _GridEdgeBias ("Grid Edge Bias", Range(0.0, 3.0)) = 0.75
+        _GridEdgeBiasPower ("Grid Edge Bias Power", Range(0.25, 4.0)) = 1.5
+
+        _MotionRate ("Motion Rate", Range(0.0, 1.0)) = 0.0
     }
 
     SubShader
     {
-        Tags
-        {
-            "Queue"="Transparent"
-            "RenderType"="Transparent"
-            "IgnoreProjector"="True"
-        }
-
-        LOD 200
-        Cull Back
+        Tags { "Queue"="Transparent" "RenderType"="Transparent" }
         ZWrite Off
         Blend SrcAlpha OneMinusSrcAlpha
 
         Pass
         {
-            Name "FORWARD"
-            Tags { "LightMode"="ForwardBase" }
-
             CGPROGRAM
             #pragma vertex vert
             #pragma fragment frag
-            #pragma target 3.0
-
             #include "UnityCG.cginc"
-            #include "Lighting.cginc"
 
             sampler2D _NormalMap;
-            float4 _NormalMap_ST;
-
             sampler2D _DetailNormalMap;
-            float4 _DetailNormalMap_ST;
-
             sampler2D _ImperfectionMask;
+
+            float4 _NormalMap_ST;
+            float4 _DetailNormalMap_ST;
             float4 _ImperfectionMask_ST;
 
-            fixed4 _GlassTint;
-            half _BaseAlpha;
+            float4 _GlassTint;
+            float _BaseAlpha;
 
-            fixed4 _FresnelColor;
-            half _FresnelPower;
-            half _FresnelStrength;
+            float4 _FresnelColor;
+            float _FresnelPower;
+            float _FresnelStrength;
 
-            half _ReflectionStrength;
-            half _ReflectionFresnelBoost;
+            float _ReflectionStrength;
+            float _ReflectionFresnelBoost;
 
-            half _NormalStrength;
-            half _DetailNormalStrength;
-            half _DetailTiling;
+            float _NormalStrength;
+            float _DetailNormalStrength;
+            float _DetailTiling;
 
-            half _ImperfectionStrength;
-            half _EdgeDarken;
-            half _AlphaFresnelBoost;
+            float _ImperfectionStrength;
+            float _EdgeDarken;
+            float _AlphaFresnelBoost;
 
-            half _VignetteStrength;
-            half _VignetteStart;
-            half _VignetteEnd;
-            half _VignetteHardness;
+            float _VignetteStrength;
+            float _VignetteStart;
+            float _VignetteEnd;
+            float _VignetteHardness;
 
-            fixed4 _DarkFinalColor;
-            half _DarkFinalAlpha;
-            half _DarkReflectStrength;
-            half _DarkFresnelStrength;
+            float4 _DarkFinalColor;
+            float _DarkFinalAlpha;
 
-            struct appdata
-            {
-                float4 vertex   : POSITION;
-                float3 normal   : NORMAL;
-                float4 tangent  : TANGENT;
-                float2 uv       : TEXCOORD0;
-                float2 uv1      : TEXCOORD1;
+            float _GridEnable;
+            float _GridUVSelect;
+            float _GridScale;
+            float _GridLineWidth;
+            float _GridRateWidthBoost;
+            float _GridIntensity;
+            float _GridRateIntensityBoost;
+            float4 _GridColor;
+            float _GridEdgeBias;
+            float _GridEdgeBiasPower;
+            float _MotionRate;
+
+            struct appdata {
+                float4 vertex:POSITION;
+                float3 normal:NORMAL;
+                float2 uv:TEXCOORD0;
+                float2 uv1:TEXCOORD1;
             };
 
-            struct v2f
-            {
-                float4 pos              : SV_POSITION;
-                float2 uv               : TEXCOORD0;
-                float2 uvDetail         : TEXCOORD1;
-                float3 worldPos         : TEXCOORD2;
-                float3 worldNormal      : TEXCOORD3;
-                float3 worldTangent     : TEXCOORD4;
-                float3 worldBinormal    : TEXCOORD5;
-                float2 uvVignette       : TEXCOORD6;
-                UNITY_FOG_COORDS(7)
+            struct v2f {
+                float4 pos:SV_POSITION;
+                float2 uv:TEXCOORD0;
+                float2 uv1:TEXCOORD1;
+                float3 worldPos:TEXCOORD2;
+                float3 normal:TEXCOORD3;
             };
 
-            v2f vert (appdata v)
+            v2f vert(appdata v)
             {
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
-
-                o.uv = TRANSFORM_TEX(v.uv, _NormalMap);
-                o.uvDetail = v.uv * _DetailTiling;
-
+                o.uv = v.uv;
+                o.uv1 = v.uv1;
                 o.worldPos = mul(unity_ObjectToWorld, v.vertex).xyz;
-                o.worldNormal = UnityObjectToWorldNormal(v.normal);
-                o.worldTangent = UnityObjectToWorldDir(v.tangent.xyz);
-                o.worldBinormal = cross(o.worldNormal, o.worldTangent) * v.tangent.w;
-                o.uvVignette = v.uv1;
-
-                UNITY_TRANSFER_FOG(o, o.pos);
+                o.normal = UnityObjectToWorldNormal(v.normal);
                 return o;
             }
 
-            float3 BlendNormalsRNM(float3 n1, float3 n2)
+            float HexLineGrid(float2 uv, float scale, float lineWidth)
             {
-                n1 = normalize(n1);
-                n2 = normalize(n2);
-                float3 t = n1 + float3(0,0,1);
-                float3 u = n2 * float3(-1,-1,1);
-                return normalize((t / t.z) * dot(t,u) - u);
+                uv *= scale;
+
+                // convert to hex grid space (pointy-top layout)
+                float2 q = float2(
+                    uv.x * 2.0/3.0,
+                    (-uv.x + 2.0 * uv.y) * 0.57735027
+                );
+
+                float2 hex = float2(q.x, q.y);
+                float2 cell = floor(hex);
+                float2 f = frac(hex) - 0.5;
+
+                // distance to 3 hex edge directions
+                float d1 = abs(f.x);
+                float d2 = abs(f.y);
+                float d3 = abs(f.x + f.y);
+
+                float d = min(min(d1, d2), d3);
+
+                // line mask
+                return 1.0 - smoothstep(lineWidth, lineWidth * 1.5, d);
             }
 
-            fixed4 frag (v2f i) : SV_Target
+            fixed4 frag(v2f i) : SV_Target
             {
-                float3 Nw = normalize(i.worldNormal);
-                float3 Tw = normalize(i.worldTangent);
-                float3 Bw = normalize(i.worldBinormal);
-                float3x3 TBN = float3x3(Tw, Bw, Nw);
+                float3 V = normalize(_WorldSpaceCameraPos - i.worldPos);
+                float3 N = normalize(i.normal);
 
-                float3 nMain = UnpackNormal(tex2D(_NormalMap, i.uv));
-                nMain.xy *= _NormalStrength;
+                float fres = pow(1 - saturate(dot(N,V)), _FresnelPower);
 
-                float2 detailUV = TRANSFORM_TEX(i.uvDetail, _DetailNormalMap);
-                float3 nDetail = UnpackNormal(tex2D(_DetailNormalMap, detailUV));
-                nDetail.xy *= _DetailNormalStrength;
+                float3 col = _GlassTint.rgb;
+                col += _FresnelColor.rgb * fres * _FresnelStrength;
 
-                float3 nTS = BlendNormalsRNM(nMain, nDetail);
-                float3 N = normalize(mul(nTS, TBN));
+                float alpha = _BaseAlpha + fres * _AlphaFresnelBoost;
 
-                float3 V = normalize(_WorldSpaceCameraPos.xyz - i.worldPos);
+                // --- vignette ---
+                float2 c = abs(i.uv1 - 0.5)*2;
+                float edge = max(c.x,c.y);
+                float mask = saturate((edge - _VignetteStart)/(_VignetteEnd - _VignetteStart));
+                float t = pow(mask,_VignetteHardness) * _VignetteStrength;
 
-                half NdotV = saturate(dot(N, V));
-                half fresnel = pow(1.0h - NdotV, _FresnelPower);
+                // --- dark replace ---
+                col = lerp(col, _DarkFinalColor.rgb, t);
+                alpha = lerp(alpha, _DarkFinalAlpha, t);
 
-                half imperfection = tex2D(_ImperfectionMask, TRANSFORM_TEX(i.uv, _ImperfectionMask)).r;
-                half imperf = lerp(1.0h, imperfection, _ImperfectionStrength);
+                // --- GRID (independent system) ---
+                float2 gridUV = lerp(i.uv, i.uv1, step(0.5, _GridUVSelect));
 
-                float3 reflDir = reflect(-V, N);
-                half4 env = UNITY_SAMPLE_TEXCUBE(unity_SpecCube0, reflDir);
-                float3 envRefl = DecodeHDR(env, unity_SpecCube0_HDR);
+                float rate = saturate(_MotionRate);
 
-                // ----- Normal glass state -----
-                float3 reflectionNormal = envRefl * (_ReflectionStrength + fresnel * _ReflectionFresnelBoost);
-                reflectionNormal *= lerp(0.9h, 1.1h, imperf);
+                // thickness scaling
+                float width = _GridLineWidth * (1.0 + rate * _GridRateWidthBoost);
 
-                float3 fresColNormal = _FresnelColor.rgb * fresnel * _FresnelStrength;
+                // proper hex lines
+                float g = HexLineGrid(gridUV, _GridScale, width);
 
-                half edgeDark = fresnel * _EdgeDarken;
+                // intensity scaling
+                float intensity = _GridIntensity + rate * _GridRateIntensityBoost;
+                intensity = saturate(intensity);
+                intensity = lerp(intensity, sqrt(intensity), rate);
 
-                float3 transmissionNormal = _GlassTint.rgb;
-                transmissionNormal *= lerp(1.0h, imperfection, _ImperfectionStrength * 0.15h);
-                transmissionNormal *= (1.0h - edgeDark);
+                // independent edge bias (NOT vignette)
+                float2 edgeUV = abs(i.uv1 - 0.5) * 2.0;
+                float edgeDist = max(edgeUV.x, edgeUV.y);
+                float edgeMask = saturate(edgeDist);
 
-                float3 normalColor = transmissionNormal + reflectionNormal + fresColNormal;
+                float edgeBias = lerp(1.0, 1.0 + _GridEdgeBias, pow(edgeMask, _GridEdgeBiasPower));
 
-                half normalAlpha = _BaseAlpha;
-                normalAlpha += fresnel * _AlphaFresnelBoost;
-                normalAlpha *= lerp(1.0h, imperfection, _ImperfectionStrength * 0.25h);
-                normalAlpha = saturate(normalAlpha);
+                // final grid
+                float gridAmount = g * intensity * edgeBias * _GridEnable;
 
-                // ----- Dark replacement state -----
-                float3 darkReflect = envRefl * _DarkReflectStrength;
-                float3 darkFresnel = _FresnelColor.rgb * fresnel * _DarkFresnelStrength;
-                float3 darkColor = _DarkFinalColor.rgb + darkReflect + darkFresnel;
-                half darkAlpha = _DarkFinalAlpha;
+                // embed into glass
+                col += _GridColor.rgb * gridAmount;
 
-                // ----- UV1 pane-edge vignette -----
-                // 0 at pane center, 1 at pane edge if UV1 spans 0..1 per pane
-                float2 centered = abs(i.uvVignette - 0.5) * 2.0;
-                half edgeCoord = max(centered.x, centered.y);
-
-                half mask01 = saturate((edgeCoord - _VignetteStart) / max(1e-5, (_VignetteEnd - _VignetteStart)));
-                half tintLerp = saturate(pow(mask01, _VignetteHardness) * _VignetteStrength);
-
-                // Hard cut to replacement state when fully tinted
-                if (tintLerp >= 0.999h)
-                {
-                    fixed4 cHard = fixed4(darkColor, saturate(darkAlpha));
-                    UNITY_APPLY_FOG(i.fogCoord, cHard);
-                    return cHard;
-                }
-
-                float3 finalCol = lerp(normalColor, darkColor, tintLerp);
-                half alpha = lerp(normalAlpha, darkAlpha, tintLerp);
-
-                fixed4 c = fixed4(finalCol, saturate(alpha));
-                UNITY_APPLY_FOG(i.fogCoord, c);
-                return c;
+                return float4(col, alpha);
             }
             ENDCG
         }
     }
-
-    FallBack Off
 }
