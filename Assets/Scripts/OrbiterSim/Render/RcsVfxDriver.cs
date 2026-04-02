@@ -2,81 +2,106 @@
 using UnityEngine;
 using VRC.SDKBase;
 
+[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class RcsVfxDriver : UdonSharpBehaviour
 {
-    [Header("References")]
+    [Header("Core references")]
     public ThrusterCatalog catalog;
-    public EffectsSyncState effectsSync;         // remote source
-    public ActuationController actuator;         // local owner source (more responsive)
+    public EffectsSyncState effectsSync;
+    public ActuationController actuator;
+    public PersonalShipSoundState personalSound;
 
-    [Header("Local/Remote selection")]
-    [Tooltip("If true and local player owns the craft/effectsSync, prefer actuator.rcsFire01[] for visuals.")]
+    [Header("Source selection")]
+    [Tooltip("If true and local player owns the craft/effectsSync, prefer local actuator values.")]
     public bool preferLocalActuatorWhenOwner = true;
 
-    [Tooltip("If true, remote mask updates are held briefly so short pulses are visible.")]
+    [Header("Remote linger (RCS masks)")]
+    [Tooltip("If true, remote mask updates are held briefly so short pulses are visible/audible.")]
     public bool enableRemoteLinger = true;
 
     [Tooltip("Seconds to hold last-seen remote state after an update.")]
     public float remoteLingerSeconds = 0.20f;
 
-    [Header("Per-thruster VFX (arrays must match catalog.rcsTf length)")]
-    public ParticleSystem[] rcsParticles;
+    // ============================================================
+    // RCS VISUAL PORTS
+    // ============================================================
+    [Header("RCS visual ports")]
+    [Tooltip("Each entry is one visual port/jet. Multiple entries may point to the same logical thruster.")]
+    public ParticleSystem[] rcsPortParticles;
 
-    [Header("Per-thruster Audio (arrays must match catalog.rcsTf length)")]
-    [Tooltip("Looping sustain audio per thruster (same clip can be reused on all).")]
+    [Tooltip("For each visual port, which logical thruster index does it follow?")]
+    public int[] rcsPortThrusterIndex;
+
+    [Header("RCS particle tuning")]
+    [Tooltip("If true, particle emission rate is scaled by LOW/HIGH value. If false, just Play/Stop.")]
+    public bool scaleRcsParticleEmission = true;
+
+    [Tooltip("Emission rate when firing LOW.")]
+    public float rcsLowEmissionRate = 10f;
+
+    [Tooltip("Emission rate when firing HIGH.")]
+    public float rcsHighEmissionRate = 40f;
+
+    [Tooltip("Color used for low mode particles.")]
+    public Color rcsLowColor = new Color(1f, 0.65f, 0.25f, 1f);
+
+    [Tooltip("Color used for high mode particles.")]
+    public Color rcsHighColor = Color.white;
+
+    // ============================================================
+    // RCS AUDIO
+    // ============================================================
+    [Header("RCS sustain audio (per logical thruster)")]
+    [Tooltip("Looping sustain audio per logical thruster.")]
     public AudioSource[] rcsSustain;
 
-    [Tooltip("One-shot wind-down/cutoff audio per thruster (same clip can be reused on all).")]
+    [Tooltip("Optional one-shot on stop per logical thruster.")]
     public AudioSource[] rcsAttack;
 
-    [Header("Audio scaling")]
+    [Header("RCS low-pass filters (per logical thruster)")]
+    [Tooltip("Optional low-pass filter per logical thruster, usually on the sustain source.")]
+    public AudioLowPassFilter[] rcsLowPass;
+
+    [Header("RCS audio tuning")]
     [Tooltip("If true, sustain/attack volumes are scaled by LOW/HIGH intensity.")]
-    public bool scaleAudioVolume = true;
+    public bool scaleRcsAudioVolume = true;
 
-    [Range(0f, 1f)] public float sustainVolLow = 0.35f;
-    [Range(0f, 1f)] public float sustainVolHigh = 1.0f;
+    [Tooltip("If true, play the attack/cutoff sound on a per-thruster falling edge.")]
+    public bool playRcsAttackOnStop = true;
 
-    [Range(0f, 1f)] public float attackVolLow = 0.35f;
-    [Range(0f, 1f)] public float attackVolHigh = 1.0f;
+    [Range(0f, 1f)] public float rcsSustainVolLow = 0.35f;
+    [Range(0f, 1f)] public float rcsSustainVolHigh = 1.0f;
 
-    [Tooltip("If true, play the attack (wind-down) on a per-thruster falling edge (firing -> off).")]
-    public bool playAttackOnStop = true;
+    [Range(0f, 1f)] public float rcsAttackVolLow = 0.35f;
+    [Range(0f, 1f)] public float rcsAttackVolHigh = 1.0f;
 
-    [Header("Drive settings")]
-    [Tooltip("If true, particle emission rate is scaled by LOW/HIGH value. If false, just Play/Stop.")]
-    public bool scaleParticleEmission = true;
+    [Tooltip("Low-pass cutoff for low RCS firing.")]
+    public float rcsLowPassCutoffLow = 1200f;
 
-    [Tooltip("Emission rate when firing HIGH (used if scaleParticleEmission=true).")]
-    public float highEmissionRate = 40f;
+    [Tooltip("Low-pass cutoff for high RCS firing.")]
+    public float rcsLowPassCutoffHigh = 5000f;
 
-    [Tooltip("Emission rate when firing LOW (used if scaleParticleEmission=true).")]
-    public float lowEmissionRate = 10f;
+    [Tooltip("Low-pass cutoff when off.")]
+    public float rcsLowPassCutoffOff = 600f;
 
-    [Header("Output (optional debug)")]
-    [Tooltip("Resolved per-thruster visual fire (0=off, lowScale=low, 1=high).")]
-    public float[] rcsFire01Visual;
+    // ============================================================
+    // MAIN ENGINE VFX
+    // ============================================================
+    [Header("Main engine particle")]
+    public ParticleSystem mainParticle;
 
-    // ------------------------------------------------------------
-    // NEW: Main engine VFX
-    // ------------------------------------------------------------
-    [Header("Main engine VFX (arrays must match catalog.mainTf length)")]
-    [Tooltip("Engine plume particle systems per main engine.")]
-    public ParticleSystem[] mainParticles;
+    [Header("Main engine visual gimbal pivot")]
+    [Tooltip("Optional visual-only gimbal pivot. Recommended: do NOT rotate the physics thruster transform.")]
+    public Transform mainGimbalPivot;
 
-    [Tooltip("Looping sustain audio per main engine.")]
-    public AudioSource[] mainSustain;
-
-    [Tooltip("Optional: visual gimbal pivot per engine. Recommended: do NOT rotate physics thruster Transform.")]
-    public Transform[] mainGimbalPivots;
-
-    [Header("Main engine VFX tuning")]
+    [Header("Main engine particle tuning")]
     [Tooltip("Throttle below this => treat main engine VFX as OFF.")]
     public float mainThrottleDeadband = 0.01f;
 
     [Tooltip("If true, particle emission scales with throttle. If false, Play/Stop only.")]
     public bool scaleMainParticleEmission = true;
 
-    [Tooltip("Emission rate at full throttle (scaleMainParticleEmission=true).")]
+    [Tooltip("Emission rate at full throttle.")]
     public float mainHighEmissionRate = 120f;
 
     [Header("Remote main gimbal smoothing")]
@@ -85,7 +110,55 @@ public class RcsVfxDriver : UdonSharpBehaviour
     [Tooltip("Max degrees/sec to slew remote gimbal angles.")]
     public float remoteGimbalSlewDegPerSec = 120f;
 
-    [Header("Main engine debug (read-only)")]
+    // ============================================================
+    // MAIN ENGINE AUDIO
+    // ============================================================
+    [Header("Main engine audio")]
+    [Tooltip("Startup audio source.")]
+    public AudioSource mainStartAudio;
+
+    [Tooltip("Looping sustain audio source.")]
+    public AudioSource mainLoopAudio;
+
+    [Tooltip("Shutdown audio source.")]
+    public AudioSource mainStopAudio;
+
+    [Header("Main engine low-pass")]
+    [Tooltip("Usually placed on the loop source.")]
+    public AudioLowPassFilter mainLowPass;
+
+    [Header("Main engine audio thresholds")]
+    [Tooltip("Throttle at/above this counts as engine on.")]
+    public float mainAudioOnThreshold = 0.03f;
+
+    [Tooltip("If throttle rises slower than this, skip startup and go straight to loop.")]
+    public float mainStartupRiseRateThreshold = 0.70f;
+
+    [Tooltip("Minimum throttle reached during onset to allow startup sound.")]
+    public float mainStartupMinThrottle = 0.10f;
+
+    [Tooltip("Throttle at/below this counts as engine off.")]
+    public float mainAudioOffThreshold = 0.01f;
+
+    [Header("Main engine audio tuning")]
+    [Range(0f, 1f)] public float mainBaseVolume = 1.0f;
+    [Range(0f, 1f)] public float mainLoopVolumeMin = 0.15f;
+    [Range(0f, 1f)] public float mainLoopVolumeMax = 1.0f;
+    [Range(0f, 1f)] public float mainStartupVolume = 1.0f;
+    [Range(0f, 1f)] public float mainShutdownVolume = 1.0f;
+
+    [Header("Main engine low-pass tuning")]
+    public float mainLowPassCutoffMin = 800f;
+    public float mainLowPassCutoffMax = 22000f;
+
+    // ============================================================
+    // DEBUG / OUTPUT
+    // ============================================================
+    [Header("Resolved RCS output")]
+    [Tooltip("Resolved per-thruster visual fire (0=off, lowScale=low, 1=high).")]
+    public float[] rcsFire01Visual;
+
+    [Header("Resolved main output")]
     [Tooltip("Resolved main throttle for visuals (0..1).")]
     public float mainThrottleVisual01;
 
@@ -95,26 +168,44 @@ public class RcsVfxDriver : UdonSharpBehaviour
     [Tooltip("Resolved shared main gimbal pitch (deg) for visuals.")]
     public float mainPitchVisualDeg;
 
-    [Tooltip("Resolved main on-mask (bit i => engine i on).")]
-    public uint mainOnMaskVisual;
+    [Tooltip("Resolved main on state for visuals.")]
+    public bool mainIsOnVisual;
 
-    // Remote linger bookkeeping (RCS)
-    private uint _lastHi, _lastLo, _lastSeq;
+    // ============================================================
+    // INTERNAL STATE
+    // ============================================================
+    private uint _lastHi;
+    private uint _lastLo;
+    private uint _lastSeq;
     private float _lingerT;
 
-    // Per-thruster edge detection (for attack sound)
-    private bool[] _prevFiring;
-    private float[] _prevIntensity;
+    private bool[] _prevRcsFiring;
+    private float[] _prevRcsIntensity;
 
-    // Remote smoothing state (main gimbal)
-    private float _mainYawCurDeg = 0f;
-    private float _mainPitchCurDeg = 0f;
+    private float _mainYawCurDeg;
+    private float _mainPitchCurDeg;
+
+    private float _mainPrevThrottle;
+    private bool _mainWasOn;
+    private int _mainAudioState;
+
+    private const int MAIN_AUDIO_OFF = 0;
+    private const int MAIN_AUDIO_STARTUP = 1;
+    private const int MAIN_AUDIO_LOOP = 2;
+    private const int MAIN_AUDIO_SHUTDOWN = 3;
 
     void Start()
     {
         EnsureArrays();
         _lingerT = 0f;
-        _lastHi = _lastLo = _lastSeq = 0u;
+        _lastHi = 0u;
+        _lastLo = 0u;
+        _lastSeq = 0u;
+        _mainPrevThrottle = 0f;
+        _mainWasOn = false;
+        _mainAudioState = MAIN_AUDIO_OFF;
+
+        if (mainLoopAudio != null) mainLoopAudio.loop = true;
     }
 
     void Update()
@@ -126,31 +217,19 @@ public class RcsVfxDriver : UdonSharpBehaviour
     {
         if (catalog == null) return;
 
-        // -------------------------
-        // Decide data source
-        // -------------------------
         bool useLocalActuator = false;
         if (preferLocalActuatorWhenOwner && actuator != null)
         {
-            if (effectsSync != null)
-                useLocalActuator = Networking.IsOwner(effectsSync.gameObject);
-            else
-                useLocalActuator = Networking.IsOwner(actuator.gameObject);
+            if (effectsSync != null) useLocalActuator = Networking.IsOwner(effectsSync.gameObject);
+            else useLocalActuator = Networking.IsOwner(actuator.gameObject);
         }
 
-        // -------------------------
-        // RCS VISUALS (existing)
-        // -------------------------
         ApplyRcs(useLocalActuator);
-
-        // -------------------------
-        // MAIN ENGINE VISUALS (new)
-        // -------------------------
-        ApplyMains(useLocalActuator);
+        ApplyMain(useLocalActuator);
     }
 
     // ============================================================
-    // RCS SECTION (unchanged behavior, just moved into a method)
+    // RCS
     // ============================================================
     private void ApplyRcs(bool useLocalActuator)
     {
@@ -163,7 +242,6 @@ public class RcsVfxDriver : UdonSharpBehaviour
 
         if (useLocalActuator && actuator != null && actuator.rcsFire01 != null)
         {
-            // Direct, most responsive
             for (int i = 0; i < n; i++)
             {
                 float f = (i < actuator.rcsFire01.Length) ? actuator.rcsFire01[i] : 0f;
@@ -172,8 +250,9 @@ public class RcsVfxDriver : UdonSharpBehaviour
         }
         else
         {
-            // Remote: derive from masks, with optional linger
-            uint hi = 0u, lo = 0u, seq = 0u;
+            uint hi = 0u;
+            uint lo = 0u;
+            uint seq = 0u;
 
             if (effectsSync != null)
             {
@@ -182,9 +261,8 @@ public class RcsVfxDriver : UdonSharpBehaviour
                 seq = effectsSync.seq;
             }
 
-            lo &= ~hi; // HI wins
+            lo &= ~hi;
 
-            // Update linger state on change
             if (seq != _lastSeq || hi != _lastHi || lo != _lastLo)
             {
                 _lastSeq = seq;
@@ -213,70 +291,105 @@ public class RcsVfxDriver : UdonSharpBehaviour
             for (int i = 0; i < limit; i++)
             {
                 bool high = (useHi & (1u << i)) != 0u;
-                bool low  = (useLo & (1u << i)) != 0u;
+                bool low = (useLo & (1u << i)) != 0u;
 
                 rcsFire01Visual[i] = high ? 1f : (low ? lowScale : 0f);
             }
         }
 
-        // Drive actual effects per thruster (particle + audio)
         for (int i = 0; i < n; i++)
         {
             float f = rcsFire01Visual[i];
             bool firing = f > 0f;
 
+            DriveRcsAudio(i, firing, f, lowScale);
+
+            _prevRcsFiring[i] = firing;
+            _prevRcsIntensity[i] = f;
+        }
+
+        ApplyRcsPorts(lowScale);
+    }
+
+    private void ApplyRcsPorts(float lowScale)
+    {
+        if (rcsPortParticles == null || rcsPortThrusterIndex == null) return;
+
+        int count = rcsPortParticles.Length;
+        if (rcsPortThrusterIndex.Length < count) count = rcsPortThrusterIndex.Length;
+
+        for (int i = 0; i < count; i++)
+        {
+            ParticleSystem ps = rcsPortParticles[i];
+            if (ps == null) continue;
+
+            int thrusterIndex = rcsPortThrusterIndex[i];
+            if (thrusterIndex < 0 || rcsFire01Visual == null || thrusterIndex >= rcsFire01Visual.Length)
+            {
+                StopParticle(ps);
+                continue;
+            }
+
+            float f = rcsFire01Visual[thrusterIndex];
             bool isHigh = f >= 0.999f;
-            bool isLow = (!isHigh && firing);
+            bool isLow = (!isHigh && f > 0f);
 
-            DriveParticle(i, isHigh, isLow);
-            DriveThrusterAudio(i, firing, f, lowScale);
-
-            _prevFiring[i] = firing;
-            _prevIntensity[i] = f;
+            DriveRcsPortParticle(ps, isHigh, isLow, lowScale);
         }
     }
 
-    private void DriveParticle(int i, bool isHigh, bool isLow)
+    private void DriveRcsPortParticle(ParticleSystem ps, bool isHigh, bool isLow, float lowScale)
     {
-        if (rcsParticles == null || i >= rcsParticles.Length) return;
-        ParticleSystem ps = rcsParticles[i];
-        if (ps == null) return;
-
-        if (!scaleParticleEmission)
+        if (!scaleRcsParticleEmission)
         {
             bool shouldPlay = isHigh || isLow;
             if (shouldPlay)
             {
+                ApplyParticleColor(ps, isHigh ? rcsHighColor : rcsLowColor);
                 if (!ps.isPlaying) ps.Play(true);
             }
             else
             {
-                if (ps.isPlaying) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+                StopParticle(ps);
             }
             return;
         }
 
-        var em = ps.emission;
+        ParticleSystem.EmissionModule em = ps.emission;
         float rate = 0f;
-        if (isHigh) rate = highEmissionRate;
-        else if (isLow) rate = lowEmissionRate;
+        if (isHigh) rate = rcsHighEmissionRate;
+        else if (isLow) rate = rcsLowEmissionRate;
 
         em.rateOverTimeMultiplier = rate;
 
         if (rate > 0f)
         {
+            ApplyParticleColor(ps, isHigh ? rcsHighColor : rcsLowColor);
             if (!ps.isPlaying) ps.Play(true);
         }
         else
         {
-            if (ps.isPlaying) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+            StopParticle(ps);
         }
     }
 
-    private void DriveThrusterAudio(int i, bool firing, float intensity01, float lowScale)
+    private void ApplyParticleColor(ParticleSystem ps, Color c)
     {
-        bool wasFiring = (_prevFiring != null && i < _prevFiring.Length) ? _prevFiring[i] : false;
-        float prevIntensity = (_prevIntensity != null && i < _prevIntensity.Length) ? _prevIntensity[i] : 0f;
+        ParticleSystem.MainModule main = ps.main;
+        main.startColor = c;
+    }
+
+    private void StopParticle(ParticleSystem ps)
+    {
+        if (ps.isPlaying) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+    }
+
+    private void DriveRcsAudio(int i, bool firing, float intensity01, float lowScale)
+    {
+        bool wasFiring = (_prevRcsFiring != null && i < _prevRcsFiring.Length) ? _prevRcsFiring[i] : false;
+        float prevIntensity = (_prevRcsIntensity != null && i < _prevRcsIntensity.Length) ? _prevRcsIntensity[i] : 0f;
+
+        float gain = GetEffectiveRcsGain();
 
         // Sustain
         if (rcsSustain != null && i < rcsSustain.Length && rcsSustain[i] != null)
@@ -287,35 +400,287 @@ public class RcsVfxDriver : UdonSharpBehaviour
             {
                 if (!a.isPlaying) a.Play();
 
-                if (scaleAudioVolume)
-                {
-                    float v = MapIntensityToVolume(intensity01, lowScale, sustainVolLow, sustainVolHigh);
-                    a.volume = v;
-                }
+                float baseVol = 1f;
+                if (scaleRcsAudioVolume)
+                    baseVol = MapIntensityToVolume(intensity01, lowScale, rcsSustainVolLow, rcsSustainVolHigh);
+
+                a.volume = Mathf.Clamp01(baseVol * gain);
             }
             else
             {
                 if (a.isPlaying) a.Stop();
+                a.volume = 0f;
             }
         }
 
+        // Low-pass
+        if (rcsLowPass != null && i < rcsLowPass.Length && rcsLowPass[i] != null)
+        {
+            AudioLowPassFilter lp = rcsLowPass[i];
+
+            if (!firing) lp.cutoffFrequency = rcsLowPassCutoffOff;
+            else if (intensity01 >= 0.999f) lp.cutoffFrequency = rcsLowPassCutoffHigh;
+            else lp.cutoffFrequency = rcsLowPassCutoffLow;
+        }
+
         // Attack on stop
-        if (playAttackOnStop && wasFiring && !firing)
+        if (playRcsAttackOnStop && wasFiring && !firing)
         {
             if (rcsAttack != null && i < rcsAttack.Length && rcsAttack[i] != null)
             {
                 AudioSource a = rcsAttack[i];
 
-                if (scaleAudioVolume)
-                {
-                    float v = MapIntensityToVolume(prevIntensity, lowScale, attackVolLow, attackVolHigh);
-                    a.volume = v;
-                }
+                float baseVol = 1f;
+                if (scaleRcsAudioVolume)
+                    baseVol = MapIntensityToVolume(prevIntensity, lowScale, rcsAttackVolLow, rcsAttackVolHigh);
 
+                a.volume = Mathf.Clamp01(baseVol * gain);
                 a.Stop();
                 a.Play();
             }
         }
+    }
+
+    // ============================================================
+    // MAIN ENGINE
+    // ============================================================
+    private void ApplyMain(bool useLocalActuator)
+    {
+        float throttle01 = 0f;
+        float yawDeg = 0f;
+        float pitchDeg = 0f;
+        bool engineOn = false;
+
+        if (useLocalActuator && actuator != null)
+        {
+            if (actuator.cmd != null) throttle01 = Mathf.Clamp01(actuator.cmd.mainThrottle01);
+
+            if (actuator.mainGimbalYawDeg != null && actuator.mainGimbalYawDeg.Length > 0)
+                yawDeg = actuator.mainGimbalYawDeg[0];
+
+            if (actuator.mainGimbalPitchDeg != null && actuator.mainGimbalPitchDeg.Length > 0)
+                pitchDeg = actuator.mainGimbalPitchDeg[0];
+
+            engineOn = throttle01 > mainThrottleDeadband;
+        }
+        else
+        {
+            if (effectsSync != null)
+            {
+                throttle01 = effectsSync.mainThrottle255 / 255f;
+                yawDeg = effectsSync.mainYaw_cdeg / 100f;
+                pitchDeg = effectsSync.mainPitch_cdeg / 100f;
+            }
+
+            engineOn = throttle01 > mainThrottleDeadband;
+        }
+
+        mainThrottleVisual01 = throttle01;
+        mainYawVisualDeg = yawDeg;
+        mainPitchVisualDeg = pitchDeg;
+        mainIsOnVisual = engineOn;
+
+        // Optional smoothing for remote gimbal
+        if (!useLocalActuator && smoothRemoteGimbal)
+        {
+            float dt = Time.deltaTime;
+            if (dt < 0f) dt = 0f;
+
+            float maxStep = remoteGimbalSlewDegPerSec * dt;
+
+            _mainYawCurDeg = Mathf.MoveTowards(_mainYawCurDeg, yawDeg, maxStep);
+            _mainPitchCurDeg = Mathf.MoveTowards(_mainPitchCurDeg, pitchDeg, maxStep);
+
+            yawDeg = _mainYawCurDeg;
+            pitchDeg = _mainPitchCurDeg;
+
+            mainYawVisualDeg = yawDeg;
+            mainPitchVisualDeg = pitchDeg;
+        }
+        else
+        {
+            _mainYawCurDeg = yawDeg;
+            _mainPitchCurDeg = pitchDeg;
+        }
+
+        DriveMainParticle(engineOn, throttle01);
+        DriveMainAudio(throttle01);
+        DriveMainGimbalPivot(yawDeg, pitchDeg);
+    }
+
+    private void DriveMainParticle(bool on, float throttle01)
+    {
+        if (mainParticle == null) return;
+
+        if (!scaleMainParticleEmission)
+        {
+            if (on)
+            {
+                if (!mainParticle.isPlaying) mainParticle.Play(true);
+            }
+            else
+            {
+                if (mainParticle.isPlaying) mainParticle.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+            }
+            return;
+        }
+
+        ParticleSystem.EmissionModule em = mainParticle.emission;
+        float rate = on ? Mathf.Lerp(0f, mainHighEmissionRate, Mathf.Clamp01(throttle01)) : 0f;
+        em.rateOverTimeMultiplier = rate;
+
+        if (rate > 0f)
+        {
+            if (!mainParticle.isPlaying) mainParticle.Play(true);
+        }
+        else
+        {
+            if (mainParticle.isPlaying) mainParticle.Stop(true, ParticleSystemStopBehavior.StopEmitting);
+        }
+    }
+
+    private void DriveMainAudio(float throttle01)
+    {
+        float dt = Time.deltaTime;
+        if (dt <= 0f) dt = 0.0001f;
+
+        float gain = GetEffectiveEngineGain();
+        bool isOnNow = throttle01 >= mainAudioOnThreshold;
+        bool isOffNow = throttle01 <= mainAudioOffThreshold;
+
+        float riseRate = (throttle01 - _mainPrevThrottle) / dt;
+        bool shouldPlayStartup = (!_mainWasOn && isOnNow &&
+                                  riseRate >= mainStartupRiseRateThreshold &&
+                                  throttle01 >= mainStartupMinThrottle);
+
+        // Transition on
+        if (!_mainWasOn && isOnNow)
+        {
+            if (shouldPlayStartup)
+            {
+                StopIfPlaying(mainStopAudio);
+
+                if (mainStartAudio != null)
+                {
+                    mainStartAudio.volume = Mathf.Clamp01(mainStartupVolume * mainBaseVolume * gain);
+                    mainStartAudio.Stop();
+                    mainStartAudio.Play();
+                }
+
+                if (mainLoopAudio != null)
+                {
+                    mainLoopAudio.volume = Mathf.Clamp01(Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, throttle01) * mainBaseVolume * gain);
+                    if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+                }
+
+                _mainAudioState = MAIN_AUDIO_STARTUP;
+            }
+            else
+            {
+                StopIfPlaying(mainStartAudio);
+                StopIfPlaying(mainStopAudio);
+
+                if (mainLoopAudio != null)
+                {
+                    mainLoopAudio.volume = Mathf.Clamp01(Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, throttle01) * mainBaseVolume * gain);
+                    if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+                }
+
+                _mainAudioState = MAIN_AUDIO_LOOP;
+            }
+        }
+
+        // While on
+        if (isOnNow)
+        {
+            if (mainLoopAudio != null)
+            {
+                float loopVol = Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, Mathf.Clamp01(throttle01));
+                mainLoopAudio.volume = Mathf.Clamp01(loopVol * mainBaseVolume * gain);
+
+                if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+            }
+
+            if (mainLowPass != null)
+            {
+                float cutoff = Mathf.Lerp(mainLowPassCutoffMin, mainLowPassCutoffMax, Mathf.Clamp01(throttle01));
+                mainLowPass.cutoffFrequency = cutoff;
+            }
+
+            if (_mainAudioState == MAIN_AUDIO_STARTUP && mainStartAudio != null)
+            {
+                if (!mainStartAudio.isPlaying) _mainAudioState = MAIN_AUDIO_LOOP;
+            }
+            else if (_mainAudioState != MAIN_AUDIO_STARTUP)
+            {
+                _mainAudioState = MAIN_AUDIO_LOOP;
+            }
+        }
+
+        // Transition off
+        if (_mainWasOn && isOffNow)
+        {
+            StopIfPlaying(mainStartAudio);
+            StopIfPlaying(mainLoopAudio);
+
+            if (mainStopAudio != null)
+            {
+                mainStopAudio.volume = Mathf.Clamp01(mainShutdownVolume * mainBaseVolume * gain);
+                mainStopAudio.Stop();
+                mainStopAudio.Play();
+            }
+
+            if (mainLowPass != null)
+                mainLowPass.cutoffFrequency = mainLowPassCutoffMin;
+
+            _mainAudioState = MAIN_AUDIO_SHUTDOWN;
+        }
+
+        // Fully off
+        if (!isOnNow && !_mainWasOn)
+        {
+            StopIfPlaying(mainStartAudio);
+            StopIfPlaying(mainLoopAudio);
+
+            if (mainLowPass != null)
+                mainLowPass.cutoffFrequency = mainLowPassCutoffMin;
+
+            if (_mainAudioState != MAIN_AUDIO_SHUTDOWN || (mainStopAudio != null && !mainStopAudio.isPlaying))
+                _mainAudioState = MAIN_AUDIO_OFF;
+        }
+
+        _mainWasOn = isOnNow;
+        _mainPrevThrottle = throttle01;
+    }
+
+    private void DriveMainGimbalPivot(float yawDeg, float pitchDeg)
+    {
+        if (mainGimbalPivot == null) return;
+
+        Quaternion qYaw = Quaternion.AngleAxis(yawDeg, Vector3.up);
+        Quaternion qPitch = Quaternion.AngleAxis(pitchDeg, Vector3.right);
+
+        mainGimbalPivot.localRotation = qYaw * qPitch;
+    }
+
+    private void StopIfPlaying(AudioSource a)
+    {
+        if (a != null && a.isPlaying) a.Stop();
+    }
+
+    // ============================================================
+    // HELPERS
+    // ============================================================
+    private float GetEffectiveEngineGain()
+    {
+        if (personalSound == null) return 1f;
+        return Mathf.Clamp01(personalSound.GetEffectiveEngineGain());
+    }
+
+    private float GetEffectiveRcsGain()
+    {
+        if (personalSound == null) return 1f;
+        return Mathf.Clamp01(personalSound.GetEffectiveRcsGain());
     }
 
     private float MapIntensityToVolume(float intensity01, float lowScale, float volAtLow, float volAtHigh)
@@ -343,192 +708,24 @@ public class RcsVfxDriver : UdonSharpBehaviour
         return 0f;
     }
 
-    // ============================================================
-    // MAIN ENGINE SECTION (new)
-    // ============================================================
-    private void ApplyMains(bool useLocalActuator)
-    {
-        int nMain = (catalog.mainTf != null) ? catalog.mainTf.Length : 0;
-        if (nMain <= 0) return;
-
-        // --- Resolve main throttle + gimbal angles + on-mask ---
-        float throttle01 = 0f;
-        float yawDeg = 0f;
-        float pitchDeg = 0f;
-        uint onMask = 0u;
-
-        if (useLocalActuator && actuator != null)
-        {
-            // Owner-local: most responsive
-            if (actuator.cmd != null) throttle01 = Mathf.Clamp01(actuator.cmd.mainThrottle01);
-
-            // Actuator provides per-engine gimbal arrays; symmetric => take [0] if present
-            if (actuator.mainGimbalYawDeg != null && actuator.mainGimbalYawDeg.Length > 0)
-                yawDeg = actuator.mainGimbalYawDeg[0];
-            if (actuator.mainGimbalPitchDeg != null && actuator.mainGimbalPitchDeg.Length > 0)
-                pitchDeg = actuator.mainGimbalPitchDeg[0];
-
-            // On mask: if you haven't implemented per-engine starve mask yet,
-            // treat all engines as on when throttled.
-            if (throttle01 > mainThrottleDeadband)
-            {
-                int limit = (nMain > 32) ? 32 : nMain;
-                for (int i = 0; i < limit; i++) onMask |= (1u << i);
-            }
-        }
-        else
-        {
-            // Remote: from synced packed fields
-            if (effectsSync != null)
-            {
-                throttle01 = effectsSync.mainThrottle255 / 255f;
-                yawDeg = effectsSync.mainYaw_cdeg / 100f;
-                pitchDeg = effectsSync.mainPitch_cdeg / 100f;
-                onMask = effectsSync.mainOnMask;
-            }
-        }
-
-        // Save debug outputs
-        mainThrottleVisual01 = throttle01;
-        mainYawVisualDeg = yawDeg;
-        mainPitchVisualDeg = pitchDeg;
-        mainOnMaskVisual = onMask;
-
-        // Optional smoothing for remote gimbal
-        if (!useLocalActuator && smoothRemoteGimbal)
-        {
-            float dt = Time.deltaTime;
-            if (dt < 0f) dt = 0f;
-
-            float maxStep = remoteGimbalSlewDegPerSec * dt;
-
-            _mainYawCurDeg = Mathf.MoveTowards(_mainYawCurDeg, yawDeg, maxStep);
-            _mainPitchCurDeg = Mathf.MoveTowards(_mainPitchCurDeg, pitchDeg, maxStep);
-
-            yawDeg = _mainYawCurDeg;
-            pitchDeg = _mainPitchCurDeg;
-
-            // update debug to show smoothed
-            mainYawVisualDeg = yawDeg;
-            mainPitchVisualDeg = pitchDeg;
-        }
-        else
-        {
-            _mainYawCurDeg = yawDeg;
-            _mainPitchCurDeg = pitchDeg;
-        }
-
-        // --- Drive per-engine particles/audio/gimbal pivots ---
-        bool anyThrottle = throttle01 > mainThrottleDeadband;
-
-        int limitMask = (nMain > 32) ? 32 : nMain;
-
-        for (int i = 0; i < nMain; i++)
-        {
-            bool engineOn;
-            if (i < limitMask)
-            {
-                // If no mask is being sent (0), fall back to throttle-driven on.
-                if (onMask == 0u) engineOn = anyThrottle;
-                else engineOn = anyThrottle && ((onMask & (1u << i)) != 0u);
-            }
-            else
-            {
-                engineOn = anyThrottle; // beyond 32, no bit
-            }
-
-            DriveMainParticles(i, engineOn, throttle01);
-            DriveMainAudio(i, engineOn, throttle01);
-            DriveMainGimbalPivot(i, yawDeg, pitchDeg);
-        }
-    }
-
-    private void DriveMainParticles(int i, bool on, float throttle01)
-    {
-        if (mainParticles == null || i >= mainParticles.Length) return;
-        ParticleSystem ps = mainParticles[i];
-        if (ps == null) return;
-
-        if (!scaleMainParticleEmission)
-        {
-            if (on)
-            {
-                if (!ps.isPlaying) ps.Play(true);
-            }
-            else
-            {
-                if (ps.isPlaying) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
-            }
-            return;
-        }
-
-        var em = ps.emission;
-        float rate = on ? Mathf.Lerp(0f, mainHighEmissionRate, Mathf.Clamp01(throttle01)) : 0f;
-        em.rateOverTimeMultiplier = rate;
-
-        if (rate > 0f)
-        {
-            if (!ps.isPlaying) ps.Play(true);
-        }
-        else
-        {
-            if (ps.isPlaying) ps.Stop(true, ParticleSystemStopBehavior.StopEmitting);
-        }
-    }
-
-    private void DriveMainAudio(int i, bool on, float throttle01)
-    {
-        if (mainSustain == null || i >= mainSustain.Length) return;
-        AudioSource a = mainSustain[i];
-        if (a == null) return;
-
-        if (on)
-        {
-            if (!a.isPlaying) a.Play();
-            // Scale volume by throttle (simple + effective)
-            a.volume = Mathf.Clamp01(throttle01);
-        }
-        else
-        {
-            if (a.isPlaying) a.Stop();
-        }
-    }
-
-    private void DriveMainGimbalPivot(int i, float yawDeg, float pitchDeg)
-    {
-        if (mainGimbalPivots == null || i >= mainGimbalPivots.Length) return;
-        Transform piv = mainGimbalPivots[i];
-        if (piv == null) return;
-
-        // Visual convention: yaw about local +Y, pitch about local +X.
-        // Author the pivot so these match your intended axes.
-        Quaternion qYaw = Quaternion.AngleAxis(yawDeg, Vector3.up);
-        Quaternion qPitch = Quaternion.AngleAxis(pitchDeg, Vector3.right);
-
-        piv.localRotation = qYaw * qPitch;
-    }
-
-    // ============================================================
-    // ARRAY MANAGEMENT
-    // ============================================================
     private void EnsureArrays()
     {
         int n = (catalog != null && catalog.rcsTf != null) ? catalog.rcsTf.Length : 0;
         if (n <= 0)
         {
             rcsFire01Visual = null;
-            _prevFiring = null;
-            _prevIntensity = null;
+            _prevRcsFiring = null;
+            _prevRcsIntensity = null;
             return;
         }
 
         if (rcsFire01Visual == null || rcsFire01Visual.Length != n)
             rcsFire01Visual = new float[n];
 
-        if (_prevFiring == null || _prevFiring.Length != n)
-            _prevFiring = new bool[n];
+        if (_prevRcsFiring == null || _prevRcsFiring.Length != n)
+            _prevRcsFiring = new bool[n];
 
-        if (_prevIntensity == null || _prevIntensity.Length != n)
-            _prevIntensity = new float[n];
+        if (_prevRcsIntensity == null || _prevRcsIntensity.Length != n)
+            _prevRcsIntensity = new float[n];
     }
 }
