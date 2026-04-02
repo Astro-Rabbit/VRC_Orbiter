@@ -50,6 +50,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public TMP_Text output;
     public GameObject continueButton;
 
+
+    public RendezvousTutorialVideoController videoController;
+    private int lastClip = -1;
+
     [Header("Settings")]
     public int targetIndex = 2;
 
@@ -92,24 +96,38 @@ public class RendezvousTutorial : UdonSharpBehaviour
         Reset();
     }
 
-    void Update()
+    void LateUpdate()
     {
         UpdateStickyConditions();
 
         clip = SelectClip();
-        output.text = ((RendezvousTutorialClip)clip).ToString();
 
-        switch (clip) {
-        case (int)RendezvousTutorialClip.Intro:
-        case (int)RendezvousTutorialClip.AlignInfo:
-        case (int)RendezvousTutorialClip.TransferInfo:
-        case (int)RendezvousTutorialClip.MatchInfo:
-            continueButton.SetActive(true);
-            break;
-        default:
-            continueButton.SetActive(false);
-            break;
+        if (output != null) {
+            output.text = ((RendezvousTutorialClip)clip).ToString();
         }
+
+        if (continueButton != null) {
+            switch (clip) {
+            case (int)RendezvousTutorialClip.Intro:
+            case (int)RendezvousTutorialClip.AlignInfo:
+            case (int)RendezvousTutorialClip.TransferInfo:
+            case (int)RendezvousTutorialClip.MatchInfo:
+                continueButton.SetActive(true);
+                break;
+            default:
+                continueButton.SetActive(false);
+                break;
+            }
+        }
+
+        if (clip != lastClip) {
+            if (videoController != null) {
+                videoController.PlayClip((RendezvousTutorialClip)clip, false);
+            }
+            lastClip = clip;
+        }
+
+
     }
 
     private int SelectClip()
@@ -130,17 +148,34 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
 
             if (velocityMatched) {
-                if (gc.intent.mainThrottle01 > 0) {
+                float mainThrottle = 0f;
+                int activeProgramId = -1;
+
+                if (gc != null && gc.intent != null) {
+                    mainThrottle = gc.intent.mainThrottle01;
+                }
+                if (gc != null && gc.runtime != null) {
+                    activeProgramId = gc.runtime.activeProgramId;
+                }
+
+                if (mainThrottle > 0f) {
                     return (int)RendezvousTutorialClip.FinishBurn;
                 }
-                if (!pointingDir || gc.runtime.activeProgramId != GC_RuntimeState.PROG_DOCK_POINT_PORT) {
+                if (!pointingDir || activeProgramId != GC_RuntimeState.PROG_DOCK_POINT_PORT) {
                     return (int)RendezvousTutorialClip.TargetDir;
                 }
                 return (int)RendezvousTutorialClip.TargetBurn;
             }
 
-            if (!pointingDir || gc.runtime.activeProgramId != GC_RuntimeState.PROG_RELVEL_RETRO) {
-                return (int)RendezvousTutorialClip.MatchDir;
+            {
+                int activeProgramId = -1;
+                if (gc != null && gc.runtime != null) {
+                    activeProgramId = gc.runtime.activeProgramId;
+                }
+
+                if (!pointingDir || activeProgramId != GC_RuntimeState.PROG_RELVEL_RETRO) {
+                    return (int)RendezvousTutorialClip.MatchDir;
+                }
             }
             return (int)RendezvousTutorialClip.MatchBurn;
         }
@@ -172,13 +207,25 @@ public class RendezvousTutorial : UdonSharpBehaviour
             if (!readyTransfer) {
                 return (int)RendezvousTutorialClip.TransferInfo;
             }
-            if (!transferPage.solver.autoValid) {
+
+            bool autoValid = false;
+            if (transferPage != null && transferPage.solver != null) {
+                autoValid = transferPage.solver.autoValid;
+            }
+
+            if (!autoValid) {
                 return (int)RendezvousTutorialClip.TransferCalc;
             }
             if (!hasTransferNode) {
                 return (int)RendezvousTutorialClip.TransferNode;
             }
-            if (!gc.runtime.autoExecuteArmedNodes) {
+
+            bool autoExecuteArmedNodes = false;
+            if (gc != null && gc.runtime != null) {
+                autoExecuteArmedNodes = gc.runtime.autoExecuteArmedNodes;
+            }
+
+            if (!autoExecuteArmedNodes) {
                 return (int)RendezvousTutorialClip.NodeAuto;
             }
             if (!executing) {
@@ -213,9 +260,18 @@ public class RendezvousTutorial : UdonSharpBehaviour
         if (!hasAlignNode) {
             return (int)RendezvousTutorialClip.AlignNode;
         }
-        if (!gc.runtime.autoExecuteArmedNodes) {
-            return (int)RendezvousTutorialClip.NodeAuto;
+
+        {
+            bool autoExecuteArmedNodes = false;
+            if (gc != null && gc.runtime != null) {
+                autoExecuteArmedNodes = gc.runtime.autoExecuteArmedNodes;
+            }
+
+            if (!autoExecuteArmedNodes) {
+                return (int)RendezvousTutorialClip.NodeAuto;
+            }
         }
+
         if (!executing) {
             return (int)RendezvousTutorialClip.NodeTime;
         }
@@ -224,7 +280,12 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
     private bool PageOpened(MFDPage page)
     {
+        if (page == null || mfds == null) {
+            return false;
+        }
+
         for (int i = 0; i < mfds.Length; i++) {
+            if (mfds[i] == null) continue;
             if (mfds[i].currentPage == page) {
                 return true;
             }
@@ -236,12 +297,24 @@ public class RendezvousTutorial : UdonSharpBehaviour
     // Conditions based on continuous variables that need hysteresis on their threshold are updated here
     void UpdateStickyConditions()
     {
-        double time = clock.simTime;
-        correctTarget = navContactsState.selectedStationIndex == targetIndex;
-        execPhase = gc.runtime.executorPhase;
+        double time = 0.0;
+        if (clock != null) {
+            time = clock.Now();
+        }
+
+        correctTarget = false;
+        if (navContactsState != null) {
+            correctTarget = navContactsState.selectedStationIndex == targetIndex;
+        }
+
+        execPhase = GC_RuntimeState.EXEC_PHASE_NONE;
+        if (gc != null && gc.runtime != null) {
+            execPhase = gc.runtime.executorPhase;
+        }
+
         bool execDone = execPhase == GC_RuntimeState.EXEC_PHASE_NONE || execPhase == GC_RuntimeState.EXEC_PHASE_POST;
 
-        if (alignPage.hasTarget && correctTarget && execDone) {
+        if (alignPage != null && alignPage.hasTarget && correctTarget && execDone) {
             double inclination = 180.0 / Math.PI * alignPage.inclination;
             if (inclination < alignInLim) {
                 planeAligned = true;
@@ -263,7 +336,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
             onFlyby = false;
         }
 
-        if (dockingPage.hasTarget && correctTarget && execDone) {
+        if (dockingPage != null && dockingPage.hasTarget && correctTarget && execDone) {
             if (dockingPage.range < proximityInLim) {
                 proximity = true;
             } else if (dockingPage.range > proximityOutLim) {
@@ -277,14 +350,17 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
         }
 
-        float dirErr = (float)(180.0 / Math.PI) * pd.attErr_B.magnitude;
+        float dirErr = 999999f;
+        if (pd != null) {
+            dirErr = (float)(180.0 / Math.PI) * pd.attErr_B.magnitude;
+        }
+
         if (dirErr < dirInLim) {
             pointingDir = true;
         } else if (dirErr > dirOutLim) {
             pointingDir = false;
         }
     }
-
     public void OnAlignNodeCreate(double time)
     {
         hasAlignNode = true;
@@ -313,6 +389,14 @@ public class RendezvousTutorial : UdonSharpBehaviour
         readyAlign = false;
         readyTransfer = false;
         readyMatch = false;
+
+        lastClip = -1;
+
+        if (videoController != null) {
+            videoController.StopPlayback();
+        }
+
+
     }
 
     public void Continue()
@@ -338,6 +422,9 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
     public void Replay()
     {
+        if (videoController != null) {
+            videoController.PlayClip((RendezvousTutorialClip)clip, true);
+        }
     }
 }
 

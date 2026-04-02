@@ -12,6 +12,12 @@ Target,
 Align,
 Transfer,
 Dock,
+Node,
+Map,
+SystemsMenu,
+SystemsForces,
+SystemsCrew,
+SystemsPdLimits,
 }
 
 public class MFDCore : UdonSharpBehaviour

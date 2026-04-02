@@ -659,12 +659,12 @@ public class SimManager : UdonSharpBehaviour
 
             if (craft != null && actuation != null)
             {
-                double dProp = actuation.mainMdot_kgps * rem;
-                if (dProp > 0.0)
-                {
-                    craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
-                    craft.RecomputeMass();
-                }
+                // double dProp = actuation.mainMdot_kgps * rem;
+                // if (dProp > 0.0)
+                // {
+                //     craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
+                //     craft.RecomputeMass();
+                // }
             }
 
             if (numeric != null && actuation != null)

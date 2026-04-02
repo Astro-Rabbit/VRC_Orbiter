@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: Orbiter_CanopyGlass_Base
-  m_Shader: {fileID: 4800000, guid: f91ef7a950d1c2e478ee5363e76b33e5, type: 3}
+  m_Shader: {fileID: 4800000, guid: fd05ee6ec6dc954418e8b82618bd0984, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -35,32 +35,72 @@ Material:
         m_Texture: {fileID: 2800000, guid: 93139238ad8e1904d8c1a180c10bd5e8, type: 3}
         m_Scale: {x: 18, y: 54}
         m_Offset: {x: 0, y: 0}
+    - _SkyOverlayTex:
+        m_Texture: {fileID: 2800000, guid: 11f4fb8e8b080e748bbca77c027db5ae, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkyOverlayTex1:
+        m_Texture: {fileID: 2800000, guid: cbc3cdceeaea68f4bb912fa14458843f, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _SkyOverlayTex2:
+        m_Texture: {fileID: 2800000, guid: 9d43c56c61734204a96a01570b7f0e8f, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
     - _AlphaFresnelBoost: 0.08
     - _BaseAlpha: 0
     - _DarkFinalAlpha: 1
     - _DarkFresnelStrength: 0.21
-    - _DarkReflectStrength: 0.09
+    - _DarkReflectStrength: 0.491
     - _DetailNormalStrength: 0
     - _DetailTiling: 6
     - _EdgeDarken: 0.145
     - _FresnelPower: 5.5
     - _FresnelStrength: 0.5
-    - _GridEdgeBias: 1.01
+    - _GridEdgeBias: 0.75
     - _GridEdgeBiasPower: 1.5
     - _GridEnable: 1
-    - _GridIntensity: 0.528
-    - _GridLineWidth: 0.001
-    - _GridRateIntensityBoost: 1.41
-    - _GridRateWidthBoost: 5
-    - _GridScale: 50
-    - _GridUVSelect: 0.629
+    - _GridIntensity: 0.05
+    - _GridLineWidth: 0.01
+    - _GridRateIntensityBoost: 0.4
+    - _GridRateWidthBoost: 1.5
+    - _GridScale: 35
+    - _GridUVSelect: 0
     - _ImperfectionStrength: 0.074
     - _MotionRate: 0
     - _NormalStrength: 0.05
+    - _ObliquityDeg: 23.439281
     - _ReflectionFresnelBoost: 0.7
     - _ReflectionStrength: 1
+    - _SkyOverlayAlpha: 0.651
+    - _SkyOverlayAlpha1: 1
+    - _SkyOverlayAlpha2: 1
+    - _SkyOverlayEnable: 0
+    - _SkyOverlayEnable1: 0
+    - _SkyOverlayEnable2: 0
+    - _SkyOverlayFlipU: 0
+    - _SkyOverlayFlipU1: 0
+    - _SkyOverlayFlipU2: 0
+    - _SkyOverlayFlipV: 0
+    - _SkyOverlayFlipV1: 0
+    - _SkyOverlayFlipV2: 0
+    - _SkyOverlayIntensity: 1
+    - _SkyOverlayIntensity1: 1
+    - _SkyOverlayIntensity2: 1
+    - _SkyOverlayLonOffsetDeg: 0
+    - _SkyOverlayLonOffsetDeg1: 0
+    - _SkyOverlayLonOffsetDeg2: 0
+    - _SkyOverlayLumaCut: 0.05
+    - _SkyOverlayLumaCut1: 0.05
+    - _SkyOverlayLumaCut2: 0.05
+    - _SkyOverlaySoftness: 0.938
+    - _SkyOverlaySoftness1: 0.05
+    - _SkyOverlaySoftness2: 0.05
+    - _SkyOverlayUseTextureAlpha: 1
+    - _SkyOverlayUseTextureAlpha1: 1
+    - _SkyOverlayUseTextureAlpha2: 1
     - _TintedAlpha: 1
     - _TintedFresnelStrength: 1.22
     - _TintedReflectionStrength: 0.73
@@ -69,16 +109,22 @@ Material:
     - _VignetteEnd: 0.314
     - _VignetteHardness: 2.47
     - _VignetteStart: 0
-    - _VignetteStrength: 0.07
+    - _VignetteStrength: 0
     - _VignetteSurfaceDarken: 1
     - _VignetteTargetAlpha: 1
     - _VignetteTintBlend: 1
     - _VignetteTransmissionDarken: 1
     m_Colors:
+    - _CanopyLocalToBody: {r: 0, g: 0, b: 0, a: 1}
+    - _CraftBodyToEq: {r: 0, g: 0, b: 0, a: 1}
     - _DarkFinalColor: {r: 0, g: 0, b: 0, a: 1}
     - _FresnelColor: {r: 0.85, g: 0.95, b: 1, a: 1}
     - _GlassTint: {r: 0, g: 0, b: 0, a: 1}
-    - _GridColor: {r: 1, g: 0.58867174, b: 0, a: 1}
+    - _GridColor: {r: 1, g: 0.63265467, b: 0, a: 1}
+    - _SkyOverlayColor: {r: 0.5379596, g: 0, b: 1, a: 1}
+    - _SkyOverlayColor1: {r: 0.19999999, g: 0.8468456, b: 1, a: 1}
+    - _SkyOverlayColor2: {r: 0.053436995, g: 1, b: 0, a: 1}
+    - _SkyOverlayFrameAdjust: {r: 0, g: 0, b: 0.70710677, a: 0.70710677}
     - _TintedGlassColor: {r: 0.6603774, g: 0.17755428, b: 0.1953638, a: 1}
     - _VignetteTintColor: {r: 0.03, g: 0, b: 0.049999982, a: 1}
   m_BuildTextureStacks: []
