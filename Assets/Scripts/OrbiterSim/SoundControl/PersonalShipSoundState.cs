@@ -10,12 +10,6 @@ using UnityEngine;
 /// Intended use:
 /// - Other audio drivers hold a reference to this script
 /// - Drivers multiply their computed source volume by the effective gain
-///
-/// V1 scope:
-/// - No networking
-/// - No persistence
-/// - No UI logic
-/// - Just a simple shared state + API
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class PersonalShipSoundState : UdonSharpBehaviour
@@ -31,9 +25,11 @@ public class PersonalShipSoundState : UdonSharpBehaviour
     [Range(0f, 1f)]
     public float rcsSound = 1f;
 
-    [Header("Optional future categories")]
     [Range(0f, 1f)]
     public float interiorSound = 1f;
+
+    [Range(0f, 1f)]
+    public float dockingSound = 1f;
 
     [Range(0f, 1f)]
     public float warningSound = 1f;
@@ -43,15 +39,13 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         ClampAll();
     }
 
-    // ------------------------------------------------------------
-    // Internal
-    // ------------------------------------------------------------
     private void ClampAll()
     {
         masterShipSound = Mathf.Clamp01(masterShipSound);
         engineSound = Mathf.Clamp01(engineSound);
         rcsSound = Mathf.Clamp01(rcsSound);
         interiorSound = Mathf.Clamp01(interiorSound);
+        dockingSound = Mathf.Clamp01(dockingSound);
         warningSound = Mathf.Clamp01(warningSound);
     }
 
@@ -78,6 +72,11 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         return Mathf.Clamp01(interiorSound);
     }
 
+    public float GetDockingSound()
+    {
+        return Mathf.Clamp01(dockingSound);
+    }
+
     public float GetWarningSound()
     {
         return Mathf.Clamp01(warningSound);
@@ -99,6 +98,11 @@ public class PersonalShipSoundState : UdonSharpBehaviour
     public float GetEffectiveInteriorGain()
     {
         return Mathf.Clamp01(masterShipSound) * Mathf.Clamp01(interiorSound);
+    }
+
+    public float GetEffectiveDockingGain()
+    {
+        return Mathf.Clamp01(masterShipSound) * Mathf.Clamp01(dockingSound);
     }
 
     public float GetEffectiveWarningGain()
@@ -129,6 +133,11 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         interiorSound = Mathf.Clamp01(value);
     }
 
+    public void SetDockingSound(float value)
+    {
+        dockingSound = Mathf.Clamp01(value);
+    }
+
     public void SetWarningSound(float value)
     {
         warningSound = Mathf.Clamp01(value);
@@ -157,6 +166,11 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         interiorSound = Mathf.Clamp01(interiorSound + delta);
     }
 
+    public void AddDockingSound(float delta)
+    {
+        dockingSound = Mathf.Clamp01(dockingSound + delta);
+    }
+
     public void AddWarningSound(float delta)
     {
         warningSound = Mathf.Clamp01(warningSound + delta);
@@ -171,6 +185,7 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         engineSound = 1f;
         rcsSound = 1f;
         interiorSound = 1f;
+        dockingSound = 1f;
         warningSound = 1f;
     }
 

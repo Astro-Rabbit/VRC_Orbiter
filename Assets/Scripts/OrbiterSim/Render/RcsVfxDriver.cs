@@ -110,6 +110,9 @@ public class RcsVfxDriver : UdonSharpBehaviour
     [Tooltip("Max degrees/sec to slew remote gimbal angles.")]
     public float remoteGimbalSlewDegPerSec = 120f;
 
+
+
+
     // ============================================================
     // MAIN ENGINE AUDIO
     // ============================================================
@@ -150,6 +153,14 @@ public class RcsVfxDriver : UdonSharpBehaviour
     [Header("Main engine low-pass tuning")]
     public float mainLowPassCutoffMin = 800f;
     public float mainLowPassCutoffMax = 22000f;
+
+    [Header("Main engine audio timing")]
+    [Tooltip("How many seconds before startup ends the loop is allowed to begin.")]
+    public float mainLoopStartLeadSeconds = 0.10f;
+
+    [Header("Main engine shutdown matching")]
+    [Tooltip("Multiplier applied to the latched live engine volume when shutdown begins.")]
+    [Range(0f, 2f)] public float mainShutdownVolumeMultiplier = 1.00f;
 
     // ============================================================
     // DEBUG / OUTPUT
@@ -194,6 +205,10 @@ public class RcsVfxDriver : UdonSharpBehaviour
     private const int MAIN_AUDIO_LOOP = 2;
     private const int MAIN_AUDIO_SHUTDOWN = 3;
 
+    private float _mainLatchedLoopVolume = 0f;
+    private float _mainLatchedLowPassCutoff = 800f;
+    private bool _mainLoopHasStartedThisCycle = false;
+
     void Start()
     {
         EnsureArrays();
@@ -204,6 +219,10 @@ public class RcsVfxDriver : UdonSharpBehaviour
         _mainPrevThrottle = 0f;
         _mainWasOn = false;
         _mainAudioState = MAIN_AUDIO_OFF;
+        _mainLoopHasStartedThisCycle = false;
+
+        _mainLatchedLoopVolume = 0f;
+        _mainLatchedLowPassCutoff = mainLowPassCutoffMin;
 
         if (mainLoopAudio != null) mainLoopAudio.loop = true;
     }
@@ -550,16 +569,25 @@ public class RcsVfxDriver : UdonSharpBehaviour
 
         float riseRate = (throttle01 - _mainPrevThrottle) / dt;
         bool shouldPlayStartup = (!_mainWasOn && isOnNow &&
-                                  riseRate >= mainStartupRiseRateThreshold &&
-                                  throttle01 >= mainStartupMinThrottle);
+                                riseRate >= mainStartupRiseRateThreshold &&
+                                throttle01 >= mainStartupMinThrottle);
 
-        // Transition on
+        float liveLoopVol = Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, Mathf.Clamp01(throttle01));
+        liveLoopVol = Mathf.Clamp01(liveLoopVol * mainBaseVolume * gain);
+
+        float liveCutoff = Mathf.Lerp(mainLowPassCutoffMin, mainLowPassCutoffMax, Mathf.Clamp01(throttle01));
+
+        // ------------------------------------------------------------
+        // Transition ON
+        // ------------------------------------------------------------
         if (!_mainWasOn && isOnNow)
         {
+            StopIfPlaying(mainStopAudio);
+
+            _mainLoopHasStartedThisCycle = false;
+
             if (shouldPlayStartup)
             {
-                StopIfPlaying(mainStopAudio);
-
                 if (mainStartAudio != null)
                 {
                     mainStartAudio.volume = Mathf.Clamp01(mainStartupVolume * mainBaseVolume * gain);
@@ -567,82 +595,114 @@ public class RcsVfxDriver : UdonSharpBehaviour
                     mainStartAudio.Play();
                 }
 
-                if (mainLoopAudio != null)
-                {
-                    mainLoopAudio.volume = Mathf.Clamp01(Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, throttle01) * mainBaseVolume * gain);
-                    if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
-                }
-
                 _mainAudioState = MAIN_AUDIO_STARTUP;
             }
             else
             {
                 StopIfPlaying(mainStartAudio);
-                StopIfPlaying(mainStopAudio);
 
                 if (mainLoopAudio != null)
                 {
-                    mainLoopAudio.volume = Mathf.Clamp01(Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, throttle01) * mainBaseVolume * gain);
+                    mainLoopAudio.volume = liveLoopVol;
                     if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
                 }
 
+                _mainLoopHasStartedThisCycle = true;
                 _mainAudioState = MAIN_AUDIO_LOOP;
             }
         }
 
-        // While on
+        // ------------------------------------------------------------
+        // While ON
+        // ------------------------------------------------------------
         if (isOnNow)
         {
-            if (mainLoopAudio != null)
-            {
-                float loopVol = Mathf.Lerp(mainLoopVolumeMin, mainLoopVolumeMax, Mathf.Clamp01(throttle01));
-                mainLoopAudio.volume = Mathf.Clamp01(loopVol * mainBaseVolume * gain);
+            // Keep current live values updated and latched
+            _mainLatchedLoopVolume = liveLoopVol;
+            _mainLatchedLowPassCutoff = liveCutoff;
 
-                if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
-            }
-
+            // Low-pass follows live throttle whenever on
             if (mainLowPass != null)
-            {
-                float cutoff = Mathf.Lerp(mainLowPassCutoffMin, mainLowPassCutoffMax, Mathf.Clamp01(throttle01));
-                mainLowPass.cutoffFrequency = cutoff;
-            }
+                mainLowPass.cutoffFrequency = liveCutoff;
 
-            if (_mainAudioState == MAIN_AUDIO_STARTUP && mainStartAudio != null)
+            if (_mainAudioState == MAIN_AUDIO_STARTUP)
             {
-                if (!mainStartAudio.isPlaying) _mainAudioState = MAIN_AUDIO_LOOP;
+                bool startupStillPlaying = (mainStartAudio != null && mainStartAudio.isPlaying);
+
+                // Start loop only near the end of startup
+                if (!_mainLoopHasStartedThisCycle && startupStillPlaying && mainLoopAudio != null)
+                {
+                    float clipLen = (mainStartAudio.clip != null) ? mainStartAudio.clip.length : 0f;
+                    float timeRemaining = clipLen - mainStartAudio.time;
+
+                    if (timeRemaining <= mainLoopStartLeadSeconds)
+                    {
+                        mainLoopAudio.volume = liveLoopVol;
+                        if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+                        _mainLoopHasStartedThisCycle = true;
+                    }
+                }
+
+                // If startup finished, ensure loop is running
+                if (!startupStillPlaying)
+                {
+                    if (!_mainLoopHasStartedThisCycle && mainLoopAudio != null)
+                    {
+                        mainLoopAudio.volume = liveLoopVol;
+                        if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+                        _mainLoopHasStartedThisCycle = true;
+                    }
+
+                    _mainAudioState = MAIN_AUDIO_LOOP;
+                }
             }
-            else if (_mainAudioState != MAIN_AUDIO_STARTUP)
+            else
             {
+                if (mainLoopAudio != null)
+                {
+                    mainLoopAudio.volume = liveLoopVol;
+                    if (!mainLoopAudio.isPlaying) mainLoopAudio.Play();
+                }
+
+                _mainLoopHasStartedThisCycle = true;
                 _mainAudioState = MAIN_AUDIO_LOOP;
             }
         }
 
-        // Transition off
+        // ------------------------------------------------------------
+        // Transition OFF
+        // ------------------------------------------------------------
         if (_mainWasOn && isOffNow)
         {
             StopIfPlaying(mainStartAudio);
             StopIfPlaying(mainLoopAudio);
 
+            // Shutdown starts from the previously live engine sound state
             if (mainStopAudio != null)
             {
-                mainStopAudio.volume = Mathf.Clamp01(mainShutdownVolume * mainBaseVolume * gain);
+                float stopVol = Mathf.Clamp01(_mainLatchedLoopVolume * mainShutdownVolumeMultiplier);
+                mainStopAudio.volume = stopVol;
                 mainStopAudio.Stop();
                 mainStopAudio.Play();
             }
 
+            // Keep LPF near prior live tone at shutdown onset instead of snapping
             if (mainLowPass != null)
-                mainLowPass.cutoffFrequency = mainLowPassCutoffMin;
+                mainLowPass.cutoffFrequency = _mainLatchedLowPassCutoff;
 
+            _mainLoopHasStartedThisCycle = false;
             _mainAudioState = MAIN_AUDIO_SHUTDOWN;
         }
 
-        // Fully off
+        // ------------------------------------------------------------
+        // Fully OFF
+        // ------------------------------------------------------------
         if (!isOnNow && !_mainWasOn)
         {
             StopIfPlaying(mainStartAudio);
             StopIfPlaying(mainLoopAudio);
 
-            if (mainLowPass != null)
+            if (mainLowPass != null && (mainStopAudio == null || !mainStopAudio.isPlaying))
                 mainLowPass.cutoffFrequency = mainLowPassCutoffMin;
 
             if (_mainAudioState != MAIN_AUDIO_SHUTDOWN || (mainStopAudio != null && !mainStopAudio.isPlaying))

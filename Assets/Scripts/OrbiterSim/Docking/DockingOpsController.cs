@@ -39,6 +39,9 @@ public class DockingOpsController : UdonSharpBehaviour
     public DockingComputer dockingComp;
     public StewartPlatformController stewart;
     public DockingOccupancyGate occupancyGate;
+
+    public StationHatchSimple linkedStationHatch;
+
     // ---------------------------------------------------------------------
     // Port animation refs
     // ---------------------------------------------------------------------
@@ -559,6 +562,9 @@ public class DockingOpsController : UdonSharpBehaviour
     private bool CanStartHatchClosing()
     {
         if (occupancyGate != null && occupancyGate.AnyPlayerOutsideCraft())
+            return false;
+
+        if (linkedStationHatch != null && !linkedStationHatch.CanCraftHatchClose())
             return false;
 
         return true;

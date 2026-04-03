@@ -5,10 +5,15 @@ using System;
 public class EarthMoonEphemerisBarycentric : UdonSharpBehaviour
 {
     [Header("Units / Constants")]
-    public double AU_m = 149597870700.0;            // meters
-    public double velDiffSeconds = 60.0;            // central-difference window (seconds)
+    public double AU_m = 149597870700.0;
+    public double velDiffSeconds = 60.0; // kept for inspector compatibility; not used
 
-    // Main entry point
+    [Header("Earth/Moon scales")]
+    public double moonMeanDistanceM = 385000560.0;
+
+    // ------------------------------------------------------------------------
+    // Public API expected by EphemerisSystem
+    // ------------------------------------------------------------------------
     public void Evaluate(double jd,
         out double sun_rx, out double sun_ry, out double sun_rz,
         out double sun_vx, out double sun_vy, out double sun_vz,
@@ -17,171 +22,340 @@ public class EarthMoonEphemerisBarycentric : UdonSharpBehaviour
         out double moon_rx, out double moon_ry, out double moon_rz,
         out double moon_vx, out double moon_vy, out double moon_vz)
     {
-        // Sun at origin in this V1 heliocentric-ecliptic frame.
         sun_rx = sun_ry = sun_rz = 0.0;
         sun_vx = sun_vy = sun_vz = 0.0;
 
-        // Positions at jd
-        double ex, ey, ez, mx, my, mz;
-        ComputePositionsOnly(jd, out ex, out ey, out ez, out mx, out my, out mz);
+        ComputeEarthState(jd,
+            out earth_rx, out earth_ry, out earth_rz,
+            out earth_vx, out earth_vy, out earth_vz);
 
-        earth_rx = ex; earth_ry = ey; earth_rz = ez;
-        moon_rx  = mx; moon_ry  = my; moon_rz  = mz;
+        double moon_geo_rx, moon_geo_ry, moon_geo_rz;
+        double moon_geo_vx, moon_geo_vy, moon_geo_vz;
 
-        // Velocities via central difference
-        double dt = Math.Max(1.0, velDiffSeconds);
-        double jd_dt = dt / 86400.0;
+        ComputeMoonGeocentricState_LargerSeries(jd,
+            out moon_geo_rx, out moon_geo_ry, out moon_geo_rz,
+            out moon_geo_vx, out moon_geo_vy, out moon_geo_vz);
 
-        double ex1, ey1, ez1, mx1, my1, mz1;
-        double ex0, ey0, ez0, mx0, my0, mz0;
+        moon_rx = earth_rx + moon_geo_rx;
+        moon_ry = earth_ry + moon_geo_ry;
+        moon_rz = earth_rz + moon_geo_rz;
 
-        ComputePositionsOnly(jd + jd_dt, out ex1, out ey1, out ez1, out mx1, out my1, out mz1);
-        ComputePositionsOnly(jd - jd_dt, out ex0, out ey0, out ez0, out mx0, out my0, out mz0);
-
-        double inv2dt = 1.0 / (2.0 * dt);
-
-        earth_vx = (ex1 - ex0) * inv2dt;
-        earth_vy = (ey1 - ey0) * inv2dt;
-        earth_vz = (ez1 - ez0) * inv2dt;
-
-        moon_vx = (mx1 - mx0) * inv2dt;
-        moon_vy = (my1 - my0) * inv2dt;
-        moon_vz = (mz1 - mz0) * inv2dt;
+        moon_vx = earth_vx + moon_geo_vx;
+        moon_vy = earth_vy + moon_geo_vy;
+        moon_vz = earth_vz + moon_geo_vz;
     }
 
-    // --- Positions only (meters), ecliptic inertial ---
-    private void ComputePositionsOnly(double jd,
-        out double earth_rx, out double earth_ry, out double earth_rz,
-        out double moon_rx, out double moon_ry, out double moon_rz)
+    // ------------------------------------------------------------------------
+    // Earth heliocentric ecliptic state
+    // Direct Kepler evaluation with direct velocity.
+    // ------------------------------------------------------------------------
+    private void ComputeEarthState(double jd,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
     {
-        // Julian days since J2000.0
         double d = jd - 2451545.0;
 
-        // ---- Sun/Earth heliocentric (Earth is opposite Sun geocentric) ----
-        // Stjarnhimlen-style:
-        // L = mean longitude, g = mean anomaly, e = eccentricity
-        // lambda = ecliptic longitude, R = distance (AU)
-        double L = DegToRad(WrapDeg(280.460 + 0.9856474 * d));
-        double g = DegToRad(WrapDeg(357.528 + 0.9856003 * d));
+        double a_AU = 1.00000011;
+        double e = 0.01671022 - 0.00000000126 * d;
 
-        // Ecliptic longitude of the Sun (geocentric) in radians
-        double lambda = L + DegToRad(1.915) * Math.Sin(g) + DegToRad(0.020) * Math.Sin(2.0 * g);
+        double varpi_deg = 102.937348 + 0.0000470935 * d;
+        double M_deg = 357.5291092 + 0.98560028 * d;
 
-        // Distance in AU
-        double R_au = 1.00014 - 0.01671 * Math.Cos(g) - 0.00014 * Math.Cos(2.0 * g);
+        double varpi = DegToRad(varpi_deg);
+        double M = DegToRad(WrapDeg(M_deg));
 
-        // Sun geocentric ecliptic coordinates (Earth->Sun). Earth heliocentric is negative of that.
-        double sun_geo_x = R_au * Math.Cos(lambda);
-        double sun_geo_y = R_au * Math.Sin(lambda);
-        double sun_geo_z = 0.0;
+        double Mdot = DegToRad(0.98560028) / 86400.0;
 
-        // Earth heliocentric in AU
-        double earth_au_x = -sun_geo_x;
-        double earth_au_y = -sun_geo_y;
-        double earth_au_z = -sun_geo_z;
+        double E = SolveKeplerE(M, e);
+        double cosE = Math.Cos(E);
+        double sinE = Math.Sin(E);
 
-        // Convert to meters
-        earth_rx = earth_au_x * AU_m;
-        earth_ry = earth_au_y * AU_m;
-        earth_rz = earth_au_z * AU_m;
+        double oneMinusECosE = 1.0 - e * cosE;
+        double sqrt1me2 = Math.Sqrt(Math.Max(1e-15, 1.0 - e * e));
 
-        // ---- Moon geocentric ecliptic (low-order series) ----
-        // This is the classic Stjarnhimlen approximation for longitude/latitude/distance.
-        // Output: Moon position relative to Earth in ecliptic coordinates.
-        double Nm = DegToRad(WrapDeg(125.1228 - 0.0529538083 * d)); // longitude of ascending node
-        double im = DegToRad(5.1454);                                // inclination
-        double wm = DegToRad(WrapDeg(318.0634 + 0.1643573223 * d));   // argument of perigee
-        double am = 60.2666;                                         // Earth radii
-        double em = 0.054900;                                        // eccentricity
-        double Mm = DegToRad(WrapDeg(115.3654 + 13.0649929509 * d));  // mean anomaly
+        double x_orb = a_AU * (cosE - e);
+        double y_orb = a_AU * (sqrt1me2 * sinE);
 
-        // Solve eccentric anomaly Em for Moon
-        double Em = SolveKeplerE(Mm, em);
+        double Edot = Mdot / Math.Max(1e-15, oneMinusECosE);
+        double vx_orb = -a_AU * sinE * Edot;
+        double vy_orb =  a_AU * sqrt1me2 * cosE * Edot;
 
-        // Moon position in its orbital plane (units: Earth radii)
-        double xv = am * (Math.Cos(Em) - em);
-        double yv = am * (Math.Sqrt(1.0 - em * em) * Math.Sin(Em));
+        double cosw = Math.Cos(varpi);
+        double sinw = Math.Sin(varpi);
 
-        double vm = Math.Atan2(yv, xv);               // true anomaly
-        double rm = Math.Sqrt(xv * xv + yv * yv);     // distance (Earth radii)
+        double x_AU  = cosw * x_orb - sinw * y_orb;
+        double y_AU  = sinw * x_orb + cosw * y_orb;
+        double z_AU  = 0.0;
 
-        // Convert to ecliptic rectangular (Earth-centered)
-        double xh = rm * (Math.Cos(Nm) * Math.Cos(vm + wm) - Math.Sin(Nm) * Math.Sin(vm + wm) * Math.Cos(im));
-        double yh = rm * (Math.Sin(Nm) * Math.Cos(vm + wm) + Math.Cos(Nm) * Math.Sin(vm + wm) * Math.Cos(im));
-        double zh = rm * (Math.Sin(vm + wm) * Math.Sin(im));
+        double vx_AU = cosw * vx_orb - sinw * vy_orb;
+        double vy_AU = sinw * vx_orb + cosw * vy_orb;
+        double vz_AU = 0.0;
 
-        // Ecliptic lon/lat from that (for perturbation series)
-        double lon = Math.Atan2(yh, xh);
-        double lat = Math.Atan2(zh, Math.Sqrt(xh * xh + yh * yh));
+        rx = x_AU * AU_m;
+        ry = y_AU * AU_m;
+        rz = z_AU * AU_m;
 
-        // Sun mean anomaly g already computed above.
-        // Moon mean elongation D, argument of latitude F (standard approximations)
-        double D  = DegToRad(WrapDeg(297.8501921 + 12.19074912 * d)); // mean elongation
-        double F  = DegToRad(WrapDeg(93.2720950  + 13.22935024 * d)); // argument of latitude
-
-        // Perturbations (arc degrees)
-        // These terms are the commonly used “good enough” subset from the same family of approximations.
-        lon += DegToRad(
-              -1.274 * Math.Sin(Mm - 2.0 * D)
-              +0.658 * Math.Sin(2.0 * D)
-              -0.186 * Math.Sin(g)
-              -0.059 * Math.Sin(2.0 * Mm - 2.0 * D)
-              -0.057 * Math.Sin(Mm - 2.0 * D + g)
-              +0.053 * Math.Sin(Mm + 2.0 * D)
-              +0.046 * Math.Sin(2.0 * D - g)
-              +0.041 * Math.Sin(Mm - g)
-              -0.035 * Math.Sin(D)
-              -0.031 * Math.Sin(Mm + g)
-              -0.015 * Math.Sin(2.0 * F - 2.0 * D)
-              +0.011 * Math.Sin(Mm - 4.0 * D)
-        );
-
-        lat += DegToRad(
-              -0.173 * Math.Sin(F - 2.0 * D)
-              -0.055 * Math.Sin(Mm - F - 2.0 * D)
-              -0.046 * Math.Sin(Mm + F - 2.0 * D)
-              +0.033 * Math.Sin(F + 2.0 * D)
-              +0.017 * Math.Sin(2.0 * Mm + F)
-        );
-
-        // Distance perturbations (Earth radii)
-        rm += (-0.58 * Math.Cos(Mm - 2.0 * D)
-               -0.46 * Math.Cos(2.0 * D));
-
-        // Convert corrected lon/lat/rm to rectangular (Earth radii)
-        double rmCosLat = rm * Math.Cos(lat);
-        double mx_er = rmCosLat * Math.Cos(lon);
-        double my_er = rmCosLat * Math.Sin(lon);
-        double mz_er = rm * Math.Sin(lat);
-
-        // Earth radius to meters
-        double Re_m = 6378137.0; // use WGS84-ish for consistent scaling
-
-        // Moon geocentric in meters (ecliptic)
-        double moon_geo_x = mx_er * Re_m;
-        double moon_geo_y = my_er * Re_m;
-        double moon_geo_z = mz_er * Re_m;
-
-        // Moon heliocentric = Earth heliocentric + Moon geocentric
-        moon_rx = earth_rx + moon_geo_x;
-        moon_ry = earth_ry + moon_geo_y;
-        moon_rz = earth_rz + moon_geo_z;
+        vx = vx_AU * AU_m;
+        vy = vy_AU * AU_m;
+        vz = vz_AU * AU_m;
     }
 
+    // ------------------------------------------------------------------------
+    // Larger truncated lunar series
+    //
+    // Output:
+    //   geocentric Moon state in ecliptic inertial frame, meters and m/s
+    //
+    // Fundamental arguments:
+    //   Lp = mean longitude of Moon
+    //   D  = mean elongation of Moon from Sun
+    //   M  = Sun mean anomaly
+    //   Mp = Moon mean anomaly
+    //   F  = Moon argument of latitude
+    //
+    // This is still a practical truncated theory, not a full DE ephemeris,
+    // but materially better than the tiny series.
+    // ------------------------------------------------------------------------
+    private void ComputeMoonGeocentricState_LargerSeries(double jd,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
+    {
+        double d = jd - 2451545.0;
+
+        // Fundamental arguments [deg]
+        double Lp_deg = 218.3164477 + 13.17639648 * d;
+        double D_deg  = 297.8501921 + 12.19074912 * d;
+        double M_deg  = 357.5291092 + 0.98560028 * d;
+        double Mp_deg = 134.9633964 + 13.06499295 * d;
+        double F_deg  = 93.2720950  + 13.22935024 * d;
+
+        double Lp = DegToRad(WrapDeg(Lp_deg));
+        double D  = DegToRad(WrapDeg(D_deg));
+        double M  = DegToRad(WrapDeg(M_deg));
+        double Mp = DegToRad(WrapDeg(Mp_deg));
+        double F  = DegToRad(WrapDeg(F_deg));
+
+        // Rates [rad/s]
+        double Lp_dot = DegToRad(13.17639648) / 86400.0;
+        double D_dot  = DegToRad(12.19074912) / 86400.0;
+        double M_dot  = DegToRad(0.98560028)  / 86400.0;
+        double Mp_dot = DegToRad(13.06499295) / 86400.0;
+        double F_dot  = DegToRad(13.22935024) / 86400.0;
+
+        // ---------------------------
+        // Longitude series [deg]
+        // lambda = Lp + dLambda
+        // ---------------------------
+        double dLambdaDeg = 0.0;
+        double dLambdaDotDeg = 0.0;
+
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  6.289, 0, 0, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  1.274, 2, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.658, 2, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.214, 0, 0, 2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.186, 0, 1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.114, 0, 0, 0, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.059, 2, 0,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.057, 2,-1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.053, 2, 0, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.046, 2,-1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.041, 0, 1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.035, 1, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.031, 0, 1, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.015, 2, 0, 0,-2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.011, 4, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.009, 4, 0,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.009, 2, 1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.008, 2, 1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.008, 1, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.007, 1, 1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.007, 0, 1,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.007, 2, 0,-1, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.006, 2, 0, 0, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.005, 2,-1, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.005, 2,-1,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.004, 0, 0, 1, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.004, 4, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.004, 4,-1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.004, 1, 0, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg, -0.003, 4,-1,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.003, 2, 0, 2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.003, 2, 0,-3, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.003, 2, 1,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.003, 0, 1, 2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref dLambdaDeg, ref dLambdaDotDeg,  0.003, 0, 2, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        // ---------------------------
+        // Latitude series [deg]
+        // beta = dBeta
+        // ---------------------------
+        double betaDeg = 0.0;
+        double betaDotDeg = 0.0;
+
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  5.128, 0, 0, 0, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.280, 0, 0, 1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.277, 0, 0, 1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.173, 2, 0, 0,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.055, 2, 0,-1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.046, 2, 0,-1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.033, 2, 0, 0, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.017, 0, 0, 2, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.009, 2, 0, 1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.009, 0, 0, 2,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.008, 2,-1, 0,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.008, 0, 0, 0, 3, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.007, 2,-1, 1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.007, 2,-1, 1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.007, 2,-1, 0, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.006, 2,-1,-1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.006, 2,-1, 0,-3, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.005, 0, 1,-1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.005, 0, 1, 0, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.004, 0, 1,-1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.004, 0, 1, 0,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.004, 0, 0, 3, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.003, 4, 0, 0,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.003, 4, 0,-1,-1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.003, 0, 0, 1,-3, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.003, 4, 0,-1, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddSinTerm(ref betaDeg, ref betaDotDeg,  0.003, 1, 0, 0, 1, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        // ---------------------------
+        // Distance series [km]
+        // r = r0 + dR
+        // ---------------------------
+        double r_km = 385000.56;
+        double rDot_km = 0.0;
+
+        AddCosTerm(ref r_km, ref rDot_km, -20905.0, 0, 0, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km, -3699.0,  2, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km, -2956.0,  2, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,  -570.0,  0, 0, 2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   246.0,  2, 0,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,  -205.0,  2,-1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,  -171.0,  2, 0, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,  -152.0,  2,-1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        AddCosTerm(ref r_km, ref rDot_km,  -129.0,  1, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   108.0,  1, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   104.0,  0, 0, 0, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    79.0,  0, 1, 1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    48.0,  0, 1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   -34.0,  4, 0,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   -26.0,  4, 0,-2, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    23.0,  2, 1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    19.0,  2, 1, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    17.0,  0, 0, 1, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   -14.0,  0, 0, 2, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    13.0,  4, 0, 0, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,    12.0,  4,-1,-1, 0, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   -10.0,  2, 0, 1, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+        AddCosTerm(ref r_km, ref rDot_km,   -10.0,  2, 0,-1, 2, D, M, Mp, F, D_dot, M_dot, Mp_dot, F_dot);
+
+        double lambda = Lp + DegToRad(dLambdaDeg);
+        double beta   = DegToRad(betaDeg);
+        double lambda_dot = Lp_dot + DegToRad(dLambdaDotDeg);
+        double beta_dot   = DegToRad(betaDotDeg);
+
+        double r_m = r_km * 1000.0;
+        double r_dot_m = rDot_km * 1000.0;
+
+        double cosB = Math.Cos(beta);
+        double sinB = Math.Sin(beta);
+        double cosL = Math.Cos(lambda);
+        double sinL = Math.Sin(lambda);
+
+        rx = r_m * cosB * cosL;
+        ry = r_m * cosB * sinL;
+        rz = r_m * sinB;
+
+        vx =
+            r_dot_m * cosB * cosL
+          + r_m * (-sinB * beta_dot * cosL - cosB * sinL * lambda_dot);
+
+        vy =
+            r_dot_m * cosB * sinL
+          + r_m * (-sinB * beta_dot * sinL + cosB * cosL * lambda_dot);
+
+        vz =
+            r_dot_m * sinB
+          + r_m * (cosB * beta_dot);
+    }
+
+    // ------------------------------------------------------------------------
+    // Helpers for harmonic terms
+    // phase = aD*D + aM*M + aMp*Mp + aF*F
+    // ------------------------------------------------------------------------
+    private void AddSinTerm(
+        ref double sum, ref double sumDot,
+        double amp,
+        int aD, int aM, int aMp, int aF,
+        double D, double M, double Mp, double F,
+        double D_dot, double M_dot, double Mp_dot, double F_dot)
+    {
+        double phase =
+            aD * D +
+            aM * M +
+            aMp * Mp +
+            aF * F;
+
+        double phaseDot =
+            aD * D_dot +
+            aM * M_dot +
+            aMp * Mp_dot +
+            aF * F_dot;
+
+        sum += amp * Math.Sin(phase);
+        sumDot += amp * Math.Cos(phase) * phaseDot;
+    }
+
+    private void AddCosTerm(
+        ref double sum, ref double sumDot,
+        double amp,
+        int aD, int aM, int aMp, int aF,
+        double D, double M, double Mp, double F,
+        double D_dot, double M_dot, double Mp_dot, double F_dot)
+    {
+        double phase =
+            aD * D +
+            aM * M +
+            aMp * Mp +
+            aF * F;
+
+        double phaseDot =
+            aD * D_dot +
+            aM * M_dot +
+            aMp * Mp_dot +
+            aF * F_dot;
+
+        sum += amp * Math.Cos(phase);
+        sumDot += -amp * Math.Sin(phase) * phaseDot;
+    }
+
+    // ------------------------------------------------------------------------
+    // Basic math helpers
+    // ------------------------------------------------------------------------
     private double SolveKeplerE(double M, double e)
     {
         double E = (e < 0.8) ? M : Math.PI;
+
         for (int k = 0; k < 12; k++)
         {
             double sE = Math.Sin(E);
             double cE = Math.Cos(E);
             double f = E - e * sE - M;
             double fp = 1.0 - e * cE;
-            if (Math.Abs(fp) < 1e-12) break;
-            double d = f / fp;
-            E -= d;
-            if (Math.Abs(d) < 1e-12) break;
+
+            if (Math.Abs(fp) < 1e-14) break;
+
+            double dE = f / fp;
+            E -= dE;
+
+            if (Math.Abs(dE) < 1e-13) break;
         }
+
         return E;
     }
 

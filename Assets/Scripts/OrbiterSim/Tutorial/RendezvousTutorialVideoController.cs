@@ -32,7 +32,38 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
     public GameObject restOfTheOwlObject;
     public GameObject outroObject;
 
+    [Header("Clip Durations (seconds, 0 = stay on until another clip/stop)")]
+    public float introDuration = 0f;
+    public float menuPageDuration = 0f;
+    public float targetPageDuration = 0f;
+    public float selectTargetDuration = 0f;
+    public float alignPageDuration = 0f;
+    public float alignInfoDuration = 0f;
+    public float alignNodeDuration = 0f;
+    public float nodeAutoDuration = 0f;
+    public float nodeTimeDuration = 0f;
+    public float nodeExecDuration = 0f;
+    public float transferPageDuration = 0f;
+    public float transferInfoDuration = 0f;
+    public float transferCalcDuration = 0f;
+    public float transferNodeDuration = 0f;
+    public float dockPageDuration = 0f;
+    public float matchInfoDuration = 0f;
+    public float matchTimeDuration = 0f;
+    public float matchDirDuration = 0f;
+    public float matchBurnDuration = 0f;
+    public float finishBurnDuration = 0f;
+    public float targetDirDuration = 0f;
+    public float targetBurnDuration = 0f;
+    public float restOfTheOwlDuration = 0f;
+    public float outroDuration = 0f;
+
     private int _currentClip = -1;
+    private int _pendingClipId = -1;
+    private GameObject _pendingClipObject = null;
+
+    private bool _playing = false;
+    private float _hideAtTime = -1f;
 
     void Start()
     {
@@ -40,6 +71,13 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
 
         if (avatarDisplayRoot != null) {
             avatarDisplayRoot.SetActive(false);
+        }
+    }
+
+    void Update()
+    {
+        if (_playing && _hideAtTime > 0f && Time.time >= _hideAtTime) {
+            StopPlayback();
         }
     }
 
@@ -52,32 +90,53 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
         }
 
         GameObject clipObject = GetClipObject(clip);
-
-        DisableAllClipObjects();
-
         if (clipObject == null) {
-            _currentClip = -1;
-
-            if (avatarDisplayRoot != null) {
-                avatarDisplayRoot.SetActive(false);
-            }
+            StopPlayback();
             return;
         }
 
-        _currentClip = clipId;
+        DisableAllClipObjects();
 
         if (avatarDisplayRoot != null) {
             avatarDisplayRoot.SetActive(true);
         }
 
-        // Re-enable to restart autoplay cleanly.
-        clipObject.SetActive(false);
-        clipObject.SetActive(true);
+        _pendingClipId = clipId;
+        _pendingClipObject = clipObject;
+
+        _currentClip = -1;
+        _playing = true;
+
+        float duration = GetClipDuration(clip);
+        if (duration > 0f) {
+            _hideAtTime = Time.time + duration;
+        } else {
+            _hideAtTime = -1f;
+        }
+
+        SendCustomEventDelayedFrames(nameof(EnablePendingClip), 1);
+    }
+
+    public void EnablePendingClip()
+    {
+        if (_pendingClipObject == null) {
+            StopPlayback();
+            return;
+        }
+
+        _pendingClipObject.SetActive(true);
+        _currentClip = _pendingClipId;
     }
 
     public void StopPlayback()
     {
+        _playing = false;
+        _hideAtTime = -1f;
+
         _currentClip = -1;
+        _pendingClipId = -1;
+        _pendingClipObject = null;
+
         DisableAllClipObjects();
 
         if (avatarDisplayRoot != null) {
@@ -143,5 +202,37 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
         }
 
         return null;
+    }
+
+    private float GetClipDuration(RendezvousTutorialClip clip)
+    {
+        switch (clip) {
+            case RendezvousTutorialClip.Intro: return introDuration;
+            case RendezvousTutorialClip.MenuPage: return menuPageDuration;
+            case RendezvousTutorialClip.TargetPage: return targetPageDuration;
+            case RendezvousTutorialClip.SelectTarget: return selectTargetDuration;
+            case RendezvousTutorialClip.AlignPage: return alignPageDuration;
+            case RendezvousTutorialClip.AlignInfo: return alignInfoDuration;
+            case RendezvousTutorialClip.AlignNode: return alignNodeDuration;
+            case RendezvousTutorialClip.NodeAuto: return nodeAutoDuration;
+            case RendezvousTutorialClip.NodeTime: return nodeTimeDuration;
+            case RendezvousTutorialClip.NodeExec: return nodeExecDuration;
+            case RendezvousTutorialClip.TransferPage: return transferPageDuration;
+            case RendezvousTutorialClip.TransferInfo: return transferInfoDuration;
+            case RendezvousTutorialClip.TransferCalc: return transferCalcDuration;
+            case RendezvousTutorialClip.TransferNode: return transferNodeDuration;
+            case RendezvousTutorialClip.DockPage: return dockPageDuration;
+            case RendezvousTutorialClip.MatchInfo: return matchInfoDuration;
+            case RendezvousTutorialClip.MatchTime: return matchTimeDuration;
+            case RendezvousTutorialClip.MatchDir: return matchDirDuration;
+            case RendezvousTutorialClip.MatchBurn: return matchBurnDuration;
+            case RendezvousTutorialClip.FinishBurn: return finishBurnDuration;
+            case RendezvousTutorialClip.TargetDir: return targetDirDuration;
+            case RendezvousTutorialClip.TargetBurn: return targetBurnDuration;
+            case RendezvousTutorialClip.RestOfTheOwl: return restOfTheOwlDuration;
+            case RendezvousTutorialClip.Outro: return outroDuration;
+        }
+
+        return 0f;
     }
 }
