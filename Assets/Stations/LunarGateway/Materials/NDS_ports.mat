@@ -12,17 +12,18 @@ Material:
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords:
+  - _ALPHATEST_ON
   - _BICUBIC_SAMPLING_ON
   - _REFLECTIONS_ON
   - _SPECULAR_HIGHLIGHTS_ON
   - _WORKFLOW_PACKED_ON
   m_InvalidKeywords: []
   m_LightmapFlags: 4
-  m_EnableInstancingVariants: 0
+  m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2000
+  m_CustomRenderQueue: 2450
   stringTagMap:
-    RenderType: Opaque
+    RenderType: TransparentCutout
   disabledShaderPasses:
   - ALWAYS
   m_LockedProperties: 
@@ -217,7 +218,7 @@ Material:
     - _AlphaMaskChannel: 0
     - _AlphaMaskOpacity: 1
     - _AlphaSource: 0
-    - _AlphaToMask: 0
+    - _AlphaToMask: 1
     - _ApplyHeightOffset: 0
     - _AreaLitOcclusionUVSet: 0
     - _AreaLitRoughnessMultiplier: 1
@@ -234,7 +235,7 @@ Material:
     - _BakeryLMSpecStrength: 1
     - _BakeryMode: 0
     - _BicubicSampling: 1
-    - _BlendMode: 0
+    - _BlendMode: 1
     - _Brightness: 1
     - _BrightnessDet: 1
     - _BrightnessEmiss: 1
@@ -246,8 +247,8 @@ Material:
     - _ContrastDet: 1
     - _ContrastEmiss: 1
     - _ContrastPost: 1
-    - _Culling: 0
-    - _Cutoff: 0.5
+    - _Culling: 2
+    - _Cutoff: 0.575
     - _DetailMainTexBlend: 2
     - _DetailMainTexStrength: 1
     - _DetailMaskChannel: 0

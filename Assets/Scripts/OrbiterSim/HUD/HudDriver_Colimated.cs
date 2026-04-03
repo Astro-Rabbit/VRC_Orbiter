@@ -20,6 +20,8 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     [Header("References")]
     public GuidanceNavCoreState nav;
     public GuidanceNavContactsState contacts;
+    public GC_Core gc;
+
 
     [Header("Pilot HUD config")]
     [Tooltip("0=OFF, 1=GROUND, 2=ORBIT, 3=APPROACH, 4=DOCK")]
@@ -541,44 +543,23 @@ public class HudDriver_Colimated : UdonSharpBehaviour
 
         float nodeTgoSeconds = 0f;
 
-        if (nodeValid && nav != null && nav.valid && nodePlan != null)
+        if (nodeValid && nav != null && nav.valid && gc != null)
         {
             int nodeIndex = nav.selectedNodeIndex;
 
-            if (nodeIndex >= 0 &&
-                nodePlan.status != null && nodeIndex < nodePlan.status.Length &&
-                nodePlan.trigType != null && nodeIndex < nodePlan.trigType.Length)
+            if (nodeIndex >= 0)
             {
-                byte trig = nodePlan.trigType[nodeIndex];
+                double tBurnStart;
+                bool haveTgo = gc.API_Node_TryGetTimeToBurnStart(nodeIndex, out tBurnStart);
 
-                if (trig == NodePlanState.TRIG_TIME)
+                if (haveTgo)
                 {
-                    if (nodePlan.triggerTime != null && nodeIndex < nodePlan.triggerTime.Length)
-                    {
-                        nodeTgoSeconds = (float)(nodePlan.triggerTime[nodeIndex] - nav.t);
-                    }
-                }
-                else if (trig == NodePlanState.TRIG_TRUE_ANOMALY)
-                {
-                    if (nodePlan.triggerNuRad != null && nodeIndex < nodePlan.triggerNuRad.Length)
-                    {
-                        double dtToNu;
-                        bool haveTgo = OrbitHelpers.TryTimeToTrueAnomaly(
-                            nav.a,
-                            nav.e,
-                            nav.muPrimary,
-                            nav.nuRad,
-                            nodePlan.triggerNuRad[nodeIndex],
-                            1e-6,
-                            out dtToNu
-                        );
-
-                        if (haveTgo)
-                            nodeTgoSeconds = (float)dtToNu;
-                    }
+                    if (tBurnStart < 0.0) tBurnStart = 0.0;
+                    nodeTgoSeconds = (float)tBurnStart;
                 }
             }
         }
+
         block.SetFloat("_NodeTgoSeconds", nodeTgoSeconds);
 
 

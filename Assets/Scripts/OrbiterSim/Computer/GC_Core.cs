@@ -53,6 +53,22 @@ public class GC_Core : UdonSharpBehaviour
     [Header("Optional: craft defaults for intent.ClearToSafeDefaults")]
     public CraftCommandState craftDefaults;
 
+
+
+    [Header("Optional warp control")]
+    public SimManager simManager;
+
+    [Header("Node auto-warp")]
+    public bool nodeAutoWarpEnabled = true;
+    public bool nodeAutoWarpOnlyForAutoExecute = true;
+    public float nodeWarpLeadSec = 120f;          // start reducing inside this
+    public float nodeWarp1xAtSec = 10f;           // be at 1x by this TTB
+    public double nodeWarpFar = 5000.0;
+    public double nodeWarpMid = 1000.0;
+    public double nodeWarpNear = 100.0;
+    public double nodeWarpClose = 10.0;
+
+
     // =====================================================================
     // Docking helper tuning (V1)
     // =====================================================================
@@ -195,6 +211,12 @@ public class GC_Core : UdonSharpBehaviour
     private double _selectedNodeTriggerTime = 0.0;
     private double _selectedNodeTimeToGo = 0.0;
 
+
+    private bool _selectedNodeBurnStartValid = false;
+    private double _selectedNodeBurnStartTime = 0.0;
+    private double _selectedNodeTimeToBurnStart = 0.0;
+
+
     [HideInInspector] public float nodeAutoExecuteKnobValue;
 
     // --------------------
@@ -224,6 +246,7 @@ public class GC_Core : UdonSharpBehaviour
             BuildNavSlowAnalytics();
 
         RefreshNodeTimingCache();
+        UpdateNodeAutoWarpRequest();
         UpdateSelectedNodeNavExport();
 
         if (ShouldRunThrottled(ref _nextAlertsTickTime, alertsHz))
@@ -621,6 +644,15 @@ public class GC_Core : UdonSharpBehaviour
                 _selectedNodeTimingValid = true;
                 _selectedNodeTriggerTime = trigT;
                 _selectedNodeTimeToGo = trigT - nowT;
+
+                float tBurn = 0f;
+                if (plan.burnDurationSec != null && i < plan.burnDurationSec.Length)
+                    tBurn = Mathf.Max(0f, plan.burnDurationSec[i]);
+
+                _selectedNodeBurnStartValid = true;
+                _selectedNodeBurnStartTime = trigT - 0.5 * (double)tBurn;
+                _selectedNodeTimeToBurnStart = _selectedNodeBurnStartTime - nowT;
+
             }
         }
 
@@ -982,17 +1014,52 @@ public class GC_Core : UdonSharpBehaviour
 
             case GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT:
             {
-                if (contacts == null || !contacts.dockValid0) break;
+                if (contacts == null) break;
 
-                Vector3 craftPort_B = new Vector3((float)contacts.craftPort_px_B0, (float)contacts.craftPort_py_B0, (float)contacts.craftPort_pz_B0);
-                Vector3 targetPort_B = new Vector3((float)contacts.targetPort_px_B0, (float)contacts.targetPort_py_B0, (float)contacts.targetPort_pz_B0);
+                Vector3 los_E = Vector3.zero;
+                bool haveTarget = false;
 
-                Vector3 err_B = targetPort_B - craftPort_B;
-                if (err_B.sqrMagnitude < 1e-8f) break;
+                // Preferred: point to selected station docking port
+                if (contacts.dockValid0)
+                {
+                    Vector3 craftPort_B = new Vector3(
+                        (float)contacts.craftPort_px_B0,
+                        (float)contacts.craftPort_py_B0,
+                        (float)contacts.craftPort_pz_B0
+                    );
 
-                Vector3 los_E = (nav.qBE * err_B).normalized;
+                    Vector3 targetPort_B = new Vector3(
+                        (float)contacts.targetPort_px_B0,
+                        (float)contacts.targetPort_py_B0,
+                        (float)contacts.targetPort_pz_B0
+                    );
+
+                    Vector3 err_B = targetPort_B - craftPort_B;
+                    if (err_B.sqrMagnitude > 1e-8f)
+                    {
+                        los_E = (nav.qBE * err_B).normalized;
+                        haveTarget = true;
+                    }
+                }
+                // Fallback: point to selected station root if no port selected / no dock target
+                else if (contacts.selValid)
+                {
+                    Vector3 dr_E = new Vector3(
+                        (float)contacts.sel_drx_E,
+                        (float)contacts.sel_dry_E,
+                        (float)contacts.sel_drz_E
+                    );
+
+                    if (dr_E.sqrMagnitude > 1e-8f)
+                    {
+                        los_E = dr_E.normalized;
+                        haveTarget = true;
+                    }
+                }
+
+                if (!haveTarget) break;
+
                 Vector3 shipAxis_E = (nav.qBE * Vector3.forward).normalized;
-
                 Quaternion qErr_E = Quaternion.FromToRotation(shipAxis_E, los_E);
                 Quaternion qDesired_BE = qErr_E * nav.qBE;
 
@@ -1762,25 +1829,112 @@ public class GC_Core : UdonSharpBehaviour
         double m0 = craft.massKg;
         if (m0 <= 1.0) return false;
 
-        const double g0 = 9.80665;
-        double ve = (double)IspSec * g0;
-        if (ve <= 1e-6) return false;
+        double thrustN = (double)TmaxN;
+        if (thrustN <= 1e-6) return false;
 
-        double m1 = m0 / System.Math.Exp((double)dv_mps / ve);
-        double mPropReq = m0 - m1;
-        if (mPropReq < 0.0) mPropReq = 0.0;
+        double accel = thrustN / m0;   // m/s^2
+        if (accel <= 1e-9) return false;
 
-        double mpAvail = craft.propMassKg;
-        if (mpAvail < 0.0) mpAvail = 0.0;
-        if (mPropReq > mpAvail) mPropReq = mpAvail;
-
-        double mdot = (double)TmaxN / ve;
-        if (mdot <= 1e-9) return false;
-
-        double t = mPropReq / mdot;
+        double t = (double)dv_mps / accel;
         tBurnSec = (float)((t > 0.0) ? t : 0.0);
         return true;
+
+
+        // const double g0 = 9.80665;
+        // double ve = (double)IspSec * g0;
+        // if (ve <= 1e-6) return false;
+
+        // double m1 = m0 / System.Math.Exp((double)dv_mps / ve);
+        // double mPropReq = m0 - m1;
+        // if (mPropReq < 0.0) mPropReq = 0.0;
+
+        // double mpAvail = craft.propMassKg;
+        // if (mpAvail < 0.0) mpAvail = 0.0;
+        // if (mPropReq > mpAvail) mPropReq = mpAvail;
+
+        // double mdot = (double)TmaxN / ve;
+        // if (mdot <= 1e-9) return false;
+
+        // double t = mPropReq / mdot;
+        // tBurnSec = (float)((t > 0.0) ? t : 0.0);
+        // return true;
     }
+
+    public bool API_Node_TryGetTimeToBurnStart(int i, out double tBurnStartSec)
+    {
+        tBurnStartSec = 0.0;
+
+        double tGo;
+        if (!API_Node_TryGetTimeToGo(i, out tGo))
+            return false;
+
+        if (plan == null) return false;
+        if (i < 0 || i >= plan.maxNodes) return false;
+
+        float tBurn = 0f;
+        if (plan.burnDurationSec != null && i < plan.burnDurationSec.Length)
+            tBurn = Mathf.Max(0f, plan.burnDurationSec[i]);
+
+        tBurnStartSec = tGo - 0.5 * (double)tBurn;
+        return true;
+    }
+
+    private void UpdateNodeAutoWarpRequest()
+    {
+        if (!nodeAutoWarpEnabled) return;
+        if (simManager == null) return;
+        if (plan == null || runtime == null) return;
+
+        if (nodeAutoWarpOnlyForAutoExecute && !runtime.autoExecuteArmedNodes)
+            return;
+
+        int idx = _nextArmedNodeValid ? _nextArmedNodeIndex : -1;
+        if (idx < 0) return;
+
+        double tToBurnStart;
+        if (!API_Node_TryGetTimeToBurnStart(idx, out tToBurnStart))
+            return;
+
+        if (tToBurnStart <= 0.0)
+        {
+            simManager.SetRequestedWarp(1.0);
+            return;
+        }
+
+        // Only start intervening when we are inside the lead window
+        if (tToBurnStart > nodeWarpLeadSec)
+            return;
+
+        double desiredWarp;
+        if (tToBurnStart <= (double)nodeWarp1xAtSec) desiredWarp = 1.0;
+        else if (tToBurnStart <= 60.0)               desiredWarp = nodeWarpClose;
+        else if (tToBurnStart <= 120.0)              desiredWarp = nodeWarpNear;
+        else if (tToBurnStart <= 600.0)              desiredWarp = nodeWarpMid;
+        else                                         desiredWarp = nodeWarpFar;
+
+        simManager.SetRequestedWarp(desiredWarp);
+    }
+
+    public void API_Node_WarpToSelected()
+    {
+        if (simManager == null || modeParams == null || plan == null) return;
+
+        int idx = (int)modeParams.selectedNodeIndex;
+        if (idx < 0 || idx >= plan.maxNodes) return;
+
+        double tToBurnStart;
+        if (!API_Node_TryGetTimeToBurnStart(idx, out tToBurnStart)) return;
+
+        double desiredWarp;
+        if (tToBurnStart <= 10.0) desiredWarp = 1.0;
+        else if (tToBurnStart <= 30.0) desiredWarp = nodeWarpClose;
+        else if (tToBurnStart <= 120.0) desiredWarp = nodeWarpNear;
+        else if (tToBurnStart <= 600.0) desiredWarp = nodeWarpMid;
+        else desiredWarp = nodeWarpFar;
+
+        simManager.SetRequestedWarp(desiredWarp);
+    }
+
 
     public void ResetForScenario(double nowT)
     {
@@ -2028,27 +2182,37 @@ public class GC_Core : UdonSharpBehaviour
         double thrustN = (double)TmaxN * Mathf.Clamp01(throttle01);
         if (thrustN <= 1e-6) return true;
 
-        double mdot = thrustN / ve;
-        if (mdot <= 1e-9) return false;
+        double accel = thrustN / m0;   // m/s^2
+        if (accel <= 1e-9) return false;
 
-        double dt = nav.dt;
-        double propUsed = mdot * dt;
-
-        double mpAvail = craft.propMassKg;
-        if (mpAvail < 0.0) mpAvail = 0.0;
-        if (propUsed > mpAvail) propUsed = mpAvail;
-
-        // Prevent invalid log if mass gets too low.
-        double m1 = m0 - propUsed;
-        if (m1 < 1.0) m1 = 1.0;
-
-        if (m1 >= m0) return true;
-
-        double dv = ve * System.Math.Log(m0 / m1);
+        double dv = accel * nav.dt;
         if (dv < 0.0) dv = 0.0;
 
         dvDelivered_mps = (float)dv;
         return true;
+
+
+        // double mdot = thrustN / ve;
+        // if (mdot <= 1e-9) return false;
+
+        // double dt = nav.dt;
+        // double propUsed = mdot * dt;
+
+        // double mpAvail = craft.propMassKg;
+        // if (mpAvail < 0.0) mpAvail = 0.0;
+        // if (propUsed > mpAvail) propUsed = mpAvail;
+
+        // // Prevent invalid log if mass gets too low.
+        // double m1 = m0 - propUsed;
+        // if (m1 < 1.0) m1 = 1.0;
+
+        // if (m1 >= m0) return true;
+
+        // double dv = ve * System.Math.Log(m0 / m1);
+        // if (dv < 0.0) dv = 0.0;
+
+        // dvDelivered_mps = (float)dv;
+        // return true;
     }
 
     private void ConsumeNodeRemainingDv(int idx, float dvDelivered_mps)
@@ -2334,7 +2498,13 @@ public class GC_Core : UdonSharpBehaviour
 
     public bool API_Dock_PointShipZAtTargetPort()
     {
-        if (contacts == null || !contacts.dockValid0) return false;
+        if (contacts == null) return false;
+
+        bool haveDockTarget = contacts.dockValid0;
+        bool haveStationTarget = contacts.selValid;
+
+        if (!haveDockTarget && !haveStationTarget) return false;
+
         runtime.activeModeId = GC_RuntimeState.MODE_DOCK_POINT_SHIPZ_TO_PORT;
         runtime.modeStartTime = nav.t;
         return true;
