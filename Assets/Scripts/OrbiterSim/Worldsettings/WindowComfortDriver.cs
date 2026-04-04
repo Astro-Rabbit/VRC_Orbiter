@@ -1,5 +1,6 @@
 ﻿using UdonSharp;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class WindowComfortDriver : UdonSharpBehaviour
 {
@@ -96,6 +97,30 @@ public class WindowComfortDriver : UdonSharpBehaviour
     private const string PROP_GRID_EDGE_BIAS = "_GridEdgeBias";
     private const string PROP_GRID_EDGE_BIAS_POWER = "_GridEdgeBiasPower";
 
+    public Slider LoungeAngleRate;
+    public Slider LoungeAngleExp;
+
+    public Slider CockpitAngleRate;
+    public Slider CockpitAngleExp;
+
+    public Slider GlobalAngleRate;
+    public Slider GlobalAngleExp;
+
+    public void OnSliderChange()
+    {
+        // Global
+        if (GlobalAngleRate) globalMaxAngularRateRad = GlobalAngleRate.value;
+        if (GlobalAngleExp) globalResponseExponent = GlobalAngleExp.value;
+
+        // Lounge
+        if (LoungeAngleRate) loungeMaxAngularRateRad = LoungeAngleRate.value;
+        if (LoungeAngleExp) loungeResponseExponent = LoungeAngleExp.value;
+
+        // Cockpit
+        if (CockpitAngleRate) cockpitMaxAngularRateRad = CockpitAngleRate.value;
+        if (CockpitAngleExp) cockpitResponseExponent = CockpitAngleExp.value;
+    }
+
     private void Start()
     {
         if (applyMaterialVisualSettingsOnStart)
@@ -158,6 +183,7 @@ public class WindowComfortDriver : UdonSharpBehaviour
         float weightedWy = wy * wyWeight;
         float weightedWz = wz * wzWeight;
 
+        //should probably be squared to avoid sqrt?
         float rateMag = Mathf.Sqrt(
             weightedWx * weightedWx +
             weightedWy * weightedWy +
