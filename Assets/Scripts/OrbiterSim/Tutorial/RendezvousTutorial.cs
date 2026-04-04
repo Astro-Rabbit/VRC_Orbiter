@@ -49,35 +49,14 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public GC_Core gc;
     public TMP_Text output;
     public GameObject continueButton;
-
     public SimManager simManager;
-
-
-    [Header("Tablet Tutorial UI")]
-    public TMP_Text simOwnerText;
-    public TMP_Text statusText;
-    public TMP_Text warpText;
-
-    [Header("Tablet Tutorial Buttons")]
-    public TabletButton startButton;
-    public TabletButton replayButton;
-    public TabletButton continueTabletButton;
-    public TabletButton restartButton;
-
-    [Header("Tablet Tutorial Refresh")]
-    public float refreshInterval = 0.1f;
+    public RendezvousTutorialVideoController videoController;
 
     [Header("Tutorial Scenario")]
     public int tutorialScenarioIndex = 0;
 
-    private float _refreshTimer = 0f;
-    private bool _lastCanStart = false;
-    private bool _lastCanReplay = false;
-    private bool _lastCanContinue = false;
-    private bool _lastCanRestart = false;
-
-    public RendezvousTutorialVideoController videoController;
-    private int lastClip = -1;
+    [Header("Tutorial Runtime")]
+    public bool tutorialActive = false;
 
     [Header("Settings")]
     public int targetIndex = 2;
@@ -85,8 +64,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
     [Header("Thresholds")]
     public double alignInLim = 0.15;
     public double alignOutLim = 0.2;
-    //public double flybyInLim = 150000;
-    //public double flybyOutLim = 200000;
     public double proximityInLim = 200000;
     public double proximityOutLim = 300000;
     public double dirInLim = 2.0;
@@ -94,7 +71,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public double interceptTimeLim = 300;
     public float velMatchInLim = 20.0f;
     public float velMatchOutLim = 200.0f;
-
 
     [Header("Close approach thresholds")]
     public float closingSpeedPerKm = 1.0f;
@@ -108,7 +84,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public bool closingSpeedReached = false;
     public bool didClosingBurn = false;
     public bool inFinalZone = false;
-
 
     [Header("Sticky Condition Flags")]
     public bool planeAligned = false;
@@ -125,7 +100,9 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public bool readyTransfer = false;
     public bool readyMatch = false;
     public bool matchWarpDropDone = false;
+
     private int clip = (int)RendezvousTutorialClip.Intro;
+    private int lastClip = -1;
     private double nodeBurnTime;
     private double transferInterceptTime;
     private bool correctTarget;
@@ -134,20 +111,20 @@ public class RendezvousTutorial : UdonSharpBehaviour
     void Start()
     {
         Reset();
-        RefreshTabletUI(true);
-    }
-
-    void Update()
-    {
-        _refreshTimer += Time.deltaTime;
-        if (_refreshTimer >= refreshInterval) {
-            _refreshTimer = 0f;
-            RefreshTabletUI(false);
-        }
     }
 
     void LateUpdate()
     {
+        if (!tutorialActive)
+        {
+            clip = (int)RendezvousTutorialClip.Intro;
+
+            if (continueButton != null)
+                continueButton.SetActive(false);
+
+            return;
+        }
+
         UpdateStickyConditions();
 
         clip = SelectClip();
@@ -176,8 +153,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
             lastClip = clip;
         }
-
-
     }
 
     private int SelectClip()
@@ -216,9 +191,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
                 float desiredClosingSpeed = Mathf.Min((float)(rangeMeters / 1000.0) * closingSpeedPerKm, closingSpeedMax);
 
-                // Final completion zone:
-                // if close and still too fast, go back to canceling relative velocity.
-                // if close and slow enough, tutorial is done.
                 if (inFinalZone) {
                     if (relSpeed > finalZoneSpeedLim) {
                         if (!pointingDir || activeProgramId != GC_RuntimeState.PROG_RELVEL_RETRO) {
@@ -229,22 +201,18 @@ public class RendezvousTutorial : UdonSharpBehaviour
                     return (int)RendezvousTutorialClip.Outro;
                 }
 
-                // After the first target-burn cycle, hand off to the repeat-cycle guidance.
                 if (didClosingBurn) {
                     return (int)RendezvousTutorialClip.RestOfTheOwl;
                 }
 
-                // Before first target burn is complete, make sure we're pointing at target.
                 if (!pointingDir || activeProgramId != GC_RuntimeState.PROG_DOCK_POINT_PORT) {
                     return (int)RendezvousTutorialClip.TargetDir;
                 }
 
-                // Once the player has accelerated enough, ask for throttle cut.
                 if (closingSpeedReached) {
                     return (int)RendezvousTutorialClip.FinishBurn;
                 }
 
-                // Keep asking for forward burn until desired closing speed is reached.
                 return (int)RendezvousTutorialClip.TargetBurn;
             }
 
@@ -375,7 +343,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
         return false;
     }
 
-    // Conditions based on continuous variables that need hysteresis on their threshold are updated here
     void UpdateStickyConditions()
     {
         double time = 0.0;
@@ -411,7 +378,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
             hasAlignNode = false;
         }
 
-        // Ideally we'd actually check if we got a flyby, but this is much easier to implement for now
         if (hasTransferNode && execDone && time > nodeBurnTime) {
             hasTransferNode = false;
             onFlyby = true;
@@ -421,8 +387,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
         }
 
         if (dockingPage != null && dockingPage.hasTarget && correctTarget && execDone) {
-
-
             bool wasProximity = proximity;
 
             if (dockingPage.range < proximityInLim) {
@@ -457,8 +421,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
                     closingSpeedReached = true;
                 }
 
-                // Once the user has reached the closing speed and brought throttle back down,
-                // transition to the repeat-cycle instruction.
                 if (closingSpeedReached) {
                     float mainThrottle = 0f;
                     if (gc != null && gc.intent != null) {
@@ -483,6 +445,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
             pointingDir = false;
         }
     }
+
     public void OnAlignNodeCreate(double time)
     {
         hasAlignNode = true;
@@ -523,39 +486,13 @@ public class RendezvousTutorial : UdonSharpBehaviour
         if (videoController != null) {
             videoController.StopPlayback();
         }
-
-
-    }
-
-
-    public void StartTutorial()
-    {
-        if (!CanStartOrRestart()) return;
-
-        if (simManager != null) {
-            simManager.RestartToScenarioIndex(tutorialScenarioIndex);
-            simManager.SetRequestedWarp(1.0);
-        }
-
-        Reset();
-        RefreshTabletUI(true);
-    }
-
-    public void RestartTutorial()
-    {
-        if (!CanStartOrRestart()) return;
-
-        if (simManager != null) {
-            simManager.RestartToScenarioIndex(tutorialScenarioIndex);
-            simManager.SetRequestedWarp(1.0);
-        }
-
-        Reset();
-        RefreshTabletUI(true);
+        tutorialActive = false;
     }
 
     public void Continue()
     {
+        if (!tutorialActive) return;
+
         switch (clip) {
         case (int)RendezvousTutorialClip.Intro:
             readyStart = true;
@@ -573,57 +510,52 @@ public class RendezvousTutorial : UdonSharpBehaviour
             Debug.Log("WARNING: Tutorial next button pressed during invalid clip");
             break;
         }
-
-        RefreshTabletUI(true);
-
     }
 
     public void Replay()
     {
+        if (!tutorialActive) return;
+
         if (videoController != null) {
             videoController.PlayClip((RendezvousTutorialClip)clip, true);
         }
     }
 
-    private void RefreshTabletUI(bool forceButtonRefresh)
+    public void API_StartTutorial()
     {
-        UpdateSimOwnerText();
-        UpdateStatusText();
-        UpdateWarpText();
-
-        bool canStart = CanStartOrRestart();
-        bool canReplay = true;
-        bool canContinue = CanContinue();
-        bool canRestart = CanStartOrRestart();
-
-        if (forceButtonRefresh || canStart != _lastCanStart) {
-            ApplyButtonState(startButton, canStart);
-            _lastCanStart = canStart;
+        if (simManager != null) {
+            simManager.RestartToScenarioIndex(tutorialScenarioIndex);
+            simManager.SetRequestedWarp(1.0);
         }
 
-        if (forceButtonRefresh || canReplay != _lastCanReplay) {
-            ApplyButtonState(replayButton, canReplay);
-            _lastCanReplay = canReplay;
-        }
-
-        if (forceButtonRefresh || canContinue != _lastCanContinue) {
-            ApplyButtonState(continueTabletButton, canContinue);
-            _lastCanContinue = canContinue;
-        }
-
-        if (forceButtonRefresh || canRestart != _lastCanRestart) {
-            ApplyButtonState(restartButton, canRestart);
-            _lastCanRestart = canRestart;
-        }
+        Reset();
+        tutorialActive = true;
     }
 
-    private bool CanStartOrRestart()
+    public void API_StopTutorial()
     {
-        if (simManager == null) return false;
-        return simManager.CanLocalUserReset();
+        tutorialActive = false;
+        Reset();
     }
 
-    private bool CanContinue()
+    public void API_RestartTutorial()
+    {
+        API_StartTutorial();
+    }
+
+    public void API_ReplayTutorial()
+    {
+        if (!tutorialActive) return;
+        Replay();
+    }
+
+    public void API_ContinueTutorial()
+    {
+        if (!tutorialActive) return;
+        Continue();
+    }
+
+    public bool CanContinueNow()
     {
         switch (clip) {
             case (int)RendezvousTutorialClip.Intro:
@@ -631,76 +563,20 @@ public class RendezvousTutorial : UdonSharpBehaviour
             case (int)RendezvousTutorialClip.TransferInfo:
             case (int)RendezvousTutorialClip.MatchInfo:
                 return true;
-        }
-
-        return false;
-    }
-
-    private void UpdateSimOwnerText()
-    {
-        if (simOwnerText == null) return;
-
-        string name = "---";
-        if (simManager != null) {
-            VRCPlayerApi owner = Networking.GetOwner(simManager.gameObject);
-            if (owner != null)
-                name = owner.displayName;
-        }
-
-        simOwnerText.text = "SIM OWNER: " + name;
-    }
-
-    private void UpdateStatusText()
-    {
-        if (statusText == null) return;
-
-        if (simManager == null) {
-            statusText.text = "STATUS: ---";
-            return;
-        }
-
-        if (simManager.CanLocalUserReset()) {
-            statusText.text = "STATUS: CONTROL";
-        } else {
-            statusText.text = "STATUS: READ ONLY";
+            default:
+                return false;
         }
     }
 
-    private void UpdateWarpText()
+    public string GetCurrentClipName()
     {
-        if (warpText == null) return;
-
-        double actualWarp = 1.0;
-        if (clock != null)
-            actualWarp = clock.timeScale;
-
-        double allowedWarp = actualWarp;
-        if (simManager != null && simManager.warpPolicy != null)
-            allowedWarp = simManager.warpPolicy.currentAllowedTimeScale;
-
-        warpText.text = "WARP: " + FormatWarp(actualWarp) + " / ALLOW: " + FormatWarp(allowedWarp);
+        return tutorialActive ? ((RendezvousTutorialClip)clip).ToString() : "OFF";
     }
 
-    private void ApplyButtonState(TabletButton btn, bool enabledState)
+    public string GetTutorialStatusText()
     {
-        if (btn == null) return;
-
-        btn.mode = enabledState ? TabletButtonMode.Trigger : TabletButtonMode.None;
-
-        if (btn.targetGraphic != null)
-            btn.targetGraphic.color = enabledState ? btn.normalColor : btn.disabledColor;
+        if (!tutorialActive) return "OFF";
+        if (clip == (int)RendezvousTutorialClip.Outro) return "COMPLETE";
+        return "RUNNING";
     }
-
-    private string FormatWarp(double warp)
-    {
-        double rounded = System.Math.Round(warp);
-
-        if (System.Math.Abs(warp - rounded) < 1e-9)
-            return ((int)rounded).ToString() + "x";
-
-        return warp.ToString("F2") + "x";
-    }
-
-
 }
-
