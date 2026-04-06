@@ -103,7 +103,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public bool matchWarpDropDone = false;
 
     private int clip = (int)RendezvousTutorialClip.Intro;
-    private int lastClip = -1;
     private double nodeBurnTime;
     private double transferInterceptTime;
     private bool correctTarget;
@@ -148,11 +147,8 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
         }
 
-        if (clip != lastClip) {
-            if (videoController != null) {
-                videoController.PlayClip((RendezvousTutorialClip)clip, false);
-            }
-            lastClip = clip;
+        if (videoController != null) {
+            videoController.PlayClip((RendezvousTutorialClip)clip, false);
         }
     }
 
@@ -482,7 +478,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
         matchWarpDropDone = false;
 
         clip = (int)RendezvousTutorialClip.Intro;
-        lastClip = -1;
 
         if (videoController != null) {
             videoController.StopPlayback();

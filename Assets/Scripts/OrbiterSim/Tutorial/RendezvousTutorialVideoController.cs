@@ -58,12 +58,16 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
     public float restOfTheOwlDuration = 0f;
     public float outroDuration = 0f;
 
+    [Header("Minimum time between starting video clips")]
+    public float requestInterval = 5.5f;
+
     private int _currentClip = -1;
     private int _pendingClipId = -1;
     private GameObject _pendingClipObject = null;
 
     private bool _playing = false;
     private float _hideAtTime = -1f;
+    private float _throttleTime = -1f;
 
     void Start()
     {
@@ -72,6 +76,8 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
         if (avatarDisplayRoot != null) {
             avatarDisplayRoot.SetActive(false);
         }
+
+        _throttleTime = Time.time;
     }
 
     void Update()
@@ -83,6 +89,10 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
 
     public void PlayClip(RendezvousTutorialClip clip, bool forceRestart)
     {
+        if (_throttleTime > 0f && Time.time < _throttleTime) {
+            return;
+        }
+
         int clipId = (int)clip;
 
         if (!forceRestart && _currentClip == clipId) {
@@ -115,6 +125,8 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
         }
 
         SendCustomEventDelayedFrames(nameof(EnablePendingClip), 1);
+
+        _throttleTime = Time.time + requestInterval;
     }
 
     public void EnablePendingClip()
