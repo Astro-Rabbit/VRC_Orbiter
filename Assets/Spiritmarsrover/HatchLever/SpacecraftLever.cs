@@ -49,73 +49,69 @@ public class SpacecraftLever : UdonSharpBehaviour
             handleAnlge = Mathf.Clamp(handleAnlge, 0f, 180f);
         }
 
-        if (!isHeld && Networking.GetOwner(gameObject) == Networking.LocalPlayer)//or not owner?
+        bool isLocalOwner = (Networking.GetOwner(gameObject) == Networking.LocalPlayer);
+
+        if (!isHeld&& isLocalOwner)
         {
             gameObject.transform.position = LeverHandlePos.transform.position;
+            handle.gameObject.transform.position = LeverHandlePos.transform.position;
 
+        }
+
+        if (isHeld && isLocalOwner)
+        {
+            float lastTarget = TargetAngle;
+
+            // Logic for the 0-degree end (Closed)
+            if (handleAnlge <= 0f)
+            {
+                TargetAngle = 0f;
+            }
+            else if (handleAnlge < 10f)
+            {
+                // If we were already latched at 0, stay at 0.
+                // If we are approaching 0, stay at -10 until handle hits 0.
+                TargetAngle = (lastTarget == 0f) ? 0f : -10f;
+            }
+            // Logic for the 180-degree end (Open)
+            else if (handleAnlge >= 180f)
+            {
+                TargetAngle = -180f;
+            }
+            else if (handleAnlge > 170f)
+            {
+                // If we were already latched at 180, stay at 180.
+                // If we are approaching 180, stay at -170 until handle hits 180.
+                TargetAngle = (lastTarget == -180f) ? -180f : -170f;
+            }
+            // Middle range
+            else
+            {
+                TargetAngle = -handleAnlge;
+            }
+
+            // Check if we just left or entered the 0-degree latch
+            bool zeroLatchChanged = (lastTarget == 0f && TargetAngle != 0f) || (lastTarget != 0f && TargetAngle == 0f);
+
+            // Check if we just left or entered the 180-degree latch
+            bool endLatchChanged = (lastTarget == -180f && TargetAngle != -180f) || (lastTarget != -180f && TargetAngle == -180f);
+
+            // Check if we just hit or left the resistance points (-10 or -170)
+            bool resistanceChanged = (lastTarget != -10f && TargetAngle == -10f) || (lastTarget == -10f && TargetAngle != -10f)
+                                  || (lastTarget != -170f && TargetAngle == -170f) || (lastTarget == -170f && TargetAngle != -170f);
+
+            if (zeroLatchChanged || endLatchChanged || resistanceChanged)
+            {
+                TriggerHaptic(0.05f, 0.7f, 1.0f);
+            }
         }
         else
         {
-            //not herustic
-            //if(handleAnlge < 10f)
-            //{
-            //    TargetAngle = 0f;
-            //}
-            //else
-            //{
-            //    TargetAngle = -handleAnlge;
-            //}
-            {
-                float lastTarget = TargetAngle;
-
-                // Logic for the 0-degree end (Closed)
-                if (handleAnlge <= 0f)
-                {
-                    TargetAngle = 0f;
-                }
-                else if (handleAnlge < 10f)
-                {
-                    // If we were already latched at 0, stay at 0.
-                    // If we are approaching 0, stay at -10 until handle hits 0.
-                    TargetAngle = (lastTarget == 0f) ? 0f : -10f;
-                }
-                // Logic for the 180-degree end (Open)
-                else if (handleAnlge >= 180f)
-                {
-                    TargetAngle = -180f;
-                }
-                else if (handleAnlge > 170f)
-                {
-                    // If we were already latched at 180, stay at 180.
-                    // If we are approaching 180, stay at -170 until handle hits 180.
-                    TargetAngle = (lastTarget == -180f) ? -180f : -170f;
-                }
-                // Middle range
-                else
-                {
-                    TargetAngle = -handleAnlge;
-                }
-
-                // Check if we just left or entered the 0-degree latch
-                bool zeroLatchChanged = (lastTarget == 0f && TargetAngle != 0f) || (lastTarget != 0f && TargetAngle == 0f);
-
-                // Check if we just left or entered the 180-degree latch
-                bool endLatchChanged = (lastTarget == -180f && TargetAngle != -180f) || (lastTarget != -180f && TargetAngle == -180f);
-
-                // Check if we just hit or left the resistance points (-10 or -170)
-                bool resistanceChanged = (lastTarget != -10f && TargetAngle == -10f) || (lastTarget == -10f && TargetAngle != -10f)
-                                      || (lastTarget != -170f && TargetAngle == -170f) || (lastTarget == -170f && TargetAngle != -170f);
-
-                if (zeroLatchChanged || endLatchChanged || resistanceChanged)
-                {
-                    if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
-                    {
-                        TriggerHaptic(0.05f, 0.7f, 1.0f);
-                    }
-                    
-                }
-            }
+            // Non-held local owner, and all remotes:
+            // animate purely from synced detent state
+            TargetAngle = isLeverOpen ? -180f : 0f;
         }
+
         angleOut = Mathf.LerpAngle(angleOut, TargetAngle, Time.deltaTime * lerpspeed);
         LeverPivot.transform.localRotation = Quaternion.Euler(angleOut, 0f, 0f);
         if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
@@ -155,6 +151,8 @@ public class SpacecraftLever : UdonSharpBehaviour
         if (Networking.GetOwner(gameObject) != Networking.LocalPlayer)
         {
             Networking.SetOwner(Networking.LocalPlayer, gameObject);
+            Networking.SetOwner(Networking.LocalPlayer, handle.gameObject);
+
         }
         isHeld = true;
         if (handle.currentHand == VRC_Pickup.PickupHand.Right)

@@ -607,12 +607,12 @@ Shader "Skybox/SkySunEarthTest"
                     if (PointSeesSun(pos, sunDir, _EarthRadiusM))
                     {
                         float lightNear, lightFar;
-                        if (RaySphereHit2(sunDir, -pos, rAtmo, lightNear, lightFar))
-                        {
+                        RaySphereHit2(sunDir, -pos, rAtmo, lightNear, lightFar);
+                        
                             rayleighSun = _RayleighAmount * ScatterSun(pos, lightFar, _RayleighScale);
                             mieSun = _MieAmount * ScatterSun(pos, lightFar, _MieScale);
                             sunVisible = 1.0;
-                        }
+
                     }
 
                     float3 transmission = exp(-(rayleighCam + rayleighSun + mieCam + mieSun));
