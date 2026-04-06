@@ -44,7 +44,7 @@ Shader "HUD/CollimatedOrbitV2"
         _NodeRemainingDV_mps ("Node Remaining DV mps", Float) = 0.0
         _NodeMarkerRadius ("Node Marker Radius", Float) = 0.028
         _NodeMarkerThickness ("Node Marker Thickness", Float) = 0.004
-
+        _NodeTgoSeconds ("Node TGO Seconds", Float) = 0.0
         _OrbitReadoutTextHeight ("Orbit Readout Text Height", Float) = 0.018
 
         _OrbitRDV_Value ("Orbit RDV Value", Float) = 0.0
@@ -57,6 +57,8 @@ Shader "HUD/CollimatedOrbitV2"
         _OrbitPER_Valid ("Orbit PER Valid", Float) = 0
         _OrbitPER_Value ("Orbit PER Value", Float) = 0.0
         _OrbitPER_UnitCode ("Orbit PER Unit Code", Float) = 1
+
+        _OrbitNextIsApo ("Orbit Next Event Is Apo", Float) = 1
 
         _FontAtlas ("Font Atlas", 2D) = "white" {}
         _FontSdfEdge ("Font SDF Edge", Float) = 0.5
@@ -173,6 +175,11 @@ Shader "HUD/CollimatedOrbitV2"
         _TargetNameC3 ("Target Name Char3", Float) = -1
         _TargetNameC4 ("Target Name Char4", Float) = -1
 
+        _OffscreenArrowSize ("Offscreen Arrow Size", Float) = 0.030
+        _OffscreenArrowThickness ("Offscreen Arrow Thickness", Float) = 0.004
+        _OffscreenArrowEdgeInset ("Offscreen Arrow Edge Inset", Float) = 0.080
+
+
     }
 
     SubShader
@@ -247,6 +254,10 @@ Shader "HUD/CollimatedOrbitV2"
             float _HudHalfFovY;
             float _HudIntensity;
             float4 _HudColor;
+
+            float _OffscreenArrowSize;
+            float _OffscreenArrowThickness;
+            float _OffscreenArrowEdgeInset;
 
             float _LineWidth;
             float _Softness;
@@ -332,6 +343,7 @@ Shader "HUD/CollimatedOrbitV2"
             float _NodeRemainingDV_mps;
             float _NodeMarkerRadius;
             float _NodeMarkerThickness;
+            float _NodeTgoSeconds;
 
             float _OrbitReadoutTextHeight;
 
@@ -341,6 +353,8 @@ Shader "HUD/CollimatedOrbitV2"
             float _OrbitAPO_Valid;
             float _OrbitAPO_Value;
             float _OrbitAPO_UnitCode;
+
+            float _OrbitNextIsApo;
 
             float _OrbitPER_Valid;
             float _OrbitPER_Value;
@@ -620,6 +634,20 @@ Shader "HUD/CollimatedOrbitV2"
                 return (upAxis.y < 0.0) ? -upAxis : upAxis;
             }
 
+
+            float2 ClampHudPointToEdge(float2 p, float inset)
+            {
+                float ax = abs(p.x);
+                float ay = abs(p.y);
+
+                float limit = 1.0 - inset;
+                float m = max(ax, ay);
+
+                if (m < 1e-6)
+                    return float2(0.0, limit);
+
+                return p * (limit / m);
+            }
 
             int GetTargetNameChar(int i)
             {
@@ -1035,6 +1063,372 @@ Shader "HUD/CollimatedOrbitV2"
                 return max(diamond, max(crossH, crossV));
             }
 
+
+            float DrawApproachFixedReadout(float2 uvh)
+            {
+                float hud = 0.0;
+
+                // Anchor in upper-left HUD space
+                float2 anchor = float2(-0.50, 0.42);
+                float rowH = 0.060;
+                float labelValueGap = 0.090;
+
+                float textH = _TargetTextHeight;
+                float2 along = float2(1.0, 0.0);
+                float2 up = float2(0.0, 1.0);
+
+                // ----------------------------                             
+                // TGT row
+                // ----------------------------
+                float2 tgtLabelCenter = anchor;
+                float2 tgtValueCenter = anchor + float2(labelValueGap, 0.0);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    tgtLabelCenter,
+                    textH,
+                    3,
+                    19, // T
+                    6,  // G
+                    19, // T
+                    -1,
+                    -1,
+                    along,
+                    up,
+                    false
+                );
+
+                int targetNameLen = (int)_TargetNameLen;
+                if (targetNameLen > 0)
+                {
+                    hud += DrawUpperLabel(
+                        uvh,
+                        tgtValueCenter,
+                        textH,
+                        targetNameLen,
+                        GetTargetNameChar(0),
+                        GetTargetNameChar(1),
+                        GetTargetNameChar(2),
+                        GetTargetNameChar(3),
+                        GetTargetNameChar(4),
+                        along,
+                        up,
+                        false
+                    );
+                }
+
+                // ----------------------------
+                // RNG row
+                // ----------------------------
+                float2 rngLabelCenter = anchor + float2(0.0, -rowH);
+                float2 rngValueCenter = anchor + float2(labelValueGap, -rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    rngLabelCenter,
+                    textH,
+                    3,
+                    17, // R
+                    13, // N
+                    6,  // G
+                    -1,
+                    -1,
+                    along,
+                    up,
+                    false
+                );
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    rngValueCenter,
+                    textH,
+                    _TargetRangeMeters,
+                    along,
+                    up,
+                    false
+                );
+
+                // ----------------------------
+                // RELV row
+                // ----------------------------
+                float2 relvLabelCenter = anchor + float2(0.0, -2.0 * rowH);
+                float2 relvValueCenter = anchor + float2(labelValueGap + 0.020, -2.0 * rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    relvLabelCenter,
+                    textH,
+                    4,
+                    17, // R
+                    4,  // E
+                    11, // L
+                    21, // V
+                    -1,
+                    along,
+                    up,
+                    false
+                );
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    relvValueCenter,
+                    textH,
+                    _TargetRelSpeedMps,
+                    along,
+                    up,
+                    false
+                );
+
+                return hud;
+            }
+
+
+            float DrawTimeUnitLabel(float2 uvh, float2 center, float glyphHeight, int unitCode)
+            {
+                // 0 = SEC
+                // 1 = MIN
+                // 2 = HR
+
+                if (unitCode == 0)
+                {
+                    return DrawUpperLabel(
+                        uvh, center, glyphHeight,
+                        3,
+                        18, // S
+                        4,  // E
+                        2,  // C
+                        -1, -1,
+                        float2(1.0, 0.0),
+                        float2(0.0, 1.0),
+                        false
+                    );
+                }
+
+                if (unitCode == 1)
+                {
+                    return DrawUpperLabel(
+                        uvh, center, glyphHeight,
+                        3,
+                        12, // M
+                        8,  // I
+                        13, // N
+                        -1, -1,
+                        float2(1.0, 0.0),
+                        float2(0.0, 1.0),
+                        false
+                    );
+                }
+
+                return DrawUpperLabel(
+                    uvh, center, glyphHeight,
+                    2,
+                    7,  // H
+                    17, // R
+                    -1, -1, -1,
+                    float2(1.0, 0.0),
+                    float2(0.0, 1.0),
+                    false
+                );
+            }
+
+
+            float EncodeTimeDisplayShader(float seconds, out int unitCode)
+            {
+                float a = abs(seconds);
+
+                if (a >= 3600.0)
+                {
+                    unitCode = 2; // hr
+                    return seconds / 3600.0;
+                }
+
+                if (a >= 60.0)
+                {
+                    unitCode = 1; // min
+                    return seconds / 60.0;
+                }
+
+                unitCode = 0; // sec
+                return seconds;
+            }            
+
+            float DrawNodeFixedReadout(float2 uvh)
+            {
+                float hud = 0.0;
+
+                float2 anchor = float2(0.50, 0.34);
+                float rowH = 0.060;
+                float labelValueGap = 0.090;
+
+                float textH = _OrbitReadoutTextHeight;
+                float2 along = float2(1.0, 0.0);
+                float2 up = float2(0.0, 1.0);
+
+                // ----------------------------
+                // DN row
+                // ----------------------------
+                float2 dnLabelCenter = anchor;
+                float2 dnValueCenter = anchor + float2(labelValueGap, 0.0);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    dnLabelCenter,
+                    textH,
+                    2,
+                    3,   // D
+                    21,  // N
+                    -1, -1, -1,
+                    along,
+                    up,
+                    false
+                );
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    dnValueCenter,
+                    textH,
+                    _NodeDVmag_mps,
+                    along,
+                    up,
+                    false
+                );
+
+                // ----------------------------
+                // REM row
+                // ----------------------------
+                float2 remLabelCenter = anchor + float2(0.0, -rowH);
+                float2 remValueCenter = anchor + float2(labelValueGap + 0.015, -rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    remLabelCenter,
+                    textH,
+                    3,
+                    17, // R
+                    4,  // E
+                    12, // M
+                    -1, -1,
+                    along,
+                    up,
+                    false
+                );
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    remValueCenter,
+                    textH,
+                    _NodeRemainingDV_mps,
+                    along,
+                    up,
+                    false
+                );
+
+                // ----------------------------
+                // TGO row
+                // ----------------------------
+                float2 tgoLabelCenter = anchor + float2(0.0, -2.0 * rowH);
+                float2 tgoValueCenter = anchor + float2(labelValueGap + 0.010, -2.0 * rowH);
+                float2 tgoUnitCenter  = anchor + float2(labelValueGap + 0.100, -2.0 * rowH);
+
+                hud += DrawUpperLabel(
+                    uvh,
+                    tgoLabelCenter,
+                    textH,
+                    3,
+                    19, // T
+                    6,  // G
+                    14, // O
+                    -1, -1,
+                    along,
+                    up,
+                    false
+                );
+
+                int tgoUnitCode = 0;
+                float tgoDisplay = EncodeTimeDisplayShader(_NodeTgoSeconds, tgoUnitCode);
+
+                hud += DrawUnsignedFixed2Generic(
+                    uvh,
+                    tgoValueCenter,
+                    textH,
+                    max(0.0, tgoDisplay),
+                    along,
+                    up,
+                    false
+                );
+
+                hud += DrawTimeUnitLabel(
+                    uvh,
+                    tgoUnitCenter,
+                    textH,
+                    tgoUnitCode
+                );
+
+                return hud;
+            }
+
+            float MarkerOffscreenArrow(float2 uvh, float2 center, float2 dirToTarget, float size, float thickness, float softness)
+            {
+                float2 fwd = normalize(dirToTarget);
+                float2 right = float2(fwd.y, -fwd.x);
+                float2 dp = uvh - center;
+
+                // Arrow tip sits toward target direction
+                float2 tip = fwd * (size * 0.55);
+                float2 baseCenter = -fwd * (size * 0.10);
+
+                float2 leftBase  = baseCenter + right * (size * 0.35);
+                float2 rightBase = baseCenter - right * (size * 0.35);
+
+                // Head sides
+                float headL = aa_segment_local(
+                    dp - 0.5 * (tip + leftBase),
+                    normalize(tip - leftBase),
+                    float2(-(normalize(tip - leftBase)).y, (normalize(tip - leftBase)).x),
+                    0.5 * length(tip - leftBase),
+                    thickness,
+                    softness
+                );
+
+                float headR = aa_segment_local(
+                    dp - 0.5 * (tip + rightBase),
+                    normalize(tip - rightBase),
+                    float2(-(normalize(tip - rightBase)).y, (normalize(tip - rightBase)).x),
+                    0.5 * length(tip - rightBase),
+                    thickness,
+                    softness
+                );
+
+                // Short stem
+                float stem = aa_segment_local(
+                    dp + fwd * (size * 0.22),
+                    fwd,
+                    right,
+                    size * 0.22,
+                    thickness,
+                    softness
+                );
+
+                return max(stem, max(headL, headR));
+            }
+
+            float DrawOffscreenArrow(float2 uvh, float2 markerPos, float size, float thickness, float inset, float softness)
+            {
+                float maxAbs = max(abs(markerPos.x), abs(markerPos.y));
+
+                // Only draw when off-screen
+                if (maxAbs <= 1.0)
+                    return 0.0;
+
+                float2 edgePos = ClampHudPointToEdge(markerPos, inset);
+
+                // Arrow should point toward the real offscreen marker direction
+                float2 dir = normalize(markerPos);
+
+                return MarkerOffscreenArrow(uvh, edgePos, dir, size, thickness, softness);
+            }
+
+
             fixed4 fragHud(v2f i) : SV_Target
             {
                 float3 ray_B = normalize(i.worldPos - _WorldSpaceCameraPos.xyz);
@@ -1390,33 +1784,52 @@ Shader "HUD/CollimatedOrbitV2"
                     float textH = _OrbitReadoutTextHeight;
 
                     // Row anchors
-                    float2 rdvLabelCenter = float2(-0.42, 0.34);
-                    float2 rdvValueCenter = float2(-0.33, 0.34);
-                    float2 rdvUnitCenter  = float2(-0.25, 0.34);
+                    float2 rdvLabelCenter = float2(-0.42, 0.22);
+                    float2 rdvValueCenter = float2(-0.34, 0.22);
+                    float2 rdvUnitCenter  = float2(-0.27, 0.22);
 
-                    float2 apoLabelCenter = float2(-0.42, 0.28);            
-                    float2 apoValueCenter = float2(-0.33, 0.28);
-                    float2 apoUnitCenter  = float2(-0.25, 0.28);
+                    float2 apoLabelCenter = float2(-0.42, 0.34);            
+                    float2 apoValueCenter = float2(-0.34, 0.34);
+                    float2 apoUnitCenter  = float2(-0.27, 0.34);
 
-                    float2 perLabelCenter = float2(-0.42, 0.22);             
-                    float2 perValueCenter = float2(-0.33, 0.22);
-                    float2 perUnitCenter  = float2(-0.25, 0.22);
+                    float2 perLabelCenter = float2(-0.42, 0.28);             
+                    float2 perValueCenter = float2(-0.34, 0.28);
+                    float2 perUnitCenter  = float2(-0.27, 0.28);
 
-                    if (_NodeValid > 0.5)
+                    if (_OrbitPER_Valid > 0.5) // or whatever your current condition is for drawing row 1
                     {
-                        hud += DrawUpperLabel(
-                            uvh,
-                            rdvLabelCenter,
-                            textH,
-                            3,
-                            17, // R
-                            3,  // D
-                            21, // V
-                            -1, -1,
-                            float2(1.0, 0.0),
-                            float2(0.0, 1.0),
-                            false
-                        );
+                        if (_OrbitNextIsApo > 0.5)
+                        {
+                            hud += DrawUpperLabel(
+                                uvh,
+                                rdvLabelCenter,
+                                textH,
+                                3,
+                                19, // T
+                                19, // T
+                                0,  // A
+                                -1, -1,
+                                float2(1.0, 0.0),
+                                float2(0.0, 1.0),
+                                false
+                            );
+                        }
+                        else
+                        {
+                            hud += DrawUpperLabel(
+                                uvh,
+                                rdvLabelCenter,
+                                textH,
+                                3,
+                                19, // T
+                                19, // T
+                                15, // P
+                                -1, -1,
+                                float2(1.0, 0.0),
+                                float2(0.0, 1.0),
+                                false
+                            );
+                        }
 
                         hud += DrawUnsignedFixed2Generic(
                             uvh,
@@ -1428,7 +1841,7 @@ Shader "HUD/CollimatedOrbitV2"
                             false
                         );
 
-                        hud += DrawUnitLabel(
+                        hud += DrawTimeUnitLabel(
                             uvh,
                             rdvUnitCenter,
                             textH,
@@ -1504,6 +1917,13 @@ Shader "HUD/CollimatedOrbitV2"
                         );
                     }
                 }
+
+                if (orbitMode && _NodeValid > 0.5)
+                {
+                    hud += DrawNodeFixedReadout(uvh);
+                }
+
+
                 // --------------------------------
                 // Orbit-mode selected node overlay
                 // --------------------------------
@@ -1523,6 +1943,19 @@ Shader "HUD/CollimatedOrbitV2"
                     hud += nodeMarker;
                 }
 
+                if (orbitMode && _NodeValid > 0.5)
+                {
+                    float2 nodePos = _NodePos_HUD.xy;
+                    hud += DrawOffscreenArrow(
+                        uvh,
+                        nodePos,
+                        _OffscreenArrowSize,
+                        _OffscreenArrowThickness,
+                        _OffscreenArrowEdgeInset,
+                        _Softness
+                    );
+                }
+
                 // --------------------------------
                 // Mode-independent selected target overlay
                 // --------------------------------
@@ -1540,50 +1973,13 @@ Shader "HUD/CollimatedOrbitV2"
 
                     hud += targetBox;
 
-                    // ----------------------------
-                    // Target short name above box
-                    // ----------------------------
-                    int targetNameLen = (int)_TargetNameLen;
-                    if (targetNameLen > 0)
-                    {
-                        float2 targetNameCenter = targetPos + float2(0.0, _TargetBoxHalfSize + 0.030);
-
-                        hud += DrawUpperLabel(
-                            uvh,
-                            targetNameCenter,
-                            _TargetTextHeight,
-                            targetNameLen,
-                            GetTargetNameChar(0),
-                            GetTargetNameChar(1),
-                            GetTargetNameChar(2),
-                            GetTargetNameChar(3),
-                            GetTargetNameChar(4),
-                            float2(1.0, 0.0),
-                            float2(0.0, 1.0),
-                            false
-                        );
-                    }
 
                     // ----------------------------
                     // RNG label + range below box
                     // ----------------------------
                     float2 rngLabelCenter = targetPos + float2(-0.040, -(_TargetBoxHalfSize + 0.040));
-                    float2 rngValueCenter = targetPos + float2(0.038, -(_TargetBoxHalfSize + 0.040));
+                    float2 rngValueCenter = targetPos + float2(0.038, -(_TargetBoxHalfSize + 0.040));                               
 
-                    hud += DrawUpperLabel(
-                        uvh,
-                        rngLabelCenter,
-                        _TargetTextHeight,
-                        3,
-                        17, // R
-                        13, // N
-                        6,  // G
-                        -1,
-                        -1,
-                        float2(1.0, 0.0),
-                        float2(0.0, 1.0),
-                        false
-                    );
 
                     hud += DrawUnsignedFixed2Generic(
                         uvh,
@@ -1594,6 +1990,11 @@ Shader "HUD/CollimatedOrbitV2"
                         float2(0.0, 1.0),
                         false
                     );
+                }
+
+                if (approachMode)
+                {
+                    hud += DrawApproachFixedReadout(uvh);
                 }
 
                 if (approachMode && _TargetRelVelValid > 0.5)
@@ -1624,6 +2025,7 @@ Shader "HUD/CollimatedOrbitV2"
 
                     hud += 0.95 * relProgMarker;
                     hud += 0.95 * relRetroMarker;
+                    
 
                     // RELV label + value only on prograde marker
                     float2 relvLabelCenter = relProg + float2(-0.050, -(_TargetRelMarkerRadius + 0.034));
@@ -1652,6 +2054,19 @@ Shader "HUD/CollimatedOrbitV2"
                         float2(1.0, 0.0),
                         float2(0.0, 1.0),
                         false
+                    );
+                }
+
+                if (approachMode && _TargetValid > 0.5)
+                {
+                    float2 targetPos = _TargetPos_HUD.xy;
+                    hud += DrawOffscreenArrow(
+                        uvh,
+                        targetPos,
+                        _OffscreenArrowSize,
+                        _OffscreenArrowThickness,
+                        _OffscreenArrowEdgeInset,
+                        _Softness
                     );
                 }
 

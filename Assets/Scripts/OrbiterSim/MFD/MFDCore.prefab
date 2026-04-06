@@ -154,6 +154,7 @@ MonoBehaviour:
   - {fileID: 6105589936145318409}
   - {fileID: 455957551047320135}
   - {fileID: 4629724221398050803}
+  - {fileID: 7868652562706066960}
 --- !u!114 &1093245788015769969
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -547,6 +548,7 @@ Transform:
   - {fileID: 3424924984732436302}
   - {fileID: 4301541287973558800}
   - {fileID: 4388549416942919925}
+  - {fileID: 5117320401207858129}
   m_Father: {fileID: 1268574231613272068}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1895216814234379581
@@ -700,13 +702,19 @@ MonoBehaviour:
   craft: {fileID: 0}
   src: {fileID: 7088621204662201330}
   tgt: {fileID: 6195667392185332091}
+  gc: {fileID: 0}
+  tutorial: {fileID: 0}
+  hasTarget: 0
   ascTime: 0
   descTime: 0
+  currentTime: 0
   inclination: 0
   dx: 0
   dy: 0
   px: 0
   py: 0
+  anBurn: {x: 0, y: 0, z: 0}
+  dnBurn: {x: 0, y: 0, z: 0}
 --- !u!114 &1120588285014815308
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -973,6 +981,7 @@ MonoBehaviour:
   solver: {fileID: 279027433865367991}
   fitter: {fileID: 6900009514466072649}
   propagator: {fileID: 7336448340245304807}
+  tutorial: {fileID: 0}
   hasTarget: 0
   tgtPx: 0
   tgtPy: 0
@@ -1213,9 +1222,11 @@ MonoBehaviour:
   - 3
   - 10
   lateralScaleIndex: 2
+  hasTarget: 0
   portSelected: 0
   range: 0
   closure: 0
+  speed: 0
   offsetX: 0
   offsetY: 0
   angleX: 0
@@ -1401,9 +1412,10 @@ MonoBehaviour:
   - TSFR
   - DOCK
   - NODE
-  logoTexture: {fileID: 0}
-  logoRectUv: {x: 0.32, y: 0.32, z: 0.68, w: 0.68}
-  logoTint: {r: 1, g: 1, b: 1, a: 1}
+  - 'MAP '
+  logoTexture: {fileID: 2800000, guid: d13d05d48ead8a741924e1bde4009b09, type: 3}
+  logoRectUv: {x: 0.32, y: 0.44, z: 0.68, w: 0.8}
+  logoTint: {r: 0.16078432, g: 0.13725491, b: 1, a: 1}
 --- !u!114 &1945092455975494804
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -1427,6 +1439,105 @@ MonoBehaviour:
   serializedProgramAsset: {fileID: 11400000, guid: 40c38a0dbb62c494091945bbc7070ed7,
     type: 2}
   programSource: {fileID: 11400000, guid: 160c17973d666d7408e8533c2a368185, type: 2}
+  serializedPublicVariablesBytesString: Ai8AAAAAATIAAABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlAFQAYQBiAGwAZQAsACAAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4AAAAAAAYBAAAAAAAAACcBBAAAAHQAeQBwAGUAAWgAAABTAHkAcwB0AGUAbQAuAEMAbwBsAGwAZQBjAHQAaQBvAG4AcwAuAEcAZQBuAGUAcgBpAGMALgBMAGkAcwB0AGAAMQBbAFsAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4ALgBJAG4AdABlAHIAZgBhAGMAZQBzAC4ASQBVAGQAbwBuAFYAYQByAGkAYQBiAGwAZQAsACAAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4AXQBdACwAIABtAHMAYwBvAHIAbABpAGIAAQEJAAAAVgBhAHIAaQBhAGIAbABlAHMALwEAAAABaAAAAFMAeQBzAHQAZQBtAC4AQwBvAGwAbABlAGMAdABpAG8AbgBzAC4ARwBlAG4AZQByAGkAYwAuAEwAaQBzAHQAYAAxAFsAWwBWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAEkAbgB0AGUAcgBmAGEAYwBlAHMALgBJAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlACwAIABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgBdAF0ALAAgAG0AcwBjAG8AcgBsAGkAYgABAAAABgEAAAAAAAAAAi8CAAAAAUkAAABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlAGAAMQBbAFsAUwB5AHMAdABlAG0ALgBJAG4AdAAzADIALAAgAG0AcwBjAG8AcgBsAGkAYgBdAF0ALAAgAFYAUgBDAC4AVQBkAG8AbgAuAEMAbwBtAG0AbwBuAAIAAAAGAgAAAAAAAAAnAQQAAAB0AHkAcABlAAEXAAAAUwB5AHMAdABlAG0ALgBTAHQAcgBpAG4AZwAsACAAbQBzAGMAbwByAGwAaQBiACcBCgAAAFMAeQBtAGIAbwBsAE4AYQBtAGUAAR8AAABfAF8AXwBVAGQAbwBuAFMAaABhAHIAcABCAGUAaABhAHYAaQBvAHUAcgBWAGUAcgBzAGkAbwBuAF8AXwBfACcBBAAAAHQAeQBwAGUAARYAAABTAHkAcwB0AGUAbQAuAEkAbgB0ADMAMgAsACAAbQBzAGMAbwByAGwAaQBiABcBBQAAAFYAYQBsAHUAZQACAAAABwUHBQcF
+  publicVariablesUnityEngineObjects: []
+  publicVariablesSerializationDataFormat: 0
+--- !u!1 &6336041509862289032
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5117320401207858129}
+  - component: {fileID: 7868652562706066960}
+  - component: {fileID: 4039729364626790588}
+  m_Layer: 0
+  m_Name: MFDMapPage
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5117320401207858129
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6336041509862289032}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 5982624544049148659}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &7868652562706066960
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6336041509862289032}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6cb8421361c9dc140924ba959b2f9c4f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  serializationData:
+    SerializedFormat: 0
+    SerializedBytes: 
+    ReferencedUnityObjects: []
+    SerializedBytesString: 
+    Prefab: {fileID: 0}
+    PrefabModificationsReferencedUnityObjects: []
+    PrefabModifications: []
+    SerializationNodes: []
+  _udonSharpBackingUdonBehaviour: {fileID: 4039729364626790588}
+  nav: {fileID: 0}
+  bodies: {fileID: 0}
+  groundTrack: {fileID: 0}
+  mapRectUv: {x: 0.04, y: 0.16, z: 0.96, w: 0.84}
+  mapSourceUv: {x: 0, y: 0, z: 1, w: 1}
+  borderColor: {r: 0, g: 1, b: 0, a: 1}
+  borderPadUv: 0.006
+  hasValidMap: 0
+  bodyLabel: ---
+  utcYear: 0
+  utcMonth: 0
+  utcDay: 0
+  utcHour: 0
+  utcMinute: 0
+  utcSecond: 0
+  latDeg: 0
+  lonDeg: 0
+  altMeters: 0
+--- !u!114 &4039729364626790588
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6336041509862289032}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 45115577ef41a5b4ca741ed302693907, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  interactTextPlacement: {fileID: 0}
+  interactText: Use
+  interactTextGO: {fileID: 0}
+  proximity: 2
+  SynchronizePosition: 0
+  AllowCollisionOwnershipTransfer: 0
+  Reliable: 0
+  _syncMethod: 2
+  serializedProgramAsset: {fileID: 11400000, guid: 67d131bf7e034524d8a1b890407cec85,
+    type: 2}
+  programSource: {fileID: 11400000, guid: 2003d5107e451d4409dcb8fee0284e22, type: 2}
   serializedPublicVariablesBytesString: Ai8AAAAAATIAAABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlAFQAYQBiAGwAZQAsACAAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4AAAAAAAYBAAAAAAAAACcBBAAAAHQAeQBwAGUAAWgAAABTAHkAcwB0AGUAbQAuAEMAbwBsAGwAZQBjAHQAaQBvAG4AcwAuAEcAZQBuAGUAcgBpAGMALgBMAGkAcwB0AGAAMQBbAFsAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4ALgBJAG4AdABlAHIAZgBhAGMAZQBzAC4ASQBVAGQAbwBuAFYAYQByAGkAYQBiAGwAZQAsACAAVgBSAEMALgBVAGQAbwBuAC4AQwBvAG0AbQBvAG4AXQBdACwAIABtAHMAYwBvAHIAbABpAGIAAQEJAAAAVgBhAHIAaQBhAGIAbABlAHMALwEAAAABaAAAAFMAeQBzAHQAZQBtAC4AQwBvAGwAbABlAGMAdABpAG8AbgBzAC4ARwBlAG4AZQByAGkAYwAuAEwAaQBzAHQAYAAxAFsAWwBWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAEkAbgB0AGUAcgBmAGEAYwBlAHMALgBJAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlACwAIABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgBdAF0ALAAgAG0AcwBjAG8AcgBsAGkAYgABAAAABgEAAAAAAAAAAi8CAAAAAUkAAABWAFIAQwAuAFUAZABvAG4ALgBDAG8AbQBtAG8AbgAuAFUAZABvAG4AVgBhAHIAaQBhAGIAbABlAGAAMQBbAFsAUwB5AHMAdABlAG0ALgBJAG4AdAAzADIALAAgAG0AcwBjAG8AcgBsAGkAYgBdAF0ALAAgAFYAUgBDAC4AVQBkAG8AbgAuAEMAbwBtAG0AbwBuAAIAAAAGAgAAAAAAAAAnAQQAAAB0AHkAcABlAAEXAAAAUwB5AHMAdABlAG0ALgBTAHQAcgBpAG4AZwAsACAAbQBzAGMAbwByAGwAaQBiACcBCgAAAFMAeQBtAGIAbwBsAE4AYQBtAGUAAR8AAABfAF8AXwBVAGQAbwBuAFMAaABhAHIAcABCAGUAaABhAHYAaQBvAHUAcgBWAGUAcgBzAGkAbwBuAF8AXwBfACcBBAAAAHQAeQBwAGUAARYAAABTAHkAcwB0AGUAbQAuAEkAbgB0ADMAMgAsACAAbQBzAGMAbwByAGwAaQBiABcBBQAAAFYAYQBsAHUAZQACAAAABwUHBQcF
   publicVariablesUnityEngineObjects: []
   publicVariablesSerializationDataFormat: 0
@@ -1597,7 +1708,7 @@ MonoBehaviour:
   minTimeOfFlightSec: 120
   burnSearchMaxSec: 21600
   encounterSearchMaxSec: 21600
-  dvCapMps: 1000
+  dvCapMps: 11000
   autoStatus: 0
   autoValid: 0
   autoBurnTime: 0

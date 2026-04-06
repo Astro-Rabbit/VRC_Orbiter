@@ -80,6 +80,8 @@ public class DockingComputer : UdonSharpBehaviour
     private byte _dbgLastRemotePresentedPhase = 255;
     private int _dbgLastRetractBucket = -999;
 
+    private int _dbgRemoteTickCount = 0;
+    private int _dbgRemoteLastTickFrame = -1;
     private bool HasSimAuthority()
     {
         if (simManager != null) return simManager.IsSimOwner();
@@ -236,6 +238,9 @@ public class DockingComputer : UdonSharpBehaviour
             dock.retractS = 0f;
             dock.retractCommanded = false;
 
+            dock.retractStartRelPos_SB = dock.relPos_SB;
+            dock.retractStart_qCraftToStation = dock.qCraftToStation;
+
             if (netCore != null)
             {
                 byte primary = st.primaryBodyId;
@@ -268,13 +273,12 @@ public class DockingComputer : UdonSharpBehaviour
         {
             dock.retractS = Mathf.MoveTowards(dock.retractS, 1f, dock.retractSpeed * dt);
 
-            Vector3 relPos = Vector3.Lerp(dock.relPos_SB, dock.targetRelPos_SB, dock.retractS);
-            Quaternion qCtoS = Quaternion.Slerp(dock.qCraftToStation, dock.target_qCraftToStation, dock.retractS);
-
+            Vector3 relPos = Vector3.Lerp(dock.retractStartRelPos_SB, dock.targetRelPos_SB, dock.retractS);
+            Quaternion qCtoS = Quaternion.Slerp(dock.retractStart_qCraftToStation, dock.target_qCraftToStation, dock.retractS);
             ApplyDockedKinematics(st, relPos, qCtoS);
 
             // Hard once retract complete + very near target
-            if (IsNearHardTarget())
+            if (dock.retractS >= 1f)
             {
                 dock.phase = DockingRuntimeState.DOCK_HARD;
 
@@ -475,6 +479,24 @@ public class DockingComputer : UdonSharpBehaviour
         byte phase = netCore.dockPhase;
 
 
+        if (netCore.dockPhase == DockingRuntimeState.DOCK_RETRACT)
+        {
+            _dbgRemoteTickCount++;
+
+            if (Time.frameCount != _dbgRemoteLastTickFrame)
+            {
+                _dbgRemoteLastTickFrame = Time.frameCount;
+
+                Debug.Log(
+                    "[Docking][REMOTE][TICK] frame=" + Time.frameCount +
+                    " tickCount=" + _dbgRemoteTickCount +
+                    " tNow=" + tNow.ToString("F3") +
+                    " retractT0=" + netCore.dockRetractT0.ToString("F3")
+                );
+            }
+        }
+
+
         if (phase != _dbgLastRemotePresentedPhase)
         {
             Debug.Log(
@@ -491,6 +513,8 @@ public class DockingComputer : UdonSharpBehaviour
 
         if (phase == DockingRuntimeState.DOCK_SOFT)
         {
+            _dbgLastRetractBucket = -999;
+
             ApplyDockedKinematics(st, rel0, q0);
             return;
         }
@@ -517,6 +541,8 @@ public class DockingComputer : UdonSharpBehaviour
 
         if (phase == DockingRuntimeState.DOCK_HARD)
         {
+            _dbgLastRetractBucket = -999;
+
             ApplyDockedKinematics(st, dock.targetRelPos_SB, dock.target_qCraftToStation);
             return;
         }
@@ -536,6 +562,14 @@ public class DockingComputer : UdonSharpBehaviour
 
         Vector3 rel = Vector3.Lerp(rel0, dock.targetRelPos_SB, s);
         Quaternion q = Quaternion.Slerp(q0, dock.target_qCraftToStation, s);
+
+        Debug.Log(
+            "[Docking][REMOTE][S] frame=" + Time.frameCount +
+            " tNow=" + tNow.ToString("F3") +
+            " t0=" + t0.ToString("F3") +
+            " s=" + s.ToString("F3")
+        );
+
 
         ApplyDockedKinematics(st, rel, q);
     }

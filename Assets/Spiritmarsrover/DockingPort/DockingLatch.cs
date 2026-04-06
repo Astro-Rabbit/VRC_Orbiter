@@ -41,4 +41,12 @@ public class DockingLatch : UdonSharpBehaviour
             targetLatch = null;
         }
     }
+
+    public void ForceClearLatch()
+    {
+        isLatched = false;
+        targetLatch = null;
+    }
+
+
 }

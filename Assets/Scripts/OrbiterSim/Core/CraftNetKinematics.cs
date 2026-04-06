@@ -109,6 +109,26 @@ public class CraftNetKinematics : UdonSharpBehaviour
     public double dbgPresentedVelOffset;
     public double dbgAppliedRawDtEx;
 
+
+    [Header("Render-time sampling (back-time query only)")]
+    [Tooltip("If true, keep a small receive buffer so remotes can sample sim-time/state at render back-time.")]
+    public bool enableRenderSampling = true;
+
+    [Tooltip("Snapshot ring buffer size for render-time sampling.")]
+    public int renderSnapBufferSize = 8;
+
+    [Tooltip("Max seconds to extrapolate beyond newest render sample.")]
+    public float renderExtrapClampSeconds = 0.25f;
+
+    // render-sampling ring buffer (indexed by NETWORK send time _epochT)
+    private double[] _rsNetTBuf;
+    private double[] _rsSimTBuf;
+    private double[] _rsRxBuf, _rsRyBuf, _rsRzBuf;
+    private double[] _rsVxBuf, _rsVyBuf, _rsVzBuf;
+    private int _rsCount = 0;
+    private int _rsHead = 0;
+
+
     // -------------------------------------------------------------------------
     // Synced snapshot fields
     // -------------------------------------------------------------------------
@@ -144,6 +164,54 @@ public class CraftNetKinematics : UdonSharpBehaviour
         {
             SnapPresentedToCraft();
         }
+
+        if (enableRenderSampling)
+            EnsureRenderSampleBuffers();
+    }
+
+    private void EnsureRenderSampleBuffers()
+    {
+        int n = renderSnapBufferSize;
+        if (n < 4) n = 4;
+        renderSnapBufferSize = n;
+
+        if (_rsNetTBuf != null && _rsNetTBuf.Length == n) return;
+
+        _rsNetTBuf = new double[n];
+        _rsSimTBuf = new double[n];
+        _rsRxBuf = new double[n];
+        _rsRyBuf = new double[n];
+        _rsRzBuf = new double[n];
+        _rsVxBuf = new double[n];
+        _rsVyBuf = new double[n];
+        _rsVzBuf = new double[n];
+
+        _rsCount = 0;
+        _rsHead = 0;
+    }
+
+    private void PushRenderSample(
+        double netT,
+        double simT,
+        double rx, double ry, double rz,
+        double vx, double vy, double vz)
+    {
+        if (!enableRenderSampling) return;
+
+        EnsureRenderSampleBuffers();
+
+        int i = _rsHead;
+        _rsNetTBuf[i] = netT;
+        _rsSimTBuf[i] = simT;
+        _rsRxBuf[i] = rx;
+        _rsRyBuf[i] = ry;
+        _rsRzBuf[i] = rz;
+        _rsVxBuf[i] = vx;
+        _rsVyBuf[i] = vy;
+        _rsVzBuf[i] = vz;
+
+        _rsHead = (i + 1) % renderSnapBufferSize;
+        if (_rsCount < renderSnapBufferSize) _rsCount++;
     }
 
     void Update()
@@ -426,6 +494,10 @@ public class CraftNetKinematics : UdonSharpBehaviour
         dbgPresentedOffsetMeters = 0.0;
         dbgPresentedVelOffset = 0.0;
         dbgAppliedRawDtEx = 0.0;
+
+        _rsCount = 0;
+        _rsHead = 0;
+
     }
 
     public void ResetSyncedStateFromCurrent()
@@ -539,6 +611,115 @@ public class CraftNetKinematics : UdonSharpBehaviour
             UpdatePresentedDebugOffsets();
         }
 
+        PushRenderSample(_epochT, _simEpochT, _rx, _ry, _rz, _vx, _vy, _vz);
         _appliedRev = _rev;
     }
+
+
+    public bool TrySampleRenderSimTime(double tRenderNet, out double simT)
+    {
+        double rx, ry, rz, vx, vy, vz;
+        return TrySampleRenderState(tRenderNet, out simT, out rx, out ry, out rz, out vx, out vy, out vz);
+    }
+
+    public bool TrySampleRenderState(
+        double tRenderNet,
+        out double simT,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
+    {
+        simT = 0.0;
+        rx = ry = rz = 0.0;
+        vx = vy = vz = 0.0;
+
+        if (HasSimAuthority()) return false;
+        if (!enableRenderSampling) return false;
+        if (_rsNetTBuf == null || _rsCount <= 0) return false;
+
+        int n = renderSnapBufferSize;
+        int oldest = (_rsHead - _rsCount + n) % n;
+
+        double tPrev = _rsNetTBuf[oldest];
+        double simPrev = _rsSimTBuf[oldest];
+        double rxPrev = _rsRxBuf[oldest];
+        double ryPrev = _rsRyBuf[oldest];
+        double rzPrev = _rsRzBuf[oldest];
+        double vxPrev = _rsVxBuf[oldest];
+        double vyPrev = _rsVyBuf[oldest];
+        double vzPrev = _rsVzBuf[oldest];
+
+        // before oldest: hold oldest
+        if (tRenderNet <= tPrev)
+        {
+            simT = simPrev;
+            rx = rxPrev; ry = ryPrev; rz = rzPrev;
+            vx = vxPrev; vy = vyPrev; vz = vzPrev;
+            return true;
+        }
+
+        // bracket interpolation in NETWORK time
+        for (int k = 1; k < _rsCount; k++)
+        {
+            int idx = (oldest + k) % n;
+            double tCur = _rsNetTBuf[idx];
+
+            if (tRenderNet <= tCur)
+            {
+                double dt = tCur - tPrev;
+                double u = (dt > 1e-6) ? ((tRenderNet - tPrev) / dt) : 1.0;
+
+                double simCur = _rsSimTBuf[idx];
+                double rxCur = _rsRxBuf[idx];
+                double ryCur = _rsRyBuf[idx];
+                double rzCur = _rsRzBuf[idx];
+                double vxCur = _rsVxBuf[idx];
+                double vyCur = _rsVyBuf[idx];
+                double vzCur = _rsVzBuf[idx];
+
+                simT = simPrev + (simCur - simPrev) * u;
+
+                rx = rxPrev + (rxCur - rxPrev) * u;
+                ry = ryPrev + (ryCur - ryPrev) * u;
+                rz = rzPrev + (rzCur - rzPrev) * u;
+
+                vx = vxPrev + (vxCur - vxPrev) * u;
+                vy = vyPrev + (vyCur - vyPrev) * u;
+                vz = vzPrev + (vzCur - vzPrev) * u;
+                return true;
+            }
+
+            tPrev = tCur;
+            simPrev = _rsSimTBuf[idx];
+            rxPrev = _rsRxBuf[idx];
+            ryPrev = _rsRyBuf[idx];
+            rzPrev = _rsRzBuf[idx];
+            vxPrev = _rsVxBuf[idx];
+            vyPrev = _rsVyBuf[idx];
+            vzPrev = _rsVzBuf[idx];
+        }
+
+        // past newest: short extrapolate
+        int newest = (_rsHead - 1 + n) % n;
+        double tn = _rsNetTBuf[newest];
+        double simN = _rsSimTBuf[newest];
+        double rxN = _rsRxBuf[newest];
+        double ryN = _rsRyBuf[newest];
+        double rzN = _rsRzBuf[newest];
+        double vxN = _rsVxBuf[newest];
+        double vyN = _rsVyBuf[newest];
+        double vzN = _rsVzBuf[newest];
+
+        double dtEx = tRenderNet - tn;
+        double c = (double)renderExtrapClampSeconds;
+        if (dtEx > c) dtEx = c;
+        if (dtEx < -c) dtEx = -c;
+
+        simT = simN + dtEx;
+        rx = rxN + vxN * dtEx;
+        ry = ryN + vyN * dtEx;
+        rz = rzN + vzN * dtEx;
+        vx = vxN; vy = vyN; vz = vzN;
+        return true;
+    }
+
 }

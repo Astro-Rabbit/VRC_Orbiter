@@ -39,6 +39,8 @@ public class DockingOpsController : UdonSharpBehaviour
     public DockingComputer dockingComp;
     public StewartPlatformController stewart;
     public DockingOccupancyGate occupancyGate;
+
+
     // ---------------------------------------------------------------------
     // Port animation refs
     // ---------------------------------------------------------------------
@@ -154,6 +156,50 @@ public class DockingOpsController : UdonSharpBehaviour
     [Range(0f, 1f)] public float hatchPos01 = 0f;
 
     [Range(0f, 1f)] public float airlockDoorPos01 = 0f;
+
+
+    [Header("Lever integration")]
+    public SpacecraftLever hatchLever;
+
+    [Header("Station hatch refs")]
+    [Tooltip("Station index key for each station hatch entry.")]
+    public int[] stationHatchStationIndex;
+
+    [Tooltip("Station port index key for each station hatch entry.")]
+    public int[] stationHatchPortIndex;
+
+    [Tooltip("Single rotating pivot for each station hatch entry.")]
+    public Transform[] stationHatchPivot;
+
+    [Header("Station hatch shared motion")]
+    [Tooltip("Closed local Euler angles for all station hatches.")]
+    public Vector3 stationHatchClosedEuler = Vector3.zero;
+
+    [Tooltip("Open local Euler angles for all station hatches.")]
+    public Vector3 stationHatchOpenEuler = Vector3.zero;
+
+    [Tooltip("Seconds for full travel from 0 to 1 for all station hatches.")]
+    public float stationHatchFullTravelSeconds = 2.0f;
+
+    [Header("Station hatch policy")]
+    [Tooltip("Delay after craft hatch is fully open before opening the mated station hatch.")]
+    public float stationHatchOpenDelaySeconds = 0.5f;
+
+    [Tooltip("Force all referenced station hatches closed on Start.")]
+    public bool forceCloseAllStationHatchesOnStart = true;
+
+    [Tooltip("Force all referenced station hatches closed if dock is suddenly lost.")]
+    public bool forceCloseAllStationHatchesOnDockLoss = true;
+
+    [Header("Synced state - station hatch")]
+    [UdonSynced] public byte stationHatchState = MECH_CLOSED;
+    [UdonSynced] public byte stationHatchStartPosQ = 0;
+    [UdonSynced] public ushort stationHatchStartTick = 0;
+
+    [Header("Runtime position - station hatch")]
+    [Range(0f, 1f)] public float stationHatchPos01 = 0f;
+
+    
     // ---------------------------------------------------------------------
     // Derived outputs
     // ---------------------------------------------------------------------
@@ -161,6 +207,26 @@ public class DockingOpsController : UdonSharpBehaviour
     public bool allowDockingCapture = false;
     public bool allowStewart = false;
 
+
+    private float _stationHatchLocalFrom01 = 0f;
+    private float _stationHatchLocalTo01 = 0f;
+    private float _stationHatchLocalStartTime = 0f;
+    private float _stationHatchLocalDuration = 0f;
+
+    private byte _lastLocalStationHatchState = 255;
+    private byte _lastLocalStationHatchStartPosQ = 255;
+    private ushort _lastLocalStationHatchStartTick = 65535;
+
+    private float _lastAppliedStationHatchPos01 = -1f;
+
+    private int _activeStationHatchIndex = -1;
+    private int _lastResolvedStationIndex = -999;
+    private int _lastResolvedStationPortIndex = -999;
+
+    private bool _pendingDelayedStationOpen = false;
+    private float _pendingDelayedStationOpenStartTime = 0f;
+
+    private bool _lastDockWasHard = false;
 
     // ---------------------------------------------------------------------
     // Local animation anchors
@@ -190,6 +256,8 @@ public class DockingOpsController : UdonSharpBehaviour
     private byte _lastLocalAirlockStartPosQ = 255;
     private ushort _lastLocalAirlockStartTick = 65535;
 
+    private bool _lastLeverPickupAllowed = true;
+
     // ---------------------------------------------------------------------
     // Thresholds / debug
     // ---------------------------------------------------------------------
@@ -218,26 +286,51 @@ public class DockingOpsController : UdonSharpBehaviour
         RebuildLocalPortAnimation();
         RebuildLocalHatchAnimation();
         RebuildLocalAirlockAnimation();
+        RebuildLocalStationHatchAnimation();
 
         portPos01 = EvaluateLocalMechanismPosition(portState, _portLocalFrom01, _portLocalTo01, _portLocalStartTime, _portLocalDuration);
         hatchPos01 = EvaluateLocalMechanismPosition(hatchState, _hatchLocalFrom01, _hatchLocalTo01, _hatchLocalStartTime, _hatchLocalDuration);
         airlockDoorPos01 = EvaluateLocalMechanismPosition(airlockDoorState, _airlockLocalFrom01, _airlockLocalTo01, _airlockLocalStartTime, _airlockLocalDuration);
-
+        stationHatchPos01 = EvaluateLocalMechanismPosition(
+            stationHatchState,
+            _stationHatchLocalFrom01,
+            _stationHatchLocalTo01,
+            _stationHatchLocalStartTime,
+            _stationHatchLocalDuration
+        );
         ApplyPortTransforms();
         ApplyHatchTransforms();
         ApplyAirlockDoorTransform();
 
+        if (forceCloseAllStationHatchesOnStart)
+        {
+            ForceCloseAllStationHatchesImmediate();
+        }
+        else
+        {
+            ApplyActiveStationHatchTransform();
+        }
 
         _lastAppliedPortPos01 = portPos01;
         _lastAppliedHatchPos01 = hatchPos01;
         _lastAppliedAirlockDoorPos01 = airlockDoorPos01;
-
+        _lastAppliedStationHatchPos01 = stationHatchPos01;
         UpdateDerivedOutputs();
+
+        RefreshHatchLeverLockout();
+
+        if (hatchLever != null)
+        {
+            bool hatchLooksOpen = (hatchState == MECH_OPEN || hatchState == MECH_OPENING || hatchPos01 > 0.5f);
+            hatchLever.isLeverOpen = hatchLooksOpen;
+        }
+
 
     }
 
     void Update()
     {
+        ResolveActiveStationHatchFromDock();
         // 1) Evaluate current mechanism positions locally from synced state
         // 1) Rebuild local animation anchors only when synced state changed
         RefreshLocalAnimationAnchorsIfNeeded();
@@ -246,9 +339,21 @@ public class DockingOpsController : UdonSharpBehaviour
         portPos01 = EvaluateLocalMechanismPosition(portState, _portLocalFrom01, _portLocalTo01, _portLocalStartTime, _portLocalDuration);
         hatchPos01 = EvaluateLocalMechanismPosition(hatchState, _hatchLocalFrom01, _hatchLocalTo01, _hatchLocalStartTime, _hatchLocalDuration);
         airlockDoorPos01 = EvaluateLocalMechanismPosition(airlockDoorState, _airlockLocalFrom01, _airlockLocalTo01, _airlockLocalStartTime, _airlockLocalDuration);
+                stationHatchPos01 = EvaluateLocalMechanismPosition(
+            stationHatchState,
+            _stationHatchLocalFrom01,
+            _stationHatchLocalTo01,
+            _stationHatchLocalStartTime,
+            _stationHatchLocalDuration
+        );
+
+        
         // 2) Owner finalizes discrete states when travel completes
         if (HasAuthority())
         {
+            // UpdateCraftHatchFromLever();
+            UpdateStationHatchAutoLogic();
+            UpdateStationHatchDockLossSafety();
             OwnerFinalizeCompletedMotion();
             UpdateDerivedOutputs();
             PublishOutputsToExternalSystems();
@@ -259,6 +364,7 @@ public class DockingOpsController : UdonSharpBehaviour
             UpdateDerivedOutputs();
         }
 
+        RefreshHatchLeverLockout();
         // 3) Apply actual transforms on every client
         if (Mathf.Abs(portPos01 - _lastAppliedPortPos01) > poseEpsilon)
         {
@@ -277,6 +383,14 @@ public class DockingOpsController : UdonSharpBehaviour
             ApplyAirlockDoorTransform();
             _lastAppliedAirlockDoorPos01 = airlockDoorPos01;
         }
+
+
+        if (Mathf.Abs(stationHatchPos01 - _lastAppliedStationHatchPos01) > poseEpsilon)
+        {
+            ApplyActiveStationHatchTransform();
+            _lastAppliedStationHatchPos01 = stationHatchPos01;
+        }
+
         // 4) Optional debug logging
         LogStateIfChanged();
     }
@@ -299,6 +413,23 @@ public class DockingOpsController : UdonSharpBehaviour
         _lastAppliedPortPos01 = portPos01;
         _lastAppliedHatchPos01 = hatchPos01;
         _lastAppliedAirlockDoorPos01 = airlockDoorPos01;
+
+
+        RebuildLocalStationHatchAnimation();
+
+        stationHatchPos01 = EvaluateLocalMechanismPosition(
+            stationHatchState,
+            _stationHatchLocalFrom01,
+            _stationHatchLocalTo01,
+            _stationHatchLocalStartTime,
+            _stationHatchLocalDuration
+        );
+
+        ApplyActiveStationHatchTransform();
+        _lastAppliedStationHatchPos01 = stationHatchPos01;
+
+
+        RefreshHatchLeverLockout();
 
     }
 
@@ -657,6 +788,15 @@ public class DockingOpsController : UdonSharpBehaviour
         {
             RebuildLocalAirlockAnimation();
         }
+
+        if (_lastLocalStationHatchState != stationHatchState ||
+            _lastLocalStationHatchStartPosQ != stationHatchStartPosQ ||
+            _lastLocalStationHatchStartTick != stationHatchStartTick)
+        {
+            RebuildLocalStationHatchAnimation();
+        }
+
+
     }
 
     private void RebuildLocalPortAnimation()
@@ -807,6 +947,21 @@ public class DockingOpsController : UdonSharpBehaviour
             RequestSerialization();
         }
 
+        if (stationHatchState == MECH_OPENING && stationHatchPos01 >= (1f - poseEpsilon))
+        {
+            stationHatchState = MECH_OPEN;
+            stationHatchStartPosQ = 255;
+            stationHatchStartTick = EncodeNetTick();
+            RequestSerialization();
+        }
+        else if (stationHatchState == MECH_CLOSING && stationHatchPos01 <= poseEpsilon)
+        {
+            stationHatchState = MECH_CLOSED;
+            stationHatchStartPosQ = 0;
+            stationHatchStartTick = EncodeNetTick();
+            RequestSerialization();
+        }
+
     }
 
     // ---------------------------------------------------------------------
@@ -871,7 +1026,9 @@ public class DockingOpsController : UdonSharpBehaviour
         // - active dock, or
         // - port open
         allowDockingCapture = dockActive || portOpen;
-        allowStewart = dockActive || portOpen;
+
+        bool portFullyOpenDiscrete = (portState == MECH_OPEN);
+        allowStewart = dockActive || portFullyOpenDiscrete;
     }
 
     private void PublishOutputsToExternalSystems()
@@ -883,6 +1040,319 @@ public class DockingOpsController : UdonSharpBehaviour
         // Stewart enable is also just a bool gate in the current setup.
         if (stewart != null)
             stewart.platformEnabled = allowStewart;
+    }
+
+
+    public void ForcePortOpenInstant()
+    {
+        portState = MECH_OPEN;
+        portStartPosQ = 255;
+        portStartTick = EncodeNetTick();
+        portPos01 = 1f;
+
+        RebuildLocalPortAnimation();
+        ApplyPortTransforms();
+
+        UpdateDerivedOutputs();
+
+        if (HasAuthority())
+        {
+            PublishOutputsToExternalSystems();
+            RequestSerialization();
+        }
+
+        _lastAppliedPortPos01 = portPos01;
+
+        if (logState)
+        {
+            Debug.Log("[DockingOpsController] ForcePortOpenInstant()");
+        }
+    }
+
+
+    public void ForcePortClosedInstant()
+    {
+        portState = MECH_CLOSED;
+        portStartPosQ = 0;
+        portStartTick = EncodeNetTick();
+        portPos01 = 0f;
+
+        RebuildLocalPortAnimation();
+        ApplyPortTransforms();
+
+        UpdateDerivedOutputs();
+
+        if (HasAuthority())
+        {
+            PublishOutputsToExternalSystems();
+            RequestSerialization();
+        }
+
+        _lastAppliedPortPos01 = portPos01;
+
+        if (logState)
+        {
+            Debug.Log("[DockingOpsController] ForcePortClosedInstant()");
+        }
+    }
+
+
+
+
+
+
+    private void RebuildLocalStationHatchAnimation()
+    {
+        _lastLocalStationHatchState = stationHatchState;
+        _lastLocalStationHatchStartPosQ = stationHatchStartPosQ;
+        _lastLocalStationHatchStartTick = stationHatchStartTick;
+
+        BuildLocalAnimation(
+            stationHatchState,
+            stationHatchStartPosQ,
+            stationHatchStartTick,
+            stationHatchFullTravelSeconds,
+            ref _stationHatchLocalFrom01,
+            ref _stationHatchLocalTo01,
+            ref _stationHatchLocalStartTime,
+            ref _stationHatchLocalDuration
+        );
+    }
+
+    private void ApplyActiveStationHatchTransform()
+    {
+        if (_activeStationHatchIndex < 0) return;
+        if (stationHatchPivot == null) return;
+        if (_activeStationHatchIndex >= stationHatchPivot.Length) return;
+
+        Transform pivot = stationHatchPivot[_activeStationHatchIndex];
+        if (pivot == null) return;
+
+        Vector3 euler = Vector3.Lerp(
+            stationHatchClosedEuler,
+            stationHatchOpenEuler,
+            stationHatchPos01
+        );
+
+        pivot.localRotation = Quaternion.Euler(euler);
+    }
+
+    private void ForceCloseActiveStationHatchImmediate()
+    {
+        if (_activeStationHatchIndex < 0) return;
+        if (stationHatchPivot == null) return;
+        if (_activeStationHatchIndex >= stationHatchPivot.Length) return;
+
+        Transform pivot = stationHatchPivot[_activeStationHatchIndex];
+        if (pivot == null) return;
+
+        pivot.localRotation = Quaternion.Euler(stationHatchClosedEuler);
+    }
+
+    private void ForceCloseAllStationHatchesImmediate()
+    {
+        if (stationHatchPivot == null) return;
+
+        int n = stationHatchPivot.Length;
+        for (int i = 0; i < n; i++)
+        {
+            Transform pivot = stationHatchPivot[i];
+            if (pivot == null) continue;
+
+            pivot.localRotation = Quaternion.Euler(stationHatchClosedEuler);
+        }
+
+        stationHatchPos01 = 0f;
+        _lastAppliedStationHatchPos01 = stationHatchPos01;
+    }
+
+    private void BeginStationHatchMotion(byte newState, float from01, float to01)
+    {
+        stationHatchState = newState;
+        stationHatchStartPosQ = Quantize01ToByte(from01);
+        stationHatchStartTick = EncodeNetTick();
+        RequestSerialization();
+    }
+
+    private void UpdateStationHatchAutoLogic()
+    {
+        bool hardDocked = IsHardDocked();
+        bool craftHatchFullyOpen = IsHatchOpen();
+
+        if (!hardDocked)
+        {
+            CancelPendingStationHatchOpen();
+
+            if (stationHatchState == MECH_OPEN || stationHatchState == MECH_OPENING)
+            {
+                stationHatchPos01 = EvaluateMechanismPosition(
+                    stationHatchState,
+                    stationHatchStartPosQ,
+                    stationHatchStartTick,
+                    stationHatchFullTravelSeconds
+                );
+
+                BeginStationHatchMotion(MECH_CLOSING, stationHatchPos01, 0f);
+            }
+
+            return;
+        }
+
+        if (_activeStationHatchIndex < 0)
+        {
+            CancelPendingStationHatchOpen();
+            return;
+        }
+
+        if (craftHatchFullyOpen)
+        {
+            if (stationHatchState == MECH_CLOSED && !_pendingDelayedStationOpen)
+            {
+                _pendingDelayedStationOpen = true;
+                _pendingDelayedStationOpenStartTime = Time.realtimeSinceStartup;
+            }
+
+            if (_pendingDelayedStationOpen)
+            {
+                float elapsed = Time.realtimeSinceStartup - _pendingDelayedStationOpenStartTime;
+
+                if (elapsed >= stationHatchOpenDelaySeconds)
+                {
+                    _pendingDelayedStationOpen = false;
+
+                    stationHatchPos01 = EvaluateMechanismPosition(
+                        stationHatchState,
+                        stationHatchStartPosQ,
+                        stationHatchStartTick,
+                        stationHatchFullTravelSeconds
+                    );
+
+                    BeginStationHatchMotion(MECH_OPENING, stationHatchPos01, 1f);
+                }
+            }
+        }
+        else
+        {
+            CancelPendingStationHatchOpen();
+
+            if (stationHatchState == MECH_OPEN || stationHatchState == MECH_OPENING)
+            {
+                stationHatchPos01 = EvaluateMechanismPosition(
+                    stationHatchState,
+                    stationHatchStartPosQ,
+                    stationHatchStartTick,
+                    stationHatchFullTravelSeconds
+                );
+
+                BeginStationHatchMotion(MECH_CLOSING, stationHatchPos01, 0f);
+            }
+        }
+    }
+
+    private void CancelPendingStationHatchOpen()
+    {
+        _pendingDelayedStationOpen = false;
+    }
+
+    private void UpdateStationHatchDockLossSafety()
+    {
+        bool hardDocked = IsHardDocked();
+
+        if (_lastDockWasHard && !hardDocked)
+        {
+            CancelPendingStationHatchOpen();
+
+            if (forceCloseAllStationHatchesOnDockLoss)
+                ForceCloseAllStationHatchesImmediate();
+            else
+                ForceCloseActiveStationHatchImmediate();
+
+            stationHatchState = MECH_CLOSED;
+            stationHatchStartPosQ = 0;
+            stationHatchStartTick = EncodeNetTick();
+            stationHatchPos01 = 0f;
+            RequestSerialization();
+        }
+
+        _lastDockWasHard = hardDocked;
+        
+    }
+
+
+    private void RefreshHatchLeverLockout()
+    {
+        if (hatchLever == null) return;
+
+        bool openingAllowed = CanStartHatchOpening();
+        bool hatchOpenSideAccessible =
+            (hatchState == MECH_OPEN) ||
+            (hatchState == MECH_OPENING) ||
+            (hatchPos01 > poseEpsilon);
+
+        bool shouldAllowPickup = hatchOpenSideAccessible || openingAllowed;
+
+        if (shouldAllowPickup == _lastLeverPickupAllowed)
+            return;
+
+        _lastLeverPickupAllowed = shouldAllowPickup;
+
+        if (shouldAllowPickup)
+            hatchLever.SetPickupOn();
+        else
+            hatchLever.SetPickupOff();
+
+        hatchLever.handle.pickupable = shouldAllowPickup;
+    }
+
+    // private void UpdateCraftHatchFromLever()
+    // {
+    //     if (hatchLever == null) return;
+
+    //     bool wantOpen = hatchLever.isLeverOpen;
+    //     float currentPos01 = hatchPos01; // use the smooth local-evaluated position from this frame
+
+    //     if (wantOpen)
+    //     {
+    //         if (hatchState == MECH_CLOSED || hatchState == MECH_CLOSING)
+    //         {
+    //             if (!CanStartHatchOpening()) return;
+    //             BeginHatchMotion(MECH_OPENING, currentPos01, 1f);
+    //         }
+    //     }
+    //     else
+    //     {
+    //         if (hatchState == MECH_OPEN || hatchState == MECH_OPENING)
+    //         {
+    //             if (!CanStartHatchClosing()) return;
+    //             BeginHatchMotion(MECH_CLOSING, currentPos01, 0f);
+    //         }
+    //     }
+    // }
+
+    public void Net_RequestHatchOpenFromLever()
+    {
+        if (!HasAuthority()) return;
+
+        float currentPos01 = hatchPos01;
+
+        if (hatchState == MECH_CLOSED || hatchState == MECH_CLOSING)
+        {
+            if (!CanStartHatchOpening()) return;
+            BeginHatchMotion(MECH_OPENING, currentPos01, 1f);
+        }
+    }
+
+    public void Net_RequestHatchCloseFromLever()
+    {
+        if (!HasAuthority()) return;
+
+        float currentPos01 = hatchPos01;
+
+        if (hatchState == MECH_OPEN || hatchState == MECH_OPENING)
+        {
+            if (!CanStartHatchClosing()) return;
+            BeginHatchMotion(MECH_CLOSING, currentPos01, 0f);
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -968,4 +1438,51 @@ public class DockingOpsController : UdonSharpBehaviour
             " specialDepressComplete=" + specialDepressComplete
         );
     }
+
+    private void ResolveActiveStationHatchFromDock()
+    {
+        int stationIndex = -1;
+        int stationPortIndex = -1;
+
+        if (dock != null && dock.active && dock.phase == DockingRuntimeState.DOCK_HARD)
+        {
+            stationIndex = dock.dockedStationIndex;
+            stationPortIndex = dock.stationPortIndex;
+        }
+
+        if (stationIndex == _lastResolvedStationIndex &&
+            stationPortIndex == _lastResolvedStationPortIndex)
+        {
+            return;
+        }
+
+        _lastResolvedStationIndex = stationIndex;
+        _lastResolvedStationPortIndex = stationPortIndex;
+
+        _activeStationHatchIndex = FindStationHatchIndex(stationIndex, stationPortIndex);
+    }
+
+    private int FindStationHatchIndex(int stationIndex, int stationPortIndex)
+    {
+        if (stationHatchStationIndex == null) return -1;
+        if (stationHatchPortIndex == null) return -1;
+        if (stationHatchPivot == null) return -1;
+
+        int n = stationHatchStationIndex.Length;
+        if (stationHatchPortIndex.Length < n) n = stationHatchPortIndex.Length;
+        if (stationHatchPivot.Length < n) n = stationHatchPivot.Length;
+
+        for (int i = 0; i < n; i++)
+        {
+            if (stationHatchStationIndex[i] != stationIndex) continue;
+            if (stationHatchPortIndex[i] != stationPortIndex) continue;
+            if (stationHatchPivot[i] == null) continue;
+
+            return i;
+        }
+
+        return -1;
+    }
+
+
 }

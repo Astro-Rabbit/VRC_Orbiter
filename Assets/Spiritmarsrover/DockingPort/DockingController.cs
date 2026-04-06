@@ -48,4 +48,15 @@ public class DockingController : UdonSharpBehaviour
             }
         }
     }
+
+    public void ForceResetController()
+    {
+        state = DockingState.Ready;
+        activeTargetPort = null;
+
+        if (localPort != null)
+            localPort.ForceClearAllLatches();
+    }
+
+
 }

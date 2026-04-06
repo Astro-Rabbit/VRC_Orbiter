@@ -7,9 +7,10 @@ public class SimScenarioInitializer : UdonSharpBehaviour
 {
     [Header("Core")]
     public EphemerisSystem ephem;
-
+    public SimManager simManager;
     [Header("Scenario entries")]
     public SimScenarioEntry[] scenarios;
+
 
     [Header("Selection")]
     public int selectedScenarioIndex = 0;
@@ -27,12 +28,6 @@ public class SimScenarioInitializer : UdonSharpBehaviour
     private int _appliedScenarioIndex = -999999;
     private double _appliedScenarioJd0 = -1.0;
 
-
-    public bool ApplySelectedScenario(double t0)
-    {
-        return ApplyScenarioByIndex(selectedScenarioIndex, t0);
-    }
-
     public bool ApplyScenarioByIndex(int index, double t0)
     {
         if (scenarios == null) return false;
@@ -41,21 +36,44 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         SimScenarioEntry entry = scenarios[index];
         if (entry == null) return false;
 
+
+        if (simManager != null)
+            simManager.AbortHandoffForAuthoritativeReset();
+
+
         _activeScenarioIndex = index;
         activeScenarioIndex = index;
 
+        double resolvedJd0 = 2460000.5;
+        bool haveResolvedJd0 = false;
+
         if (entry.overrideScenarioJd0)
         {
-            _activeScenarioJd0 = entry.scenarioJd0;
-            activeScenarioJd0 = entry.scenarioJd0;
-
-            if (ephem != null)
-                ephem.jd0 = entry.scenarioJd0;
+            resolvedJd0 = entry.scenarioJd0;
+            haveResolvedJd0 = true;
+        }
+        else if (entry.scenarioType == SimScenarioEntry.SCENARIO_CONIC && entry.tleOrbitScenario != null)
+        {
+            double tleJd0;
+            if (entry.tleOrbitScenario.TryGetScenarioJd0(out tleJd0))
+            {
+                resolvedJd0 = tleJd0;
+                haveResolvedJd0 = true;
+            }
         }
         else if (ephem != null)
         {
-            _activeScenarioJd0 = ephem.jd0;
-            activeScenarioJd0 = ephem.jd0;
+            resolvedJd0 = ephem.jd0;
+            haveResolvedJd0 = true;
+        }
+
+        if (haveResolvedJd0)
+        {
+            _activeScenarioJd0 = resolvedJd0;
+            activeScenarioJd0 = resolvedJd0;
+
+            if (ephem != null)
+                ephem.jd0 = resolvedJd0;
         }
 
         if (Networking.IsOwner(gameObject))
@@ -64,37 +82,29 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         switch (entry.scenarioType)
         {
             case SimScenarioEntry.SCENARIO_DOCKED:
-                if (entry.dockedScenario == null)
-                {
-                    if (log) Debug.Log("[SimScenarioInitializer] Missing docked scenario at index " + index);
-                    return false;
-                }
+                if (entry.dockedScenario == null) return false;
                 return entry.dockedScenario.InitializeNow();
 
             case SimScenarioEntry.SCENARIO_NEAR_STATION:
-                if (entry.nearStationScenario == null)
-                {
-                    if (log) Debug.Log("[SimScenarioInitializer] Missing near-station scenario at index " + index);
-                    return false;
-                }
+                if (entry.nearStationScenario == null) return false;
                 return entry.nearStationScenario.InitializeNow();
 
             case SimScenarioEntry.SCENARIO_CONIC:
             default:
-                if (entry.orbitScenario == null)
+                if (entry.tleOrbitScenario != null)
                 {
-                    if (log) Debug.Log("[SimScenarioInitializer] Missing orbit scenario at index " + index);
-                    return false;
+                    entry.tleOrbitScenario.t0Seconds = t0;
+                    return entry.tleOrbitScenario.InitializeNow();
                 }
 
-                entry.orbitScenario.t0Seconds = t0;
-                entry.orbitScenario.InitializeNow();
-                return true;
+                if (entry.orbitScenario != null)
+                {
+                    entry.orbitScenario.t0Seconds = t0;
+                    return entry.orbitScenario.InitializeNow();
+                }
+
+                return false;
         }
-
-
-
-
     }
 
     public string GetSelectedScenarioName()
@@ -124,7 +134,6 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         return entry.scenarioName;
     }
 
-
     public override void OnDeserialization()
     {
         activeScenarioIndex = _activeScenarioIndex;
@@ -136,6 +145,4 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         _appliedScenarioIndex = _activeScenarioIndex;
         _appliedScenarioJd0 = _activeScenarioJd0;
     }
-
-
 }

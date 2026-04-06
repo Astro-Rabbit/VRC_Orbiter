@@ -42,6 +42,18 @@ public class SkyBoxDriver : UdonSharpBehaviour
     [Tooltip("Earth-dominant skybox material.")]
     public Material earthSkyboxMat;
 
+    [Header("Sky-linked canopy materials")]
+    [Tooltip("Optional canopy materials using Orbiter/CanopyGlass_SkyLinked.")]
+    public Material[] canopySkyLinkedMaterials;
+
+    [Tooltip("Obliquity passed to the canopy overlay shader. Keep matched to sky presentation.")]
+    public float canopyObliquityDeg = 23.439281f;
+
+    [Header("Sky overlay frame adjustment")]
+    [Tooltip("Static Euler adjustment for the overlay texture frame, in degrees. This should align the overlay to the sky without changing motion behavior.")]
+    public Vector3 canopySkyOverlayFrameAdjustEulerDeg = Vector3.zero;
+
+
     [Tooltip("If true, keep both materials updated every tick and switch active material as needed.")]
     public bool keepBothMaterialsHot = true;
 
@@ -163,6 +175,7 @@ public class SkyBoxDriver : UdonSharpBehaviour
 
         UpdateActiveSkyMode(earthAngRad, moonAngRad);
         ApplyActiveSkyboxMaterial();
+        WriteCanopySkyUniforms(q);
 
         if (keepBothMaterialsHot)
         {
@@ -460,6 +473,30 @@ public class SkyBoxDriver : UdonSharpBehaviour
         return EstimateDiskOverlap01((float)sunAngRad, (float)bodyAngRad, (float)sep);
     }
 
+    private void WriteCanopySkyUniforms(Quaternion q)
+    {
+        if (canopySkyLinkedMaterials == null) return;
+
+        Vector4 qSky = new Vector4(q.x, q.y, q.z, q.w);
+
+        Quaternion qOverlayAdjust = Quaternion.Euler(canopySkyOverlayFrameAdjustEulerDeg);
+        Vector4 qOverlayAdjustV = new Vector4(
+            qOverlayAdjust.x,
+            qOverlayAdjust.y,
+            qOverlayAdjust.z,
+            qOverlayAdjust.w
+        );
+
+        for (int i = 0; i < canopySkyLinkedMaterials.Length; i++)
+        {
+            Material m = canopySkyLinkedMaterials[i];
+            if (m == null) continue;
+
+            m.SetVector("_CraftBodyToEq", qSky);
+            m.SetFloat("_ObliquityDeg", canopyObliquityDeg);
+            m.SetVector("_SkyOverlayFrameAdjust", qOverlayAdjustV);
+        }
+    }
     private float EstimateDiskOverlap01(float sunRad, float occRad, float sep)
     {
         if (sep >= sunRad + occRad) return 0f;

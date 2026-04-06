@@ -3,14 +3,14 @@ using UnityEngine;
 using VRC.SDKBase;
 using VRC.Udon;
 using VRC.SDK3.Components;
-
+using VRC.Udon.Common.Interfaces;
 [UdonBehaviourSyncMode(BehaviourSyncMode.Continuous)]
 public class SpacecraftLever : UdonSharpBehaviour
 {
     public VRCPickup handle;
     public GameObject LeverPivot;
     public GameObject LeverHandlePos;
-
+    public DockingOpsController dockingOps;
     float handleAnlge;
     float angleOut;
     bool isHeld = false;
@@ -118,9 +118,10 @@ public class SpacecraftLever : UdonSharpBehaviour
         }
         angleOut = Mathf.LerpAngle(angleOut, TargetAngle, Time.deltaTime * lerpspeed);
         LeverPivot.transform.localRotation = Quaternion.Euler(angleOut, 0f, 0f);
-
         if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
         {
+            bool prevIsLeverOpen = isLeverOpen;
+
             // If we push it almost to the end, it's definitely OPEN
             if (angleOut <= -175f)
             {
@@ -133,6 +134,19 @@ public class SpacecraftLever : UdonSharpBehaviour
             }
             // If it's anywhere in the middle, we don't change isLeverOpen. 
             // It stays whatever it was until it hits one of the boundaries above.
+
+            if (isLeverOpen != prevIsLeverOpen)
+            {
+                RequestSerialization();
+
+                if (dockingOps != null)
+                {
+                    if (isLeverOpen)
+                        dockingOps.SendCustomNetworkEvent(NetworkEventTarget.Owner, "Net_RequestHatchOpenFromLever");
+                    else
+                        dockingOps.SendCustomNetworkEvent(NetworkEventTarget.Owner, "Net_RequestHatchCloseFromLever");
+                }
+            }
         }
     }
 
@@ -190,15 +204,33 @@ public class SpacecraftLever : UdonSharpBehaviour
     public override void OnDeserialization()
     {
         handle.pickupable = _handlePickable;
+
+        if (!isHeld)
+        {
+            TargetAngle = isLeverOpen ? -180f : 0f;
+        }
     }
 
     //Lockout
     public void SetPickupOn()
     {
+        if (_handlePickable && handle.pickupable) return;
+
         _handlePickable = true;
+        handle.pickupable = true;
+
+        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+            RequestSerialization();
     }
+
     public void SetPickupOff()
     {
+        if (!_handlePickable && !handle.pickupable) return;
+
         _handlePickable = false;
+        handle.pickupable = false;
+
+        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+            RequestSerialization();
     }
 }

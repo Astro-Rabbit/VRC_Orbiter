@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!21 &2100000
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: avatar-export-pcPlayer.1
+  m_Shader: {fileID: 4800000, guid: 83061e8de39ec564b973ac6ebcac92c0, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 1
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: 2999
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties: 
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _Bone:
+        m_Texture: {fileID: -6151382732105135136, guid: 0efebedc03edbaf419a7e9e403267140,
+          type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MainTex:
+        m_Texture: {fileID: 2800000, guid: 2a5351fc2f1361d47b8d2e358a0bd5c0, type: 3}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _MotionDec:
+        m_Texture: {fileID: 8600000, guid: 0247e5cfe3e145b4d9cba5360c02bfea, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _Shape:
+        m_Texture: {fileID: -8068034097216836566, guid: 0efebedc03edbaf419a7e9e403267140,
+          type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _AlphaTest: 0
+    - _Cull: 2
+    - _Cutoff: 0
+    - _HoloAmount: 0.314
+    - _HoloBandSteps: 7.97
+    - _HoloBodyFill: 0.22
+    - _HoloBrightness: 1
+    - _HoloDesaturate: 0.75
+    - _HoloFresnelPower: 0.89
+    - _HoloFresnelStrength: 0.48
+    - _HoloMinBody: 0.35
+    - _HoloNoiseScale: 8
+    - _HoloNoiseStrength: 0.08
+    - _HoloOpacity: 0.85
+    - _HoloScanlineDensity: 136
+    - _HoloScanlineSpeed: 5.45
+    - _HoloScanlineStrength: 1.635
+    - _HumanScale: -1
+    - _Layer: 0
+    - _NearClip: 0
+    - _RotationTolerance: 0.136
+    m_Colors:
+    - _Color: {r: 1, g: 1, b: 1, a: 1}
+    - _HoloColor: {r: 0.09803921, g: 1, b: 0.792252, a: 1}
+  m_BuildTextureStacks: []

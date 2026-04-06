@@ -76,7 +76,14 @@ public class MFDMapPage : MFDPage
 
         altMeters = nav.rMag - nav.radiusPrimary;
 
-        if (groundTrack != null && groundTrack.mapRT != null && groundTrack.mapRT.IsCreated())
+        // Debug.Log(
+        //     "[MFDMapPage] primary=" + nav.primaryId +
+        //     " lat=" + latDeg.ToString("0.000") +
+        //     " lon=" + lonDeg.ToString("0.000") +
+        //     " have=" + (_haveLatLon ? "1" : "0")
+        // );
+
+        if (groundTrack != null && groundTrack.MapMatchesBody(nav.primaryId))
             hasValidMap = true;
     }
 

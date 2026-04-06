@@ -457,7 +457,7 @@ public class HandControls : UdonSharpBehaviour
             joystickHandle.localRotation = Quaternion.Euler(
                 -inputZ * maxTiltAngle,
                 0f,
-                inputY * maxTiltAngle
+                -inputY * maxTiltAngle
             );
         }
 
@@ -465,7 +465,7 @@ public class HandControls : UdonSharpBehaviour
         {
             twistGrip.localRotation = Quaternion.Euler(
                 0f,
-                -inputX * maxTwistAngle,
+                inputX * maxTwistAngle,
                 0f
             );
         }
@@ -893,7 +893,7 @@ public class HandControls : UdonSharpBehaviour
                 0f, 0f, 0f,
                 ThrottleValue,
                 0f, 0f, 0f,
-                seatClaimed,
+                false,
                 false,
                 activeSeatForVisuals
             );

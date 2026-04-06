@@ -251,8 +251,11 @@ public class MFDNodePage : MFDPage
             return;
         }
 
-        double tGo = 0.0;
-        bool haveTGo = (gc != null) && gc.API_Node_TryGetTimeToGo(cursorIndex, out tGo);
+        double tNode = 0.0;
+        bool haveTNode = (gc != null) && gc.API_Node_TryGetTimeToGo(cursorIndex, out tNode);
+
+        double tBurnStart = 0.0;
+        bool haveTBurnStart = (gc != null) && gc.API_Node_TryGetTimeToBurnStart(cursorIndex, out tBurnStart);
 
         float dv = 0f;
         float rem = 0f;
@@ -274,8 +277,15 @@ public class MFDNodePage : MFDPage
         display.DrawText("NODE N" + cursorIndex, row++, COL_DETAIL, Color.green);
         display.DrawText("STAT " + statText, row++, COL_DETAIL, Color.green);
 
-        if (haveTGo)
-            display.DrawText(MFD.FormatNumber("TGO", tGo), row++, COL_DETAIL, Color.green);
+        // TNODE (center of burn / node trigger)
+        // if (haveTNode)
+        //     display.DrawText(MFD.FormatNumber("TNODE", tNode), row++, COL_DETAIL, Color.green);
+        // else
+        //     display.DrawText("TNODE ---", row++, COL_DETAIL, Color.green);
+
+        // TGO (burn start)
+        if (haveTBurnStart)
+            display.DrawText(MFD.FormatNumber("TGO", tBurnStart), row++, COL_DETAIL, Color.green);
         else
             display.DrawText("TGO ---", row++, COL_DETAIL, Color.green);
 

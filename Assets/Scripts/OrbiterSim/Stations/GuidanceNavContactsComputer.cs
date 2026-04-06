@@ -42,6 +42,21 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
 
     private double _simRenderT;
 
+    [Header("Debug transition/contact output")]
+    public bool debugModeTransitionContacts = false;
+    public float debugModeTransitionLogWindowSeconds = 0.50f;
+
+    private byte _dbgLastPresentedMode = CraftNetState.MODE_RAILS;
+    private double _dbgLogUntilNet = -1.0;
+
+    private bool _dbgPrevRender0Valid = false;
+    private int _dbgPrevRender0Station = -1;
+    private Vector3 _dbgPrevRender0DrB = Vector3.zero;
+
+    private bool _dbgPrevRender1Valid = false;
+    private int _dbgPrevRender1Station = -1;
+    private Vector3 _dbgPrevRender1DrB = Vector3.zero;
+
     private Quaternion _qCraftForRender = Quaternion.identity;
     private double _crxRender, _cryRender, _crzRender;
     private double _cvxRender, _cvyRender, _cvzRender;
@@ -84,6 +99,19 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
             {
                 double tRender = clock.GetCachedRemoteRenderTime();
                 byte presentedMode = netCore.GetPresentedMode(tRender);
+
+
+                if (debugModeTransitionContacts)
+                {
+                    if (_dbgLastPresentedMode == CraftNetState.MODE_INTEGRATED &&
+                        presentedMode == CraftNetState.MODE_RAILS)
+                    {
+                        _dbgLogUntilNet = tRender + (double)debugModeTransitionLogWindowSeconds;
+                        Debug.Log("[ContactsDbg] presented transition INTEGRATED -> RAILS");
+                    }
+
+                    _dbgLastPresentedMode = presentedMode;
+                }
 
                 if (netAtt != null)
                     _qCraftForRender = netAtt.SampleRenderQuaternion(tRender);
@@ -151,6 +179,17 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
             FillFullSlot1(idx1, allowRenderSmoothing);
         else
             ResetSmooth1();
+
+
+
+        if (clock != null && netCore != null)
+        {
+            double tRender = clock.GetCachedRemoteRenderTime();
+            byte presentedMode = netCore.GetPresentedMode(tRender);
+            DebugLogTransitionContacts(tRender, presentedMode, allowRenderSmoothing);
+        }
+
+
     }
 
     private int FindNearestOther(int selectedIndex)
@@ -462,4 +501,123 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         vyB = (double)vB.y;
         vzB = (double)vB.z;
     }
+
+    private void DebugLogTransitionContacts(
+        double tRender,
+        byte presentedMode,
+        bool allowRenderSmoothing)
+    {
+        if (!debugModeTransitionContacts) return;
+        if (simManager != null && simManager.IsSimOwner()) return;
+        if (tRender > _dbgLogUntilNet) return;
+
+        // Slot 0
+        if (contacts.fullValid0)
+        {
+            Vector3 rawB0 = new Vector3(
+                (float)contacts.drx_B0,
+                (float)contacts.dry_B0,
+                (float)contacts.drz_B0);
+
+            Vector3 renderB0 = contacts.renderFullValid0
+                ? new Vector3(
+                    (float)contacts.render_drx_B0,
+                    (float)contacts.render_dry_B0,
+                    (float)contacts.render_drz_B0)
+                : rawB0;
+
+            Vector3 dRaw0 = Vector3.zero;
+            Vector3 dRender0 = Vector3.zero;
+
+            if (_dbgPrevRender0Valid && _dbgPrevRender0Station == contacts.fullStationIndex0)
+            {
+                dRender0 = renderB0 - _dbgPrevRender0DrB;
+            }
+
+            Debug.Log(
+                "[ContactsDbg][S0] " +
+                "mode=" + presentedMode +
+                " tRender=" + tRender.ToString("F3") +
+                " allowSmooth=" + allowRenderSmoothing +
+                " st=" + contacts.fullStationIndex0 +
+                " rawB=(" + rawB0.x.ToString("F2") + "," + rawB0.y.ToString("F2") + "," + rawB0.z.ToString("F2") + ")" +
+                " renderB=(" + renderB0.x.ToString("F2") + "," + renderB0.y.ToString("F2") + "," + renderB0.z.ToString("F2") + ")" +
+                " dRender=(" + dRender0.x.ToString("F2") + "," + dRender0.y.ToString("F2") + "," + dRender0.z.ToString("F2") + ")" +
+                " |dRender|=" + dRender0.magnitude.ToString("F2")
+            );
+
+            _dbgPrevRender0Valid = true;
+            _dbgPrevRender0Station = contacts.fullStationIndex0;
+            _dbgPrevRender0DrB = renderB0;
+        }
+        else
+        {
+            Debug.Log(
+                "[ContactsDbg][S0] " +
+                "mode=" + presentedMode +
+                " tRender=" + tRender.ToString("F3") +
+                " allowSmooth=" + allowRenderSmoothing +
+                " INVALID"
+            );
+
+            _dbgPrevRender0Valid = false;
+            _dbgPrevRender0Station = -1;
+            _dbgPrevRender0DrB = Vector3.zero;
+        }
+
+        // Slot 1
+        if (contacts.fullValid1)
+        {
+            Vector3 rawB1 = new Vector3(
+                (float)contacts.drx_B1,
+                (float)contacts.dry_B1,
+                (float)contacts.drz_B1);
+
+            Vector3 renderB1 = contacts.renderFullValid1
+                ? new Vector3(
+                    (float)contacts.render_drx_B1,
+                    (float)contacts.render_dry_B1,
+                    (float)contacts.render_drz_B1)
+                : rawB1;
+
+            Vector3 dRender1 = Vector3.zero;
+
+            if (_dbgPrevRender1Valid && _dbgPrevRender1Station == contacts.fullStationIndex1)
+            {
+                dRender1 = renderB1 - _dbgPrevRender1DrB;
+            }
+
+            Debug.Log(
+                "[ContactsDbg][S1] " +
+                "mode=" + presentedMode +
+                " tRender=" + tRender.ToString("F3") +
+                " allowSmooth=" + allowRenderSmoothing +
+                " st=" + contacts.fullStationIndex1 +
+                " rawB=(" + rawB1.x.ToString("F2") + "," + rawB1.y.ToString("F2") + "," + rawB1.z.ToString("F2") + ")" +
+                " renderB=(" + renderB1.x.ToString("F2") + "," + renderB1.y.ToString("F2") + "," + renderB1.z.ToString("F2") + ")" +
+                " dRender=(" + dRender1.x.ToString("F2") + "," + dRender1.y.ToString("F2") + "," + dRender1.z.ToString("F2") + ")" +
+                " |dRender|=" + dRender1.magnitude.ToString("F2")
+            );
+
+            _dbgPrevRender1Valid = true;
+            _dbgPrevRender1Station = contacts.fullStationIndex1;
+            _dbgPrevRender1DrB = renderB1;
+        }
+        else
+        {
+            Debug.Log(
+                "[ContactsDbg][S1] " +
+                "mode=" + presentedMode +
+                " tRender=" + tRender.ToString("F3") +
+                " allowSmooth=" + allowRenderSmoothing +
+                " INVALID"
+            );
+
+            _dbgPrevRender1Valid = false;
+            _dbgPrevRender1Station = -1;
+            _dbgPrevRender1DrB = Vector3.zero;
+        }
+    }
+
+
 }

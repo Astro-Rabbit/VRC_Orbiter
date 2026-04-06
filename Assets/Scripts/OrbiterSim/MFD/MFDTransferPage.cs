@@ -25,6 +25,8 @@ public class MFDTransferPage : MFDPage
     // for calculating position and velocity at burn time
     public ConicPropagator propagator;
 
+    public RendezvousTutorial tutorial;
+
     [Header("Display Data")]
     public bool hasTarget = false;
     public double tgtPx;
@@ -311,12 +313,19 @@ public class MFDTransferPage : MFDPage
     private void UploadAutoNode()
     {
         if (!solver.autoValid) return;
-        int idx = gc.API_Node_CreateAtTime(solver.autoDvE, solver.autoBurnTime);
+
+        int idx = gc.API_RequestCreateNode_Time(
+            solver.autoDvE,
+            solver.autoBurnTime
+        );
+
         if (idx >= 0) {
             solver.autoStatus = TransferSolver.AUTO_PLAN;
         } else {
             solver.autoStatus = TransferSolver.AUTO_ERR;
         }
+
+        tutorial.OnTransferNodeCreate(solver.autoBurnTime, solver.autoEncounterTime);
     }
 
     public override void DrawDisplay(MFD display)
@@ -358,7 +367,6 @@ public class MFDTransferPage : MFDPage
         display.ClearText();
 
         double now = clock.simTime;
-        //Color planColor = autoShowSolution && autoValid ? Color.cyan : Color.green;
         Color planColor = Color.green;
 
         display.DrawText(MFD.FormatPercent("STP", stepRatio), 2, 19, Color.green);

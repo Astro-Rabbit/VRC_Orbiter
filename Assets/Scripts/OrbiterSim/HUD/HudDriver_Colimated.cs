@@ -13,9 +13,15 @@ public class HudDriver_Colimated : UdonSharpBehaviour
     public Material orbitHudMat2;
     public Material dockHudMat2;
 
+    [Header("Optional plans")]
+    public NodePlanState nodePlan;
+
+
     [Header("References")]
     public GuidanceNavCoreState nav;
     public GuidanceNavContactsState contacts;
+    public GC_Core gc;
+
 
     [Header("Pilot HUD config")]
     [Tooltip("0=OFF, 1=GROUND, 2=ORBIT, 3=APPROACH, 4=DOCK")]
@@ -533,12 +539,37 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         block.SetVector("_TargetRelVelRetro_HUD", Vector4.zero);
         block.SetFloat("_TargetRelSpeedMps", 0f);
 
+
+
+        float nodeTgoSeconds = 0f;
+
+        if (nodeValid && nav != null && nav.valid && gc != null)
+        {
+            int nodeIndex = nav.selectedNodeIndex;
+
+            if (nodeIndex >= 0)
+            {
+                double tBurnStart;
+                bool haveTgo = gc.API_Node_TryGetTimeToBurnStart(nodeIndex, out tBurnStart);
+
+                if (haveTgo)
+                {
+                    if (tBurnStart < 0.0) tBurnStart = 0.0;
+                    nodeTgoSeconds = (float)tBurnStart;
+                }
+            }
+        }
+
+        block.SetFloat("_NodeTgoSeconds", nodeTgoSeconds);
+
+
+
         ClearTargetNameInBlock(block);
 
-        float rdvValue;
-        float rdvUnitCode;
-        if (nodeValid) rdvValue = EncodeSpeedDisplay((double)nodeRemainingDV, out rdvUnitCode);
-        else rdvValue = EncodeSpeedDisplay(0.0, out rdvUnitCode);
+        float rdvValue = 0f;
+        float rdvUnitCode = 0f;
+        bool nextEventIsApo = false;
+        bool rdvValid = false;
 
         bool apoValid = false;
         float apoValue = 0f;
@@ -568,10 +599,64 @@ public class HudDriver_Colimated : UdonSharpBehaviour
                 apoValid = true;
                 apoValue = EncodeDistanceDisplay(apoAlt, out apoUnitCode);
             }
+
+            // Time-to-event only for elliptical orbits
+            if (nav.e >= 0.0 && nav.e < 1.0 && nav.a > 0.0 && nav.muPrimary > 0.0)
+            {
+                double tToApo;
+                bool haveApoTime = OrbitHelpers.TryTimeToTrueAnomaly(
+                    nav.a,
+                    nav.e,
+                    nav.muPrimary,
+                    nav.nuRad,
+                    System.Math.PI,
+                    1e-6,
+                    out tToApo
+                );
+
+                double tToPeri;
+                bool havePeriTime = OrbitHelpers.TryTimeToTrueAnomaly(
+                    nav.a,
+                    nav.e,
+                    nav.muPrimary,
+                    nav.nuRad,
+                    0.0,
+                    1e-6,
+                    out tToPeri
+                );
+
+                if (haveApoTime && havePeriTime)
+                {
+                    double tEvent = tToApo;
+                    nextEventIsApo = true;
+
+                    if (tToPeri < tEvent)
+                    {
+                        tEvent = tToPeri;
+                        nextEventIsApo = false;
+                    }
+
+                    rdvValid = true;
+                    rdvValue = EncodeTimeDisplay(tEvent, out rdvUnitCode);
+                }
+                else if (haveApoTime)
+                {
+                    rdvValid = true;
+                    nextEventIsApo = true;
+                    rdvValue = EncodeTimeDisplay(tToApo, out rdvUnitCode);
+                }
+                else if (havePeriTime)
+                {
+                    rdvValid = true;
+                    nextEventIsApo = false;
+                    rdvValue = EncodeTimeDisplay(tToPeri, out rdvUnitCode);
+                }
+            }
         }
 
         block.SetFloat("_OrbitRDV_Value", rdvValue);
         block.SetFloat("_OrbitRDV_UnitCode", rdvUnitCode);
+        block.SetFloat("_OrbitNextIsApo", nextEventIsApo ? 1f : 0f);
 
         block.SetFloat("_OrbitAPO_Valid", apoValid ? 1f : 0f);
         block.SetFloat("_OrbitAPO_Value", apoValue);
@@ -580,6 +665,8 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         block.SetFloat("_OrbitPER_Valid", perValid ? 1f : 0f);
         block.SetFloat("_OrbitPER_Value", perValue);
         block.SetFloat("_OrbitPER_UnitCode", perUnitCode);
+
+
     }
 
     private void WriteApproachCueTo(MaterialPropertyBlock block, float halfFovX, float halfFovY)
@@ -665,6 +752,7 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         block.SetFloat("_OrbitPER_Valid", 0f);
         block.SetFloat("_OrbitPER_Value", 0f);
         block.SetFloat("_OrbitPER_UnitCode", 0f);
+        block.SetFloat("_NodeTgoSeconds", 0f);
     }
 
     private void WriteDockModeToBlock(MaterialPropertyBlock block, float halfFovX, float halfFovY)
@@ -730,6 +818,12 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         block.SetVector("_DockRelVelProg_HUD", new Vector4(dockRelVelProgHUD.x, dockRelVelProgHUD.y, 0f, 0f));
         block.SetVector("_DockRelVelRetro_HUD", new Vector4(dockRelVelRetroHUD.x, dockRelVelRetroHUD.y, 0f, 0f));
         block.SetFloat("_DockRelSpeedMps", dockRelSpeedMps);
+
+        float dockPortIndex = -1f;
+        if (contacts != null && contacts.dockValid0)
+            dockPortIndex = (float)contacts.dockStationPortIndex0;
+
+        block.SetFloat("_DockPortIndex", dockPortIndex);
 
         block.SetFloat("_NodeValid", 0f);
         block.SetVector("_NodePos_HUD", Vector4.zero);
@@ -1060,6 +1154,27 @@ public class HudDriver_Colimated : UdonSharpBehaviour
         unitCode = 0f; // m/s scale
         return (float)metersPerSecond;
     }
+
+    private static float EncodeTimeDisplay(double seconds, out float unitCode)
+    {
+        double absT = System.Math.Abs(seconds);
+
+        if (absT >= 3600.0)
+        {
+            unitCode = 2f; // hr
+            return (float)(seconds / 3600.0);
+        }
+
+        if (absT >= 60.0)
+        {
+            unitCode = 1f; // min
+            return (float)(seconds / 60.0);
+        }
+
+        unitCode = 0f; // sec
+        return (float)seconds;
+    }
+
 
     // ============================================================
     // Panel hooks

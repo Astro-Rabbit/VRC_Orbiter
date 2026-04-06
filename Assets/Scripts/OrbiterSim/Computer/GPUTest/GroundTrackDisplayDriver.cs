@@ -85,6 +85,10 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
     private int _lastMapHeight = -1;
     private double _lastDispatchT = double.NegativeInfinity;
 
+
+    private int _lastRenderedBodyId = -1;
+    private bool _mapMatchesCurrentBody = false;
+
     void Update()
     {
         if (!updateEveryFrame) return;
@@ -102,12 +106,19 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         if (outputRT == null) return;
         if (mapRT == null) return;
 
-        if (minUpdateIntervalSec > 0f)
+        int bodyId = nav.primaryId;
+        bool bodyChanged = (bodyId != _lastRenderedBodyId);
+
+        if (minUpdateIntervalSec > 0f && !bodyChanged)
         {
             double nowT = nav.t;
             if (nowT - _lastDispatchT < (double)minUpdateIntervalSec)
                 return;
             _lastDispatchT = nowT;
+        }
+        else
+        {
+            _lastDispatchT = nav.t;
         }
 
         int desiredSamples = sampleCount;
@@ -117,7 +128,6 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         EnsureTrackDataResources(desiredSamples);
         EnsureMapResources();
 
-        int bodyId = nav.primaryId;
         float bodyRadius = (float)nav.radiusPrimary;
 
         PushPropagationUniforms(bodyId, bodyRadius, desiredSamples);
@@ -125,8 +135,28 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
 
         PushMapUniforms(bodyId, desiredSamples);
         DispatchMapPass();
+
+        _lastRenderedBodyId = bodyId;
+        _mapMatchesCurrentBody = true;
+
+
     }
 
+    public void ForceRefresh()
+    {
+        _lastDispatchT = double.NegativeInfinity;
+        _mapMatchesCurrentBody = false;
+        EvaluateAndDispatch();
+    }
+
+
+    public bool MapMatchesBody(int bodyId)
+    {
+        return _mapMatchesCurrentBody &&
+            mapRT != null &&
+            mapRT.IsCreated() &&
+            _lastRenderedBodyId == bodyId;
+    }
     private void EnsureTrackDataResources(int desiredSamples)
     {
         if (outputRT == null) return;
@@ -307,11 +337,6 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         return outputRT != null && outputRT.IsCreated();
     }
 
-    public void ForceRefresh()
-    {
-        _lastDispatchT = double.NegativeInfinity;
-        EvaluateAndDispatch();
-    }
 
     void OnDisable()
     {

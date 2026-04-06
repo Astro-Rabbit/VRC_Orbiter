@@ -179,6 +179,16 @@ public class SimManager : UdonSharpBehaviour
     public SkyBoxDriver skyrender;
     public StationRenderManager stationRender;
     public CraftNetCabinAccel netCabinAccel;
+
+
+    [Header("Remote rails transition smoothing")]
+    [Tooltip("After remote presented mode flips from integrated to rails, keep using render-sampled kin time briefly if available.")]
+    public float remoteRailsKinTimeHoldSeconds = 0.35f;
+
+    private byte _lastRemotePresentedMode = MODE_RAILS;
+    private double _remoteRailsKinTimeHoldUntilNet = -1.0;
+
+
     // -------------------------------------------------------------------------
     // Initialization helpers
     // -------------------------------------------------------------------------
@@ -233,6 +243,15 @@ public class SimManager : UdonSharpBehaviour
     // -------------------------------------------------------------------------
     // Unity lifecycle
     // -------------------------------------------------------------------------
+
+
+    [Header("Debug transition seam")]
+    public bool debugRemoteIntegratedToRailsSeam = false;
+    public float debugSeamLogWindowSeconds = 0.5f;
+
+    private byte _dbgLastPresentedMode = MODE_RAILS;
+    private double _dbgLogUntilNet = -1.0;
+
 
     public bool IsFreezeActive()
     {
@@ -379,9 +398,54 @@ public class SimManager : UdonSharpBehaviour
 
         }
 
+        if (!isOwner && debugRemoteIntegratedToRailsSeam)
+        {
+            if (_dbgLastPresentedMode == MODE_INTEGRATED && presentedMode == MODE_RAILS)
+            {
+                _dbgLogUntilNet = tRenderNet + (double)debugSeamLogWindowSeconds;
+                Debug.Log("[SeamDbg] presented transition INTEGRATED -> RAILS");
+            }
+            _dbgLastPresentedMode = presentedMode;
+        }
+
+        if (!isOwner && debugRemoteIntegratedToRailsSeam && tRenderNet <= _dbgLogUntilNet)
+        {
+            double railsTview = Tmission - backTime * clock.timeScale;
+            double kinTview = (netKin != null && netKin.rawValid) ? netKin.rawSimT : double.NaN;
+            double deltaT = (netKin != null && netKin.rawValid) ? (kinTview - railsTview) : double.NaN;
+
+            Debug.Log(
+                "[SeamDbg] " +
+                "presentedMode=" + presentedMode +
+                " tRenderNet=" + tRenderNet.ToString("F3") +
+                " backTime=" + backTime.ToString("F3") +
+                " Tmission=" + Tmission.ToString("F3") +
+                " railsTview=" + railsTview.ToString("F3") +
+                " kinTview=" + (double.IsNaN(kinTview) ? "NaN" : kinTview.ToString("F3")) +
+                " deltaT=" + (double.IsNaN(deltaT) ? "NaN" : deltaT.ToString("F3"))
+            );
+
+            double savedRx = craft.rx, savedRy = craft.ry, savedRz = craft.rz;
+            double savedVx = craft.vx, savedVy = craft.vy, savedVz = craft.vz;
+
+            double curRx = craft.rx, curRy = craft.ry, curRz = craft.rz;
+
+            craftProp.Evaluate(railsTview);
+
+            double testRx = craft.rx, testRy = craft.ry, testRz = craft.rz;
+
+            double dx = testRx - curRx;
+            double dy = testRy - curRy;
+            double dz = testRz - curRz;
+            double jumpMeters = System.Math.Sqrt(dx * dx + dy * dy + dz * dz);
+
+            craft.rx = savedRx; craft.ry = savedRy; craft.rz = savedRz;
+            craft.vx = savedVx; craft.vy = savedVy; craft.vz = savedVz;
+
+            Debug.Log("[SeamDbg] predictedJumpMeters=" + jumpMeters.ToString("F2"));
 
 
-
+        }
 
         // 1) Evaluate ephemeris for the chosen presentation time
         if (ephem != null)
@@ -595,12 +659,12 @@ public class SimManager : UdonSharpBehaviour
 
             if (craft != null && actuation != null)
             {
-                double dProp = actuation.mainMdot_kgps * rem;
-                if (dProp > 0.0)
-                {
-                    craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
-                    craft.RecomputeMass();
-                }
+                // double dProp = actuation.mainMdot_kgps * rem;
+                // if (dProp > 0.0)
+                // {
+                //     craft.propMassKg = System.Math.Max(0.0, craft.propMassKg - dProp);
+                //     craft.RecomputeMass();
+                // }
             }
 
             if (numeric != null && actuation != null)
@@ -658,6 +722,9 @@ public class SimManager : UdonSharpBehaviour
 
         if (netAtt != null)
             netAtt.PublishAttitude();
+
+        // if (conicFitter != null)
+        //     conicFitter.Fit(craft.primaryBodyId, clock.Now());
     }
 
     // -------------------------------------------------------------------------
@@ -766,8 +833,8 @@ public class SimManager : UdonSharpBehaviour
                     if (netKin != null)
                         netKin.ApplyRemoteRawToCraft();
 
-                    if (conicFitter != null)
-                        conicFitter.Fit(craft.primaryBodyId, clock.Now());
+                    // if (conicFitter != null)
+                        // conicFitter.Fit(craft.primaryBodyId, clock.Now());
                 }
 
 
@@ -894,22 +961,134 @@ public class SimManager : UdonSharpBehaviour
         _accumSim = 0.0;
     }
 
-    public override void OnOwnershipTransferred(VRCPlayerApi player)
+    private void RecoverRailsFromSyncedState()
     {
-        if (!Networking.IsOwner(gameObject)) return;
+        _simTValid = false;
+        _accumSim = 0.0;
 
-        if (handoffNet == null || handoffNet.state != 1)
+        double T = (clock != null) ? clock.Now() : 0.0;
+        _simT = T;
+
+        if (dock != null)
+            dock.ResetState();
+
+        if (conicFitter != null)
+            conicFitter.Fit(craft.primaryBodyId, T);
+
+        if (craftProp != null)
+            craftProp.Evaluate(T);
+
+        if (netAtt != null)
         {
-            HandoffLog("Ownership transfer (non-handoff)");
+            Quaternion q = netAtt.SampleRenderQuaternion(clock != null ? clock.GetCachedRemoteRenderTime() : 0.0);
+            craftAtt.qBE = q;
+        }
+    }
+    private bool RecoverIntegratedFromSyncedState()
+    {
+        if (netKin == null || !netKin.rawValid)
+            return false;
+
+        craft.rx = netKin.rawRx;
+        craft.ry = netKin.rawRy;
+        craft.rz = netKin.rawRz;
+
+        craft.vx = netKin.rawVx;
+        craft.vy = netKin.rawVy;
+        craft.vz = netKin.rawVz;
+
+        _simT = netKin.rawSimT;
+        _simTValid = true;
+        _accumSim = 0.0;
+
+        if (netAtt != null)
+        {
+            // Use the latest available remote-sampled attitude as the recovered authority basis
+            Quaternion q = netAtt.SampleRenderQuaternion(clock != null ? clock.GetCachedRemoteRenderTime() : 0.0);
+            craftAtt.qBE = q;
+        }
+
+        // Keep existing angular rates if no better synced source is exposed
+        // If netAtt exposes raw angular rate mirrors later, use them here.
+
+        if (dock != null)
+            dock.ResetState();
+
+        return true;
+    }
+    private void RecoverDockedFromSyncedState()
+    {
+        _simT = (clock != null) ? clock.Now() : 0.0;
+        _simTValid = false;
+        _accumSim = 0.0;
+
+        if (dock != null)
+            dock.ResetState();
+
+        AdoptDockRuntimeFromNetCore();
+
+        if (dockingComp != null && clock != null)
+            dockingComp.EvaluateDockedRemote(clock.Now());
+    }
+    private void RecoverAuthorityFromSyncedState()
+    {
+        // Clear any stale local handoff/freeze state first
+        authorityArmed = true;
+        handoffFreeze = false;
+        _lastOwnershipRequestTxnId = -1;
+
+        if (handoffNet != null)
+            _lastConsumedTxnId = handoffNet.txnId;
+
+        _settleAccum = 0f;
+        _accumSim = 0.0;
+
+        if (netCore == null || craft == null || craftAtt == null)
+        {
+            HandoffLog("ABRUPT RECOVERY FAILED: missing netCore/craft/craftAtt");
             return;
         }
 
-        if (handoffNet.targetPlayerId != Networking.LocalPlayer.playerId)
+        byte mode = netCore.mode;
+        byte primary = netCore.primaryBodyId;
+
+        craft.primaryBodyId = primary;
+
+        if (mode == MODE_DOCKED)
         {
-            HandoffLog("Ownership transfer not intended for us");
-            return;
+            RecoverDockedFromSyncedState();
+        }
+        else if (mode == MODE_INTEGRATED)
+        {
+            bool okIntegrated = RecoverIntegratedFromSyncedState();
+            if (!okIntegrated)
+            {
+                HandoffLog("ABRUPT RECOVERY: integrated source not valid, falling back to rails");
+                RecoverRailsFromSyncedState();
+            }
+        }
+        else
+        {
+            RecoverRailsFromSyncedState();
         }
 
+        if (netCore != null)
+            netCore.AdoptModeImmediate(mode, primary);
+
+        ForcePublishAuthoritativeState();
+
+        if (handoffNet != null && netCore != null)
+        {
+            netCore.SetHandoffEstablishedTxnId(handoffNet.txnId);
+            netCore.ForcePublishCore();
+        }
+
+
+        HandoffLog($"ABRUPT RECOVERY COMPLETE mode={mode} primary={primary}");
+    }
+
+    private void HandleGracefulOwnershipTakeover()
+    {
         // stay frozen until adoption is complete
         authorityArmed = false;
         handoffFreeze = true;
@@ -997,6 +1176,19 @@ public class SimManager : UdonSharpBehaviour
 
         HandoffLog("HANDOFF COMPLETE → SIM RESUMED");
     }
+    public override void OnOwnershipTransferred(VRCPlayerApi player)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+
+        if (IsValidGracefulHandoffForLocal())
+        {
+            HandleGracefulOwnershipTakeover();
+            return;
+        }
+
+        HandoffLog("Ownership transfer (abrupt/non-handoff) → recovering from synced state");
+        RecoverAuthorityFromSyncedState();
+    }
 
     public override bool OnOwnershipRequest(VRCPlayerApi requester, VRCPlayerApi newOwner)
     {
@@ -1013,6 +1205,18 @@ public class SimManager : UdonSharpBehaviour
     public bool IsSimOwner()
     {
         return Networking.IsOwner(gameObject);
+    }
+
+
+    private bool IsValidGracefulHandoffForLocal()
+    {
+        if (handoffNet == null) return false;
+        if (handoffNet.state != 1) return false;
+
+        VRCPlayerApi local = Networking.LocalPlayer;
+        if (local == null) return false;
+
+        return handoffNet.targetPlayerId == local.playerId;
     }
 
     /// <summary>
@@ -1137,7 +1341,27 @@ public class SimManager : UdonSharpBehaviour
             netAtt.ForcePublishAttitude();
     }
 
+    public void AbortHandoffForAuthoritativeReset()
+    {
+        authorityArmed = true;
+        handoffFreeze = false;
 
+        _lastOwnershipRequestTxnId = -1;
+
+        if (handoffNet != null)
+        {
+            // Consume whatever txn was active locally so it can never refreeze us.
+            _lastConsumedTxnId = handoffNet.txnId;
+
+            if (Networking.IsOwner(handoffNet.gameObject))
+                handoffNet.ClearState(true);
+        }
+
+        if (netCore != null && Networking.IsOwner(netCore.gameObject))
+        {
+            netCore.ClearHandoffEstablished(true);
+        }
+    }
 
     public void SetOwnershipTransferHardLocked(bool locked)
     {
@@ -1336,6 +1560,10 @@ public class SimManager : UdonSharpBehaviour
             dockingComp.requestUndock = false;
             dockingComp.requestLeaveDockedToRails = false;
             dockingComp.requestEnterDocked = false;
+
+            if (dockingComp.dockCtrl != null)
+                dockingComp.dockCtrl.ForceResetController();
+
         }
 
         if (gcCore != null)

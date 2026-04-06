@@ -51,4 +51,17 @@ public class DockingPort : UdonSharpBehaviour
             return new Vector3((float)stationModel.vx, (float)stationModel.vy, (float)stationModel.vz);
         }
     }
+
+    public void ForceClearAllLatches()
+    {
+        if (latches == null) return;
+
+        int n = latches.Length;
+        for (int i = 0; i < n; i++)
+        {
+            if (latches[i] != null)
+                latches[i].ForceClearLatch();
+        }
+    }
+
 }

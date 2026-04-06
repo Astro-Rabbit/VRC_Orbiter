@@ -558,4 +558,17 @@ public class CraftNetState : UdonSharpBehaviour
     }
 
 
+    public void ClearHandoffEstablished(bool forcePublish = true)
+    {
+        if (!Networking.IsOwner(gameObject)) return;
+        if (!HasSimAuthority()) return;
+
+        _handoffEstablishedTxnId = -1;
+        handoffEstablishedTxnId = -1;
+
+        if (forcePublish)
+            ForcePublishCore();
+    }
+
+
 }

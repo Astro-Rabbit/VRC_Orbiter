@@ -16,13 +16,14 @@ public class TabletSimControl : UdonSharpBehaviour
     public TMP_Text statusText;
     public TMP_Text scenarioText;
     public TMP_Text lockText;
+    public TMP_Text ownershipLockText;   // NEW
 
     [Header("Buttons")]
     public TabletButton scenarioPrevButton;
     public TabletButton scenarioNextButton;
     public TabletButton resetButton;
     public TabletButton lockToggleButton;
-
+    public TabletButton ownershipLockToggleButton;   // NEW
     [Header("Refresh")]
     public float refreshInterval = 0.1f;
 
@@ -37,7 +38,7 @@ public class TabletSimControl : UdonSharpBehaviour
     private bool _lastCanReset = false;
     private bool _lastCanToggleLock = false;
     private bool _lastCanBrowse = false;
-
+    private bool _lastCanToggleOwnershipLock = false;
     void Start()
     {
         ClampScenarioIndex();
@@ -133,6 +134,19 @@ public class TabletSimControl : UdonSharpBehaviour
         RefreshUI(true);
     }
 
+    public void ToggleOwnershipLock()
+    {
+        if (!CanToggleOwnershipLock()) return;
+        if (simManager == null) return;
+
+        simManager.SetOwnershipTransferHardLocked(!simManager.ownershipTransferHardLocked);
+        RefreshUI(true);
+    }
+
+    private bool CanToggleOwnershipLock()
+    {
+        return simManager != null && simManager.IsSimOwner();
+    }
     private void RefreshUI(bool forceButtonRefresh)
     {
         ClampScenarioIndex();
@@ -142,10 +156,11 @@ public class TabletSimControl : UdonSharpBehaviour
         UpdateStatusText();
         UpdateScenarioText();
         UpdateLockText();
-
+        UpdateOwnershipLockText();
         bool canReset = CanReset();
         bool canToggleLock = CanToggleLock();
         bool canBrowse = CanBrowseScenarios();
+        bool canToggleOwnershipLock = CanToggleOwnershipLock();
 
         if (forceButtonRefresh || canBrowse != _lastCanBrowse)
         {
@@ -165,8 +180,28 @@ public class TabletSimControl : UdonSharpBehaviour
             ApplyButtonState(lockToggleButton, canToggleLock);
             _lastCanToggleLock = canToggleLock;
         }
+
+        if (forceButtonRefresh || canToggleOwnershipLock != _lastCanToggleOwnershipLock)
+        {
+            ApplyButtonState(ownershipLockToggleButton, canToggleOwnershipLock);
+            _lastCanToggleOwnershipLock = canToggleOwnershipLock;
+        }
+
     }
 
+    private void UpdateOwnershipLockText()
+    {
+        if (ownershipLockText == null) return;
+        if (simManager == null)
+        {
+            ownershipLockText.text = "OWNER LOCK: ---";
+            return;
+        }
+
+        ownershipLockText.text = simManager.ownershipTransferHardLocked
+            ? "OWNER LOCK: ON"
+            : "OWNER LOCK: OFF";
+    }
     private void ClampScenarioIndex()
     {
         if (scenarioInitializer == null)

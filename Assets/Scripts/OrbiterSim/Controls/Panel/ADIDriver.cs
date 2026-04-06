@@ -34,6 +34,18 @@ public class ADIDriver : UdonSharpBehaviour
     public CraftAttitudeState attitude;
     public GuidanceNavCoreState nav;
 
+    [Header("Optional guidance contacts")]
+    public GuidanceNavContactsState contacts;
+
+
+    [Header("Mode Source")]
+    public HudDriver_Colimated hudDriver;
+    public bool followCopilotHud = false;
+
+    [Header("Mode Source")]
+    [Tooltip("0=OFF, 1=GROUND, 2=ORBIT, 3=APPROACH, 4=DOCK")]
+    public byte hudMode = 2;
+
     [Header("ADI Ball Calibration")]
     public Vector3 ballEulerOffset = Vector3.zero;
     public bool invertBallRotation = false;
@@ -116,6 +128,39 @@ public class ADIDriver : UdonSharpBehaviour
     public float yawAngleMax = 30.0f;
 
 
+
+    [Header("Pitch Error Needle")]
+    public Transform pitchErrorNeedle;
+    public int pitchErrorRotationAxis = AXIS_Z;
+    public bool invertPitchError = false;
+    public float pitchErrorMinDeg = -30f;
+    public float pitchErrorMaxDeg = 30f;
+    public float pitchErrorAngleMin = -30f;
+    public float pitchErrorAngleZero = 0f;
+    public float pitchErrorAngleMax = 30f;
+
+    [Header("Yaw Error Needle")]
+    public Transform yawErrorNeedle;
+    public int yawErrorRotationAxis = AXIS_Z;
+    public bool invertYawError = false;
+    public float yawErrorMinDeg = -30f;
+    public float yawErrorMaxDeg = 30f;
+    public float yawErrorAngleMin = -30f;
+    public float yawErrorAngleZero = 0f;
+    public float yawErrorAngleMax = 30f;
+
+    [Header("Roll Error Needle")]
+    public Transform rollErrorNeedle;
+    public int rollErrorRotationAxis = AXIS_Z;
+    public bool invertRollError = false;
+    public float rollErrorMinDeg = -45f;
+    public float rollErrorMaxDeg = 45f;
+    public float rollErrorAngleMin = -30f;
+    public float rollErrorAngleZero = 0f;
+    public float rollErrorAngleMax = 30f;
+
+
+
     [Header("ADI Ball")]
     public Renderer ballRenderer;
     public string ballRotationProperty = "_BallRot";
@@ -172,8 +217,7 @@ public class ADIDriver : UdonSharpBehaviour
                 new Vector4(q.x, q.y, q.z, q.w)
             );
         }
-
-
+        DriveErrorNeedles();
     }
 
     private float GetRateValue(int source, bool invert)
@@ -321,5 +365,167 @@ public class ADIDriver : UdonSharpBehaviour
         return Quaternion.Inverse(qRefInBody);
     }
 
+    private bool TryGetReferenceFrame_B(out Vector3 refForward_B, out Vector3 refUp_B)
+    {
+        refForward_B = Vector3.forward;
+        refUp_B = Vector3.up;
+
+        if (nav == null || !nav.valid)
+            return false;
+
+        Quaternion qEB = Quaternion.Inverse(nav.qBE);
+        byte activeHudMode = GetActiveHudMode();
+
+        if (activeHudMode == 2) // ORBIT
+        {
+            if (!nav.selectedNodeVectorValid) return false;
+
+            refForward_B = qEB * nav.selectedNodeDir_E;
+            if (refForward_B.sqrMagnitude < 1e-10f) return false;
+            refForward_B.Normalize();
+
+            refUp_B = qEB * nav.Nhat_E;
+            refUp_B = (refUp_B - Vector3.Dot(refUp_B, refForward_B) * refForward_B);
+            if (refUp_B.sqrMagnitude < 1e-10f) refUp_B = Vector3.up;
+            refUp_B.Normalize();
+            return true;
+        }
+
+        if (activeHudMode == 3) // APPROACH
+        {
+            if (contacts == null || !contacts.selValid) return false;
+
+            refForward_B = new Vector3(
+                (float)contacts.sel_drx_B,
+                (float)contacts.sel_dry_B,
+                (float)contacts.sel_drz_B
+            );
+            if (refForward_B.sqrMagnitude < 1e-10f) return false;
+            refForward_B.Normalize();
+
+            if (contacts.fullValid0)
+            {
+                Quaternion qTargetInB = contacts.qTargetInB0;
+                refUp_B = qTargetInB * Vector3.up;
+                refUp_B = (refUp_B - Vector3.Dot(refUp_B, refForward_B) * refForward_B);
+                if (refUp_B.sqrMagnitude < 1e-10f) refUp_B = Vector3.up;
+                refUp_B.Normalize();
+            }
+            else
+            {
+                refUp_B = Vector3.up;
+            }
+
+            return true;
+        }
+
+        if (activeHudMode == 4) // DOCK
+        {
+            if (contacts == null || !contacts.dockValid0) return false;
+
+            Quaternion qTargetPortInB = contacts.qTargetPortInB0;
+
+            refForward_B = -(qTargetPortInB * Vector3.forward);
+            if (refForward_B.sqrMagnitude < 1e-10f) return false;
+            refForward_B.Normalize();
+
+            refUp_B = qTargetPortInB * Vector3.up;
+            refUp_B = (refUp_B - Vector3.Dot(refUp_B, refForward_B) * refForward_B);
+            if (refUp_B.sqrMagnitude < 1e-10f) return false;
+            refUp_B.Normalize();
+
+            return true;
+        }
+
+        return false;
+    }
+
+
+    private void DriveErrorNeedles()
+    {
+        Vector3 refForward_B, refUp_B;
+        if (!TryGetReferenceFrame_B(out refForward_B, out refUp_B))
+        {
+            DriveNeedle(pitchErrorNeedle, 0f,
+                pitchErrorMinDeg, pitchErrorMaxDeg,
+                pitchErrorAngleMin, pitchErrorAngleZero, pitchErrorAngleMax,
+                pitchErrorRotationAxis);
+
+            DriveNeedle(yawErrorNeedle, 0f,
+                yawErrorMinDeg, yawErrorMaxDeg,
+                yawErrorAngleMin, yawErrorAngleZero, yawErrorAngleMax,
+                yawErrorRotationAxis);
+
+            DriveNeedle(rollErrorNeedle, 0f,
+                rollErrorMinDeg, rollErrorMaxDeg,
+                rollErrorAngleMin, rollErrorAngleZero, rollErrorAngleMax,
+                rollErrorRotationAxis);
+            return;
+        }
+        byte activeHudMode = GetActiveHudMode();
+
+        // Craft boresight frame in body coordinates
+        Vector3 curForward_B = Vector3.forward;
+        Vector3 curUp_B = Vector3.up;
+        Vector3 curRight_B = Vector3.right;
+
+        float yawErrDeg = Mathf.Atan2(refForward_B.x, refForward_B.z) * Mathf.Rad2Deg;
+        float pitchErrDeg = Mathf.Atan2(refForward_B.y, refForward_B.z) * Mathf.Rad2Deg;
+
+        Vector3 refRight_B = Vector3.Cross(refUp_B, refForward_B).normalized;
+        Vector3 refUpOrtho_B = Vector3.Cross(refForward_B, refRight_B).normalized;
+
+        float rollErrDeg = SignedAngleAroundAxis(curUp_B, refUpOrtho_B, refForward_B);
+
+        if (activeHudMode != 4) // only active in DOCK
+        {
+            rollErrDeg = 0f;
+        }
+
+        if (invertPitchError) pitchErrDeg = -pitchErrDeg;
+        if (invertYawError) yawErrDeg = -yawErrDeg;
+        if (invertRollError) rollErrDeg = -rollErrDeg;
+
+        DriveNeedle(pitchErrorNeedle, pitchErrDeg,
+            pitchErrorMinDeg, pitchErrorMaxDeg,
+            pitchErrorAngleMin, pitchErrorAngleZero, pitchErrorAngleMax,
+            pitchErrorRotationAxis);
+
+        DriveNeedle(yawErrorNeedle, yawErrDeg,
+            yawErrorMinDeg, yawErrorMaxDeg,
+            yawErrorAngleMin, yawErrorAngleZero, yawErrorAngleMax,
+            yawErrorRotationAxis);
+
+        DriveNeedle(rollErrorNeedle, rollErrDeg,
+            rollErrorMinDeg, rollErrorMaxDeg,
+            rollErrorAngleMin, rollErrorAngleZero, rollErrorAngleMax,
+            rollErrorRotationAxis);
+    }
+
+    private Vector3 GetAxisVector(int axis)
+    {
+        if (axis == AXIS_X) return Vector3.right;
+        if (axis == AXIS_Y) return Vector3.up;
+        return Vector3.forward;
+    }
+    private float SignedAngleAroundAxis(Vector3 from, Vector3 to, Vector3 axis)
+    {
+        Vector3 f = Vector3.ProjectOnPlane(from, axis).normalized;
+        Vector3 t = Vector3.ProjectOnPlane(to, axis).normalized;
+
+        if (f.sqrMagnitude < 1e-10f || t.sqrMagnitude < 1e-10f)
+            return 0f;
+
+        float ang = Vector3.Angle(f, t);
+        float sign = Mathf.Sign(Vector3.Dot(axis, Vector3.Cross(f, t)));
+        return ang * sign;
+    }
+    private byte GetActiveHudMode()
+    {
+        if (hudDriver == null)
+            return hudMode; // fallback to local inspector value if not wired
+
+        return followCopilotHud ? hudDriver.hudMode2 : hudDriver.hudMode;
+    }
 
 }

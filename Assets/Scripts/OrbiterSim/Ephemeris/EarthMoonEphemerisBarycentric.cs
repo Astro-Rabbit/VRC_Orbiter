@@ -5,8 +5,12 @@ using System;
 public class EarthMoonEphemerisBarycentric : UdonSharpBehaviour
 {
     [Header("Units / Constants")]
-    public double AU_m = 149597870700.0;            // meters
-    public double velDiffSeconds = 60.0;            // central-difference window (seconds)
+    public double AU_m = 149597870700.0;     // meters
+    public double velDiffSeconds = 60.0;     // kept only for inspector/backward compatibility; not used
+
+    [Header("Earth-Moon scaling")]
+    public double earthRadiusModelM = 6378137.0;   // legacy inspector compatibility
+    public double moonMeanDistanceM = 385000560.0; // mean lunar distance
 
     // Main entry point
     public void Evaluate(double jd,
@@ -17,171 +21,265 @@ public class EarthMoonEphemerisBarycentric : UdonSharpBehaviour
         out double moon_rx, out double moon_ry, out double moon_rz,
         out double moon_vx, out double moon_vy, out double moon_vz)
     {
-        // Sun at origin in this V1 heliocentric-ecliptic frame.
+        // Sun at origin in this V1 heliocentric-ecliptic inertial frame.
         sun_rx = sun_ry = sun_rz = 0.0;
         sun_vx = sun_vy = sun_vz = 0.0;
 
-        // Positions at jd
-        double ex, ey, ez, mx, my, mz;
-        ComputePositionsOnly(jd, out ex, out ey, out ez, out mx, out my, out mz);
+        ComputeEarthState(jd,
+            out earth_rx, out earth_ry, out earth_rz,
+            out earth_vx, out earth_vy, out earth_vz);
 
-        earth_rx = ex; earth_ry = ey; earth_rz = ez;
-        moon_rx  = mx; moon_ry  = my; moon_rz  = mz;
+        double moon_geo_rx, moon_geo_ry, moon_geo_rz;
+        double moon_geo_vx, moon_geo_vy, moon_geo_vz;
 
-        // Velocities via central difference
-        double dt = Math.Max(1.0, velDiffSeconds);
-        double jd_dt = dt / 86400.0;
+        ComputeMoonGeocentricState(jd,
+            out moon_geo_rx, out moon_geo_ry, out moon_geo_rz,
+            out moon_geo_vx, out moon_geo_vy, out moon_geo_vz);
 
-        double ex1, ey1, ez1, mx1, my1, mz1;
-        double ex0, ey0, ez0, mx0, my0, mz0;
+        moon_rx = earth_rx + moon_geo_rx;
+        moon_ry = earth_ry + moon_geo_ry;
+        moon_rz = earth_rz + moon_geo_rz;
 
-        ComputePositionsOnly(jd + jd_dt, out ex1, out ey1, out ez1, out mx1, out my1, out mz1);
-        ComputePositionsOnly(jd - jd_dt, out ex0, out ey0, out ez0, out mx0, out my0, out mz0);
-
-        double inv2dt = 1.0 / (2.0 * dt);
-
-        earth_vx = (ex1 - ex0) * inv2dt;
-        earth_vy = (ey1 - ey0) * inv2dt;
-        earth_vz = (ez1 - ez0) * inv2dt;
-
-        moon_vx = (mx1 - mx0) * inv2dt;
-        moon_vy = (my1 - my0) * inv2dt;
-        moon_vz = (mz1 - mz0) * inv2dt;
+        moon_vx = earth_vx + moon_geo_vx;
+        moon_vy = earth_vy + moon_geo_vy;
+        moon_vz = earth_vz + moon_geo_vz;
     }
 
-    // --- Positions only (meters), ecliptic inertial ---
-    private void ComputePositionsOnly(double jd,
-        out double earth_rx, out double earth_ry, out double earth_rz,
-        out double moon_rx, out double moon_ry, out double moon_rz)
+    // ------------------------------------------------------------------------
+    // Earth heliocentric ecliptic state
+    // Uses a simple Keplerian model with direct velocity instead of finite diff.
+    // ------------------------------------------------------------------------
+    private void ComputeEarthState(double jd,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
     {
-        // Julian days since J2000.0
-        double d = jd - 2451545.0;
+        double d = jd - 2451545.0; // days since J2000
 
-        // ---- Sun/Earth heliocentric (Earth is opposite Sun geocentric) ----
-        // Stjarnhimlen-style:
-        // L = mean longitude, g = mean anomaly, e = eccentricity
-        // lambda = ecliptic longitude, R = distance (AU)
-        double L = DegToRad(WrapDeg(280.460 + 0.9856474 * d));
-        double g = DegToRad(WrapDeg(357.528 + 0.9856003 * d));
+        // Low-cost Earth orbit model (same class of approximation as before,
+        // but evaluated as a direct state instead of position + finite diff)
+        double a_AU = 1.00000011;
+        double e = 0.01671022 - 0.00000000126 * d;
 
-        // Ecliptic longitude of the Sun (geocentric) in radians
-        double lambda = L + DegToRad(1.915) * Math.Sin(g) + DegToRad(0.020) * Math.Sin(2.0 * g);
+        // Longitude of perihelion (deg)
+        double varpi_deg = 102.937348 + 0.0000470935 * d;
 
-        // Distance in AU
-        double R_au = 1.00014 - 0.01671 * Math.Cos(g) - 0.00014 * Math.Cos(2.0 * g);
+        // Mean anomaly (deg)
+        double M_deg = 357.5291092 + 0.98560028 * d;
 
-        // Sun geocentric ecliptic coordinates (Earth->Sun). Earth heliocentric is negative of that.
-        double sun_geo_x = R_au * Math.Cos(lambda);
-        double sun_geo_y = R_au * Math.Sin(lambda);
-        double sun_geo_z = 0.0;
+        double varpi = DegToRad(varpi_deg);
+        double M = DegToRad(WrapDeg(M_deg));
 
-        // Earth heliocentric in AU
-        double earth_au_x = -sun_geo_x;
-        double earth_au_y = -sun_geo_y;
-        double earth_au_z = -sun_geo_z;
+        // Mean motion [rad/s]
+        double Mdot = DegToRad(0.98560028) / 86400.0;
 
-        // Convert to meters
-        earth_rx = earth_au_x * AU_m;
-        earth_ry = earth_au_y * AU_m;
-        earth_rz = earth_au_z * AU_m;
+        double E = SolveKeplerE(M, e);
+        double cosE = Math.Cos(E);
+        double sinE = Math.Sin(E);
 
-        // ---- Moon geocentric ecliptic (low-order series) ----
-        // This is the classic Stjarnhimlen approximation for longitude/latitude/distance.
-        // Output: Moon position relative to Earth in ecliptic coordinates.
-        double Nm = DegToRad(WrapDeg(125.1228 - 0.0529538083 * d)); // longitude of ascending node
-        double im = DegToRad(5.1454);                                // inclination
-        double wm = DegToRad(WrapDeg(318.0634 + 0.1643573223 * d));   // argument of perigee
-        double am = 60.2666;                                         // Earth radii
-        double em = 0.054900;                                        // eccentricity
-        double Mm = DegToRad(WrapDeg(115.3654 + 13.0649929509 * d));  // mean anomaly
+        double oneMinusECosE = 1.0 - e * cosE;
+        double sqrt1me2 = Math.Sqrt(Math.Max(1e-15, 1.0 - e * e));
 
-        // Solve eccentric anomaly Em for Moon
-        double Em = SolveKeplerE(Mm, em);
+        // Orbital plane coordinates [AU]
+        double x_orb = a_AU * (cosE - e);
+        double y_orb = a_AU * (sqrt1me2 * sinE);
 
-        // Moon position in its orbital plane (units: Earth radii)
-        double xv = am * (Math.Cos(Em) - em);
-        double yv = am * (Math.Sqrt(1.0 - em * em) * Math.Sin(Em));
+        // Direct derivatives in orbital plane [AU/s]
+        double Edot = Mdot / Math.Max(1e-15, oneMinusECosE);
+        double vx_orb = -a_AU * sinE * Edot;
+        double vy_orb =  a_AU * sqrt1me2 * cosE * Edot;
 
-        double vm = Math.Atan2(yv, xv);               // true anomaly
-        double rm = Math.Sqrt(xv * xv + yv * yv);     // distance (Earth radii)
+        double cosw = Math.Cos(varpi);
+        double sinw = Math.Sin(varpi);
 
-        // Convert to ecliptic rectangular (Earth-centered)
-        double xh = rm * (Math.Cos(Nm) * Math.Cos(vm + wm) - Math.Sin(Nm) * Math.Sin(vm + wm) * Math.Cos(im));
-        double yh = rm * (Math.Sin(Nm) * Math.Cos(vm + wm) + Math.Cos(Nm) * Math.Sin(vm + wm) * Math.Cos(im));
-        double zh = rm * (Math.Sin(vm + wm) * Math.Sin(im));
+        // Rotate from orbital plane into ecliptic plane
+        double x_AU  = cosw * x_orb - sinw * y_orb;
+        double y_AU  = sinw * x_orb + cosw * y_orb;
+        double z_AU  = 0.0;
 
-        // Ecliptic lon/lat from that (for perturbation series)
-        double lon = Math.Atan2(yh, xh);
-        double lat = Math.Atan2(zh, Math.Sqrt(xh * xh + yh * yh));
+        double vx_AU = cosw * vx_orb - sinw * vy_orb;
+        double vy_AU = sinw * vx_orb + cosw * vy_orb;
+        double vz_AU = 0.0;
 
-        // Sun mean anomaly g already computed above.
-        // Moon mean elongation D, argument of latitude F (standard approximations)
-        double D  = DegToRad(WrapDeg(297.8501921 + 12.19074912 * d)); // mean elongation
-        double F  = DegToRad(WrapDeg(93.2720950  + 13.22935024 * d)); // argument of latitude
+        rx = x_AU * AU_m;
+        ry = y_AU * AU_m;
+        rz = z_AU * AU_m;
 
-        // Perturbations (arc degrees)
-        // These terms are the commonly used “good enough” subset from the same family of approximations.
-        lon += DegToRad(
-              -1.274 * Math.Sin(Mm - 2.0 * D)
-              +0.658 * Math.Sin(2.0 * D)
-              -0.186 * Math.Sin(g)
-              -0.059 * Math.Sin(2.0 * Mm - 2.0 * D)
-              -0.057 * Math.Sin(Mm - 2.0 * D + g)
-              +0.053 * Math.Sin(Mm + 2.0 * D)
-              +0.046 * Math.Sin(2.0 * D - g)
-              +0.041 * Math.Sin(Mm - g)
-              -0.035 * Math.Sin(D)
-              -0.031 * Math.Sin(Mm + g)
-              -0.015 * Math.Sin(2.0 * F - 2.0 * D)
-              +0.011 * Math.Sin(Mm - 4.0 * D)
-        );
+        vx = vx_AU * AU_m;
+        vy = vy_AU * AU_m;
+        vz = vz_AU * AU_m;
+    }
 
-        lat += DegToRad(
-              -0.173 * Math.Sin(F - 2.0 * D)
-              -0.055 * Math.Sin(Mm - F - 2.0 * D)
-              -0.046 * Math.Sin(Mm + F - 2.0 * D)
-              +0.033 * Math.Sin(F + 2.0 * D)
-              +0.017 * Math.Sin(2.0 * Mm + F)
-        );
+    // ------------------------------------------------------------------------
+    // Moon geocentric ecliptic state
+    // Truncated lunar theory with direct derivatives.
+    //
+    // Angles:
+    //   L'  mean longitude of Moon
+    //   D   mean elongation
+    //   M   Sun mean anomaly
+    //   M'  Moon mean anomaly
+    //   F   Moon argument of latitude
+    //
+    // This is still not a high-precision ephemeris, but it is materially
+    // better than the old low-order orbital-plane approximation and keeps
+    // runtime cost very modest.
+    // ------------------------------------------------------------------------
+    private void ComputeMoonGeocentricState(double jd,
+        out double rx, out double ry, out double rz,
+        out double vx, out double vy, out double vz)
+    {
+        double d = jd - 2451545.0; // days since J2000
 
-        // Distance perturbations (Earth radii)
-        rm += (-0.58 * Math.Cos(Mm - 2.0 * D)
-               -0.46 * Math.Cos(2.0 * D));
+        // Fundamental arguments [deg]
+        double Lp_deg = 218.3164477 + 13.17639648 * d; // mean longitude
+        double D_deg  = 297.8501921 + 12.19074912 * d; // mean elongation
+        double M_deg  = 357.5291092 + 0.98560028 * d;  // Sun mean anomaly
+        double Mp_deg = 134.9633964 + 13.06499295 * d; // Moon mean anomaly
+        double F_deg  = 93.2720950  + 13.22935024 * d; // argument of latitude
 
-        // Convert corrected lon/lat/rm to rectangular (Earth radii)
-        double rmCosLat = rm * Math.Cos(lat);
-        double mx_er = rmCosLat * Math.Cos(lon);
-        double my_er = rmCosLat * Math.Sin(lon);
-        double mz_er = rm * Math.Sin(lat);
+        double Lp = DegToRad(WrapDeg(Lp_deg));
+        double D  = DegToRad(WrapDeg(D_deg));
+        double M  = DegToRad(WrapDeg(M_deg));
+        double Mp = DegToRad(WrapDeg(Mp_deg));
+        double F  = DegToRad(WrapDeg(F_deg));
 
-        // Earth radius to meters
-        double Re_m = 6378137.0; // use WGS84-ish for consistent scaling
+        // Angular rates [rad/s]
+        double Lp_dot = DegToRad(13.17639648) / 86400.0;
+        double D_dot  = DegToRad(12.19074912) / 86400.0;
+        double M_dot  = DegToRad(0.98560028)  / 86400.0;
+        double Mp_dot = DegToRad(13.06499295) / 86400.0;
+        double F_dot  = DegToRad(13.22935024) / 86400.0;
 
-        // Moon geocentric in meters (ecliptic)
-        double moon_geo_x = mx_er * Re_m;
-        double moon_geo_y = my_er * Re_m;
-        double moon_geo_z = mz_er * Re_m;
+        // ---- Longitude correction [deg] ----
+        // lambda = L' + dLambda
+        double dLambda =
+              6.289 * Math.Sin(Mp)
+            + 1.274 * Math.Sin(2.0 * D - Mp)
+            + 0.658 * Math.Sin(2.0 * D)
+            + 0.214 * Math.Sin(2.0 * Mp)
+            - 0.186 * Math.Sin(M)
+            - 0.114 * Math.Sin(2.0 * F)
+            + 0.059 * Math.Sin(2.0 * D - 2.0 * Mp)
+            + 0.057 * Math.Sin(2.0 * D - M - Mp)
+            + 0.053 * Math.Sin(2.0 * D + Mp)
+            + 0.046 * Math.Sin(2.0 * D - M)
+            + 0.041 * Math.Sin(M - Mp)
+            - 0.035 * Math.Sin(D)
+            - 0.031 * Math.Sin(M + Mp)
+            - 0.015 * Math.Sin(2.0 * F - 2.0 * D)
+            + 0.011 * Math.Sin(Mp - 4.0 * D);
 
-        // Moon heliocentric = Earth heliocentric + Moon geocentric
-        moon_rx = earth_rx + moon_geo_x;
-        moon_ry = earth_ry + moon_geo_y;
-        moon_rz = earth_rz + moon_geo_z;
+        double dLambda_dt_deg =
+              6.289 * Math.Cos(Mp) * (Mp_dot)
+            + 1.274 * Math.Cos(2.0 * D - Mp) * (2.0 * D_dot - Mp_dot)
+            + 0.658 * Math.Cos(2.0 * D) * (2.0 * D_dot)
+            + 0.214 * Math.Cos(2.0 * Mp) * (2.0 * Mp_dot)
+            - 0.186 * Math.Cos(M) * (M_dot)
+            - 0.114 * Math.Cos(2.0 * F) * (2.0 * F_dot)
+            + 0.059 * Math.Cos(2.0 * D - 2.0 * Mp) * (2.0 * D_dot - 2.0 * Mp_dot)
+            + 0.057 * Math.Cos(2.0 * D - M - Mp) * (2.0 * D_dot - M_dot - Mp_dot)
+            + 0.053 * Math.Cos(2.0 * D + Mp) * (2.0 * D_dot + Mp_dot)
+            + 0.046 * Math.Cos(2.0 * D - M) * (2.0 * D_dot - M_dot)
+            + 0.041 * Math.Cos(M - Mp) * (M_dot - Mp_dot)
+            - 0.035 * Math.Cos(D) * (D_dot)
+            - 0.031 * Math.Cos(M + Mp) * (M_dot + Mp_dot)
+            - 0.015 * Math.Cos(2.0 * F - 2.0 * D) * (2.0 * F_dot - 2.0 * D_dot)
+            + 0.011 * Math.Cos(Mp - 4.0 * D) * (Mp_dot - 4.0 * D_dot);
+
+        // ---- Latitude correction [deg] ----
+        double beta_deg =
+              5.128 * Math.Sin(F)
+            + 0.280 * Math.Sin(Mp + F)
+            + 0.277 * Math.Sin(Mp - F)
+            + 0.173 * Math.Sin(2.0 * D - F)
+            + 0.055 * Math.Sin(2.0 * D + F - Mp)
+            + 0.046 * Math.Sin(2.0 * D - F - Mp)
+            + 0.033 * Math.Sin(2.0 * D + F)
+            + 0.017 * Math.Sin(2.0 * Mp + F);
+
+        double beta_dt_deg =
+              5.128 * Math.Cos(F) * (F_dot)
+            + 0.280 * Math.Cos(Mp + F) * (Mp_dot + F_dot)
+            + 0.277 * Math.Cos(Mp - F) * (Mp_dot - F_dot)
+            + 0.173 * Math.Cos(2.0 * D - F) * (2.0 * D_dot - F_dot)
+            + 0.055 * Math.Cos(2.0 * D + F - Mp) * (2.0 * D_dot + F_dot - Mp_dot)
+            + 0.046 * Math.Cos(2.0 * D - F - Mp) * (2.0 * D_dot - F_dot - Mp_dot)
+            + 0.033 * Math.Cos(2.0 * D + F) * (2.0 * D_dot + F_dot)
+            + 0.017 * Math.Cos(2.0 * Mp + F) * (2.0 * Mp_dot + F_dot);
+
+        // ---- Distance [km] ----
+        double r_km =
+              385000.56
+            - 20905.0 * Math.Cos(Mp)
+            - 3699.0  * Math.Cos(2.0 * D - Mp)
+            - 2956.0  * Math.Cos(2.0 * D)
+            - 570.0   * Math.Cos(2.0 * Mp)
+            + 246.0   * Math.Cos(2.0 * Mp - 2.0 * D)
+            - 205.0   * Math.Cos(M - 2.0 * D)
+            - 171.0   * Math.Cos(Mp + 2.0 * D)
+            - 152.0   * Math.Cos(Mp + M - 2.0 * D);
+
+        double r_dt_km =
+              -20905.0 * Math.Sin(Mp) * (Mp_dot)
+            - 3699.0  * Math.Sin(2.0 * D - Mp) * (2.0 * D_dot - Mp_dot)
+            - 2956.0  * Math.Sin(2.0 * D) * (2.0 * D_dot)
+            - 570.0   * Math.Sin(2.0 * Mp) * (2.0 * Mp_dot)
+            + 246.0   * Math.Sin(2.0 * Mp - 2.0 * D) * (2.0 * Mp_dot - 2.0 * D_dot)
+            - 205.0   * Math.Sin(M - 2.0 * D) * (M_dot - 2.0 * D_dot)
+            - 171.0   * Math.Sin(Mp + 2.0 * D) * (Mp_dot + 2.0 * D_dot)
+            - 152.0   * Math.Sin(Mp + M - 2.0 * D) * (Mp_dot + M_dot - 2.0 * D_dot);
+
+        double lambda = Lp + DegToRad(dLambda);
+        double beta   = DegToRad(beta_deg);
+        double r_m    = r_km * 1000.0;
+
+        double lambda_dot = Lp_dot + DegToRad(dLambda_dt_deg);
+        double beta_dot   = DegToRad(beta_dt_deg);
+        double r_dot_m    = r_dt_km * 1000.0;
+
+        // Spherical -> rectangular
+        double cosB = Math.Cos(beta);
+        double sinB = Math.Sin(beta);
+        double cosL = Math.Cos(lambda);
+        double sinL = Math.Sin(lambda);
+
+        rx = r_m * cosB * cosL;
+        ry = r_m * cosB * sinL;
+        rz = r_m * sinB;
+
+        // Derivatives
+        vx =
+            r_dot_m * cosB * cosL
+          + r_m * (-sinB * beta_dot * cosL - cosB * sinL * lambda_dot);
+
+        vy =
+            r_dot_m * cosB * sinL
+          + r_m * (-sinB * beta_dot * sinL + cosB * cosL * lambda_dot);
+
+        vz =
+            r_dot_m * sinB
+          + r_m * ( cosB * beta_dot );
     }
 
     private double SolveKeplerE(double M, double e)
     {
         double E = (e < 0.8) ? M : Math.PI;
+
         for (int k = 0; k < 12; k++)
         {
             double sE = Math.Sin(E);
             double cE = Math.Cos(E);
-            double f = E - e * sE - M;
+            double f  = E - e * sE - M;
             double fp = 1.0 - e * cE;
-            if (Math.Abs(fp) < 1e-12) break;
-            double d = f / fp;
-            E -= d;
-            if (Math.Abs(d) < 1e-12) break;
+
+            if (Math.Abs(fp) < 1e-14) break;
+
+            double dE = f / fp;
+            E -= dE;
+
+            if (Math.Abs(dE) < 1e-13) break;
         }
+
         return E;
     }
 
