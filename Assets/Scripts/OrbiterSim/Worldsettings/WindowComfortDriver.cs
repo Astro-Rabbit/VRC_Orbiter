@@ -23,7 +23,7 @@ public class WindowComfortDriver : UdonSharpBehaviour
     public bool cockpitEnabled = false;
     public bool loungeEnabled = true;
 
-    public bool cockpitUsesGlobalProfile = true;
+    public bool cockpitUsesGlobalProfile = false;
     public bool loungeUsesGlobalProfile = true;
 
     [Header("Global Profile")]
@@ -97,37 +97,36 @@ public class WindowComfortDriver : UdonSharpBehaviour
     private const string PROP_GRID_EDGE_BIAS = "_GridEdgeBias";
     private const string PROP_GRID_EDGE_BIAS_POWER = "_GridEdgeBiasPower";
 
-    public Slider LoungeAngleRate;
-    public Slider LoungeAngleExp;
+    [Header("Optional UI")]
+    public Slider globalRateLimitSlider;
+    public Slider globalResponseExponentSlider;
 
-    public Slider CockpitAngleRate;
-    public Slider CockpitAngleExp;
+    [Tooltip("Optional: assign a GameObject to show when lounge is enabled.")]
+    public GameObject loungeEnabledIndicator;
 
-    public Slider GlobalAngleRate;
-    public Slider GlobalAngleExp;
+    [Tooltip("Optional: assign a GameObject to show when lounge is disabled.")]
+    public GameObject loungeDisabledIndicator;
 
-    public void OnSliderChange()
-    {
-        // Global
-        if (GlobalAngleRate) globalMaxAngularRateRad = GlobalAngleRate.value;
-        if (GlobalAngleExp) globalResponseExponent = GlobalAngleExp.value;
-
-        // Lounge
-        if (LoungeAngleRate) loungeMaxAngularRateRad = LoungeAngleRate.value;
-        if (LoungeAngleExp) loungeResponseExponent = LoungeAngleExp.value;
-
-        // Cockpit
-        if (CockpitAngleRate) cockpitMaxAngularRateRad = CockpitAngleRate.value;
-        if (CockpitAngleExp) cockpitResponseExponent = CockpitAngleExp.value;
-    }
+    [Header("UI Sync")]
+    public bool syncUiFromStateOnStart = true;
 
     private void Start()
     {
+        cockpitEnabled = false;
+        cockpitUsesGlobalProfile = false;
+        loungeUsesGlobalProfile = true;
+
         if (applyMaterialVisualSettingsOnStart)
         {
             ApplyGlobalGridVisualSettingsToAll();
         }
 
+        if (syncUiFromStateOnStart)
+        {
+            SyncGlobalUIFromState();
+        }
+
+        RefreshLoungeToggleVisuals();
         ApplyNow();
     }
 
@@ -183,7 +182,6 @@ public class WindowComfortDriver : UdonSharpBehaviour
         float weightedWy = wy * wyWeight;
         float weightedWz = wz * wzWeight;
 
-        //should probably be squared to avoid sqrt?
         float rateMag = Mathf.Sqrt(
             weightedWx * weightedWx +
             weightedWy * weightedWy +
@@ -306,8 +304,18 @@ public class WindowComfortDriver : UdonSharpBehaviour
 
     public void EnableCockpit() { cockpitEnabled = true; }
     public void DisableCockpit() { cockpitEnabled = false; }
-    public void EnableLounge() { loungeEnabled = true; }
-    public void DisableLounge() { loungeEnabled = false; }
+
+    public void EnableLounge()
+    {
+        loungeEnabled = true;
+        RefreshLoungeToggleVisuals();
+    }
+
+    public void DisableLounge()
+    {
+        loungeEnabled = false;
+        RefreshLoungeToggleVisuals();
+    }
 
     public void SetCockpitUsesGlobalProfile(bool value) { cockpitUsesGlobalProfile = value; }
     public void SetLoungeUsesGlobalProfile(bool value) { loungeUsesGlobalProfile = value; }
@@ -392,6 +400,60 @@ public class WindowComfortDriver : UdonSharpBehaviour
         loungeVignetteMaxLevel = Mathf.Clamp01(vignetteMax);
         loungeLineStartLevel = Mathf.Clamp01(lineStart);
         loungeLineMaxLevel = Mathf.Clamp01(lineMax);
+    }
+
+    // --------------------------------------------------------------------
+    // Global UI API
+    // --------------------------------------------------------------------
+
+    public void SyncGlobalUIFromState()
+    {
+        if (globalRateLimitSlider != null)
+            globalRateLimitSlider.value = Mathf.Max(0.0001f, globalMaxAngularRateRad);
+
+        if (globalResponseExponentSlider != null)
+            globalResponseExponentSlider.value = Mathf.Max(0.0001f, globalResponseExponent);
+    }
+
+    public void OnGlobalRateLimitSliderChanged()
+    {
+        if (globalRateLimitSlider == null) return;
+        globalMaxAngularRateRad = Mathf.Max(0.0001f, globalRateLimitSlider.value);
+    }
+
+    public void OnGlobalResponseExponentSliderChanged()
+    {
+        if (globalResponseExponentSlider == null) return;
+        globalResponseExponent = Mathf.Max(0.0001f, globalResponseExponentSlider.value);
+    }
+
+    // --------------------------------------------------------------------
+    // Lounge toggle UI API
+    // --------------------------------------------------------------------
+
+    public void EnableLoungeFromUI()
+    {
+        EnableLounge();
+    }
+
+    public void DisableLoungeFromUI()
+    {
+        DisableLounge();
+    }
+
+    public void ToggleLoungeEnabledFromUI()
+    {
+        loungeEnabled = !loungeEnabled;
+        RefreshLoungeToggleVisuals();
+    }
+
+    public void RefreshLoungeToggleVisuals()
+    {
+        if (loungeEnabledIndicator != null)
+            loungeEnabledIndicator.SetActive(loungeEnabled);
+
+        if (loungeDisabledIndicator != null)
+            loungeDisabledIndicator.SetActive(!loungeEnabled);
     }
 
     // --------------------------------------------------------------------

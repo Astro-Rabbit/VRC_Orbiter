@@ -6,6 +6,7 @@ using UnityEngine;
 ///
 /// Current features:
 /// - Soft dock one-shot on transition into DOCK_SOFT
+/// - Retract one-shot on transition into DOCK_RETRACT
 /// - Hard dock one-shot on transition into DOCK_HARD
 /// - Decompress one-shot when docking ends after previously being hard docked
 /// - Hatch compression one-shot on transition into hatch OPENING
@@ -29,6 +30,7 @@ public class DockingSoundDriver : UdonSharpBehaviour
 
     [Header("Docking audio")]
     public AudioSource softDockAudio;
+    public AudioSource retractAudio;
     public AudioSource hardDockAudio;
     public AudioSource decompressAudio;
 
@@ -47,6 +49,7 @@ public class DockingSoundDriver : UdonSharpBehaviour
 
     [Header("Base volumes")]
     [Range(0f, 1f)] public float softDockVolume = 1f;
+    [Range(0f, 1f)] public float retractVolume = 1f;
     [Range(0f, 1f)] public float hardDockVolume = 1f;
     [Range(0f, 1f)] public float decompressVolume = 1f;
 
@@ -116,6 +119,16 @@ public class DockingSoundDriver : UdonSharpBehaviour
                 {
                     PlayOneShot(softDockAudio, softDockVolume);
                     if (logTransitions) Debug.Log("[DockingSoundDriver] soft dock");
+                }
+            }
+
+            // Retract
+            if (dockActive && dockPhase == DockingRuntimeState.DOCK_RETRACT)
+            {
+                if (allowTransitionSounds)
+                {
+                    PlayOneShot(retractAudio, retractVolume);
+                    if (logTransitions) Debug.Log("[DockingSoundDriver] retract");
                 }
             }
 

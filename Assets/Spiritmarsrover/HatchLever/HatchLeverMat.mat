@@ -137,7 +137,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
-        m_Texture: {fileID: 2800000, guid: 15b3e5a8fca40234e9cd27234f5959df, type: 3}
+        m_Texture: {fileID: 2800000, guid: b9cb16f5ff42aad40a6e8ccb00e0be10, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MetallicGlossMap:
@@ -145,7 +145,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MetallicMap:
-        m_Texture: {fileID: 2800000, guid: 9e29d24e8a1f1ad4791c631637b02ce2, type: 3}
+        m_Texture: {fileID: 2800000, guid: 292d824f738b8b8458ac080804d2f67f, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _NoiseTexSSR:
@@ -157,7 +157,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _OcclusionMap:
-        m_Texture: {fileID: 2800000, guid: 8fa45895f89284b4c94760dcd98fab19, type: 3}
+        m_Texture: {fileID: 2800000, guid: 642ebfb5339c6744a88735b90474a24e, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _PackedMap:
@@ -307,7 +307,7 @@ Material:
     - _MaxHeightSteps: 16
     - _Metallic: 0
     - _MetallicChannel: 2
-    - _MetallicStrength: 0
+    - _MetallicStrength: 1
     - _MinHeightSteps: 8
     - _MipMapRescaling: 1
     - _MipMapScale: 0.25
@@ -357,7 +357,7 @@ Material:
     - _RippleSpeed: 18
     - _RippleStrength: 1
     - _RoughnessChannel: 1
-    - _RoughnessStrength: 1
+    - _RoughnessStrength: 0.5
     - _SSREdgeFade: 0.1
     - _SSRHeight: 0.2
     - _SSRStrength: 1

@@ -2255,6 +2255,114 @@ public class GC_Core : UdonSharpBehaviour
         return Networking.IsOwner(gameObject);
     }
 
+
+    private bool IsFiniteDouble(double v)
+    {
+        return !double.IsNaN(v) && !double.IsInfinity(v);
+    }
+
+    private bool IsFiniteFloat(float v)
+    {
+        return !float.IsNaN(v) && !float.IsInfinity(v);
+    }
+
+    private bool IsValidCreateNodeRequest(
+        int trigType,
+        double triggerA,
+        double triggerB,
+        float dvx,
+        float dvy,
+        float dvz,
+        int axis,
+        int aux)
+    {
+        if (trigType != NodePlanState.TRIG_TIME &&
+            trigType != NodePlanState.TRIG_TRUE_ANOMALY)
+            return false;
+
+        if (axis < 0 || axis > 2)
+            return false;
+
+        if (!IsFiniteDouble(triggerA)) return false;
+        if (!IsFiniteDouble(triggerB)) return false;
+
+        if (!IsFiniteFloat(dvx)) return false;
+        if (!IsFiniteFloat(dvy)) return false;
+        if (!IsFiniteFloat(dvz)) return false;
+
+        Vector3 dvE = new Vector3(dvx, dvy, dvz);
+        if (dvE.sqrMagnitude <= 1e-12f)
+            return false;
+
+        return true;
+    }
+
+
+
+    public int API_RequestCreateNode_Time(Vector3 dvE, double execTime)
+    {
+        if (HasGcAuthority())
+            return API_Node_CreateAtTime(dvE, execTime);
+
+        SendCreateNodeRequest8(
+            NodePlanState.TRIG_TIME,
+            execTime,
+            0.0,
+            dvE.x,
+            dvE.y,
+            dvE.z,
+            (int)ClampAxis012(defaultNodeAxisToPoint),
+            0
+        );
+
+        return -1;
+    }
+
+
+    private void SendCreateNodeRequest8(
+        int trigType,
+        double triggerA,
+        double triggerB,
+        float dvx,
+        float dvy,
+        float dvz,
+        int axis,
+        int aux)
+    {
+        SendCustomNetworkEvent(
+            NetworkEventTarget.Owner,
+            nameof(Net_RequestCreateNode8),
+            trigType,
+            triggerA,
+            triggerB,
+            dvx,
+            dvy,
+            dvz,
+            axis,
+            aux
+        );
+    }
+
+
+    public int API_RequestCreateNode_TrueAnomaly(Vector3 dvE, double nuTargetRad)
+    {
+        if (HasGcAuthority())
+            return API_Node_CreateAtTrueAnomaly(dvE, nuTargetRad);
+
+        SendCreateNodeRequest8(
+            NodePlanState.TRIG_TRUE_ANOMALY,
+            nuTargetRad,
+            0.0,
+            dvE.x,
+            dvE.y,
+            dvE.z,
+            (int)ClampAxis012(defaultNodeAxisToPoint),
+            0
+        );
+
+        return -1;
+    }
+
     // =====================================================================
     // Minimal API methods
     // =====================================================================
@@ -2491,7 +2599,47 @@ public class GC_Core : UdonSharpBehaviour
 
         API_Node_Delete(nodeIndex);
     }
-        
+
+    [NetworkCallable]
+    public void Net_RequestCreateNode8(
+        int trigType,
+        double triggerA,
+        double triggerB,
+        float dvx,
+        float dvy,
+        float dvz,
+        int axis,
+        int aux)
+    {
+        if (!HasGcAuthority()) return;
+
+        if (!IsValidCreateNodeRequest(
+            trigType,
+            triggerA,
+            triggerB,
+            dvx,
+            dvy,
+            dvz,
+            axis,
+            aux))
+            return;
+
+        Vector3 dvE = new Vector3(dvx, dvy, dvz);
+
+        if (trigType == NodePlanState.TRIG_TIME)
+        {
+            API_Node_CreateAtTime(dvE, triggerA);   // ✅ correct
+            return;
+        }
+
+        if (trigType == NodePlanState.TRIG_TRUE_ANOMALY)
+        {
+            API_Node_CreateAtTrueAnomaly(dvE, triggerA);  // ✅ correct
+            return;
+        }
+    }
+
+
     // =====================================================================
     // Docking Helper APIs
     // =====================================================================

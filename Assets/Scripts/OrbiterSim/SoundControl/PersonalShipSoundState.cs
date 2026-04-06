@@ -1,5 +1,6 @@
 ﻿using UdonSharp;
 using UnityEngine;
+using UnityEngine.UI;
 
 /// <summary>
 /// PersonalShipSoundState
@@ -10,6 +11,7 @@ using UnityEngine;
 /// Intended use:
 /// - Other audio drivers hold a reference to this script
 /// - Drivers multiply their computed source volume by the effective gain
+/// - Unity UI sliders call the dedicated On...SliderChanged() events below
 /// </summary>
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class PersonalShipSoundState : UdonSharpBehaviour
@@ -34,9 +36,25 @@ public class PersonalShipSoundState : UdonSharpBehaviour
     [Range(0f, 1f)]
     public float warningSound = 1f;
 
+    [Header("Optional UI Sliders")]
+    public Slider masterShipSoundSlider;
+    public Slider engineSoundSlider;
+    public Slider rcsSoundSlider;
+    public Slider interiorSoundSlider;
+    public Slider dockingSoundSlider;
+    public Slider warningSoundSlider;
+
+    [Header("UI Sync")]
+    public bool syncUiFromStateOnStart = true;
+
     private void Start()
     {
         ClampAll();
+
+        if (syncUiFromStateOnStart)
+        {
+            SyncUIFromState();
+        }
     }
 
     private void ClampAll()
@@ -187,10 +205,66 @@ public class PersonalShipSoundState : UdonSharpBehaviour
         interiorSound = 1f;
         dockingSound = 1f;
         warningSound = 1f;
+
+        SyncUIFromState();
     }
 
     public void MuteAllShipSounds()
     {
         masterShipSound = 0f;
+        SyncUIFromState();
+    }
+
+    // ------------------------------------------------------------
+    // UI sync helpers
+    // ------------------------------------------------------------
+    public void SyncUIFromState()
+    {
+        if (masterShipSoundSlider != null) masterShipSoundSlider.value = Mathf.Clamp01(masterShipSound);
+        if (engineSoundSlider != null) engineSoundSlider.value = Mathf.Clamp01(engineSound);
+        if (rcsSoundSlider != null) rcsSoundSlider.value = Mathf.Clamp01(rcsSound);
+        if (interiorSoundSlider != null) interiorSoundSlider.value = Mathf.Clamp01(interiorSound);
+        if (dockingSoundSlider != null) dockingSoundSlider.value = Mathf.Clamp01(dockingSound);
+        if (warningSoundSlider != null) warningSoundSlider.value = Mathf.Clamp01(warningSound);
+    }
+
+    // ------------------------------------------------------------
+    // Unity UI slider events
+    // Assign each slider's OnValueChanged to its matching method.
+    // ------------------------------------------------------------
+    public void OnMasterShipSoundSliderChanged()
+    {
+        if (masterShipSoundSlider == null) return;
+        SetMasterShipSound(masterShipSoundSlider.value);
+    }
+
+    public void OnEngineSoundSliderChanged()
+    {
+        if (engineSoundSlider == null) return;
+        SetEngineSound(engineSoundSlider.value);
+    }
+
+    public void OnRcsSoundSliderChanged()
+    {
+        if (rcsSoundSlider == null) return;
+        SetRcsSound(rcsSoundSlider.value);
+    }
+
+    public void OnInteriorSoundSliderChanged()
+    {
+        if (interiorSoundSlider == null) return;
+        SetInteriorSound(interiorSoundSlider.value);
+    }
+
+    public void OnDockingSoundSliderChanged()
+    {
+        if (dockingSoundSlider == null) return;
+        SetDockingSound(dockingSoundSlider.value);
+    }
+
+    public void OnWarningSoundSliderChanged()
+    {
+        if (warningSoundSlider == null) return;
+        SetWarningSound(warningSoundSlider.value);
     }
 }

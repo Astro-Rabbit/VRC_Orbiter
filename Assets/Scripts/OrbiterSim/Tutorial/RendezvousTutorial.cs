@@ -1,4 +1,4 @@
-﻿using UdonSharp;
+using UdonSharp;
 using System;
 using UnityEngine;
 using VRC.SDKBase;
@@ -51,9 +51,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public GameObject continueButton;
     public SimManager simManager;
     public RendezvousTutorialVideoController videoController;
+    public SimScenarioInitializer scenarioInitializer;
 
     [Header("Tutorial Scenario")]
-    public int tutorialScenarioIndex = 0;
+    public int tutorialScenarioIndex = 6;
 
     [Header("Tutorial Runtime")]
     public bool tutorialActive = false;
@@ -524,7 +525,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public void API_StartTutorial()
     {
         if (simManager != null) {
-            simManager.RestartToScenarioIndex(tutorialScenarioIndex);
+            scenarioInitializer.ApplyScenarioByIndex(tutorialScenarioIndex, 0.0);
             simManager.SetRequestedWarp(1.0);
         }
 

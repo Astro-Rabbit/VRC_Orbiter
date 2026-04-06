@@ -497,7 +497,6 @@ public class DockingComputer : UdonSharpBehaviour
         }
 
 
-        Debug.Log("[Docking][REMOTE] EvaluateDockedRemote tick tNow=" + tNow.ToString("F3"));
         if (phase != _dbgLastRemotePresentedPhase)
         {
             Debug.Log(

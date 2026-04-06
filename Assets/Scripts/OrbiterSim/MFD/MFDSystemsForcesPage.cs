@@ -59,7 +59,7 @@ public class MFDSystemsForcesPage : MFDPage
 
     public override void OnButton(MFD display, ButtonSide side, int num)
     {
-        if (side == ButtonSide.Bottom && num == 1)
+        if (side == ButtonSide.Bottom && num == 0)
         {
             display.SetPage((byte)MFDPageID.SystemsMenu);
             return;

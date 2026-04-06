@@ -32,6 +32,9 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
     [UdonSynced] private float[] _burnDurationSec;
     [UdonSynced] private float[] _burnThrottle01;
 
+    [UdonSynced] private float[] _dVmag_mps;
+    [UdonSynced] private float[] _remainingDV_mps;
+
     private int _appliedRev = -1;
     private float _publishCooldown = 0f;
     private float _heartbeatAccum = 0f;
@@ -87,6 +90,10 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
         if (_postHoldSec == null || _postHoldSec.Length != n) _postHoldSec = new float[n];
         if (_burnDurationSec == null || _burnDurationSec.Length != n) _burnDurationSec = new float[n];
         if (_burnThrottle01 == null || _burnThrottle01.Length != n) _burnThrottle01 = new float[n];
+
+        if (_dVmag_mps == null || _dVmag_mps.Length != n) _dVmag_mps = new float[n];
+        if (_remainingDV_mps == null || _remainingDV_mps.Length != n) _remainingDV_mps = new float[n];
+
     }
 
     private bool CaptureFromPlan()
@@ -117,6 +124,10 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
             if (_postHoldSec[i] != plan.postHoldSec[i]) { _postHoldSec[i] = plan.postHoldSec[i]; changed = true; }
             if (_burnDurationSec[i] != plan.burnDurationSec[i]) { _burnDurationSec[i] = plan.burnDurationSec[i]; changed = true; }
             if (_burnThrottle01[i] != plan.burnThrottle01[i]) { _burnThrottle01[i] = plan.burnThrottle01[i]; changed = true; }
+
+            if (_dVmag_mps[i] != plan.dVmag_mps[i]) { _dVmag_mps[i] = plan.dVmag_mps[i]; changed = true; }
+            if (_remainingDV_mps[i] != plan.remainingDV_mps[i]) { _remainingDV_mps[i] = plan.remainingDV_mps[i]; changed = true; }
+
         }
 
         if (changed) _rev++;
@@ -147,6 +158,10 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
             plan.postHoldSec[i] = _postHoldSec[i];
             plan.burnDurationSec[i] = _burnDurationSec[i];
             plan.burnThrottle01[i] = _burnThrottle01[i];
+
+            plan.dVmag_mps[i] = _dVmag_mps[i];
+            plan.remainingDV_mps[i] = _remainingDV_mps[i];
+
         }
 
         _appliedRev = _rev;
@@ -210,6 +225,8 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
                 _postHoldSec[i] = plan.postHoldSec[i];
                 _burnDurationSec[i] = plan.burnDurationSec[i];
                 _burnThrottle01[i] = plan.burnThrottle01[i];
+                _dVmag_mps[i] = plan.dVmag_mps[i];
+                _remainingDV_mps[i] = plan.remainingDV_mps[i];
             }
         }
         else
@@ -229,6 +246,8 @@ public class GC_NodePlanNetState : UdonSharpBehaviour
                 _postHoldSec[i] = 5f;
                 _burnDurationSec[i] = 0f;
                 _burnThrottle01[i] = 0f;
+                _dVmag_mps[i] = 0f;
+                _remainingDV_mps[i] = 0f;
             }
         }
 

@@ -180,7 +180,7 @@ public class MFDDockingPage : MFDPage
         display.DrawConic(center, size, 0f, 0f, targetColor);
 
         if (portSelected) {
-            Vector2 offsetPos = size * new Vector2((float)offsetX, (float)offsetY);
+            Vector2 offsetPos = size * new Vector2((float)offsetX, -(float)offsetY);
             display.DrawLine(center + offsetPos - new Vector2(iconSize, 0), center + offsetPos + new Vector2(iconSize, 0), Color.green);
             display.DrawLine(center + offsetPos - new Vector2(0, iconSize), center + offsetPos + new Vector2(0, iconSize), Color.green);
 

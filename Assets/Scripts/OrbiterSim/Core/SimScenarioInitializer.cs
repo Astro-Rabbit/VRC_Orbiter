@@ -7,9 +7,10 @@ public class SimScenarioInitializer : UdonSharpBehaviour
 {
     [Header("Core")]
     public EphemerisSystem ephem;
-
+    public SimManager simManager;
     [Header("Scenario entries")]
     public SimScenarioEntry[] scenarios;
+
 
     [Header("Selection")]
     public int selectedScenarioIndex = 0;
@@ -34,6 +35,11 @@ public class SimScenarioInitializer : UdonSharpBehaviour
 
         SimScenarioEntry entry = scenarios[index];
         if (entry == null) return false;
+
+
+        if (simManager != null)
+            simManager.AbortHandoffForAuthoritativeReset();
+
 
         _activeScenarioIndex = index;
         activeScenarioIndex = index;

@@ -723,8 +723,8 @@ public class SimManager : UdonSharpBehaviour
         if (netAtt != null)
             netAtt.PublishAttitude();
 
-        if (conicFitter != null)
-            conicFitter.Fit(craft.primaryBodyId, clock.Now());
+        // if (conicFitter != null)
+        //     conicFitter.Fit(craft.primaryBodyId, clock.Now());
     }
 
     // -------------------------------------------------------------------------
@@ -1341,7 +1341,27 @@ public class SimManager : UdonSharpBehaviour
             netAtt.ForcePublishAttitude();
     }
 
+    public void AbortHandoffForAuthoritativeReset()
+    {
+        authorityArmed = true;
+        handoffFreeze = false;
 
+        _lastOwnershipRequestTxnId = -1;
+
+        if (handoffNet != null)
+        {
+            // Consume whatever txn was active locally so it can never refreeze us.
+            _lastConsumedTxnId = handoffNet.txnId;
+
+            if (Networking.IsOwner(handoffNet.gameObject))
+                handoffNet.ClearState(true);
+        }
+
+        if (netCore != null && Networking.IsOwner(netCore.gameObject))
+        {
+            netCore.ClearHandoffEstablished(true);
+        }
+    }
 
     public void SetOwnershipTransferHardLocked(bool locked)
     {
@@ -1540,6 +1560,10 @@ public class SimManager : UdonSharpBehaviour
             dockingComp.requestUndock = false;
             dockingComp.requestLeaveDockedToRails = false;
             dockingComp.requestEnterDocked = false;
+
+            if (dockingComp.dockCtrl != null)
+                dockingComp.dockCtrl.ForceResetController();
+
         }
 
         if (gcCore != null)

@@ -313,14 +313,18 @@ public class MFDTransferPage : MFDPage
     private void UploadAutoNode()
     {
         if (!solver.autoValid) return;
-        int idx = gc.API_Node_CreateAtTime(solver.autoDvE, solver.autoBurnTime);
+
+        int idx = gc.API_RequestCreateNode_Time(
+            solver.autoDvE,
+            solver.autoBurnTime
+        );
+
         if (idx >= 0) {
             solver.autoStatus = TransferSolver.AUTO_PLAN;
         } else {
             solver.autoStatus = TransferSolver.AUTO_ERR;
         }
 
-        // TODO: come up with a less ugly way of detecting this in the tutorial
         tutorial.OnTransferNodeCreate(solver.autoBurnTime, solver.autoEncounterTime);
     }
 

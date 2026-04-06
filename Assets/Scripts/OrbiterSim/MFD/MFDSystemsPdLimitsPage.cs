@@ -34,8 +34,7 @@ public class MFDSystemsPdLimitsPage : MFDPage
         bool canEdit = CanLocalEdit();
         bool canToggleLock = CanLocalToggleLock();
 
-        // Bottom nav
-        if (side == ButtonSide.Bottom && num == 1)
+        if (side == ButtonSide.Bottom && num == 0)
         {
             display.SetPage((byte)MFDPageID.SystemsMenu);
             return;
@@ -47,11 +46,7 @@ public class MFDSystemsPdLimitsPage : MFDPage
             return;
         }
 
-        // Top popup buttons are only used while popup is visible
-        // so ignore T3/T4 here
-
-        // Lock toggle
-        if (side == ButtonSide.Right && num == 2)
+        if (side == ButtonSide.Right && num == 0)
         {
             if (!canToggleLock || rateLimitConfig == null) return;
 
@@ -66,7 +61,6 @@ public class MFDSystemsPdLimitsPage : MFDPage
 
         if (!canEdit || rateLimitConfig == null) return;
 
-        // L1 toggle limiter
         if (side == ButtonSide.Left && num == 0)
         {
             bool nextEnable = !rateLimitConfig.GetLimiterEnabled();
@@ -89,7 +83,6 @@ public class MFDSystemsPdLimitsPage : MFDPage
             return;
         }
 
-        // L2 / L3 decrease/increase rate
         if (side == ButtonSide.Left && num == 1)
         {
             TryAdjustLimit(-1);
@@ -111,10 +104,10 @@ public class MFDSystemsPdLimitsPage : MFDPage
 
         display.DrawText("SYSTEMS / PD LIMITS", 0, 14, Color.green);
 
-        DrawMainPage(display);
-
         if (_showConfirmPopup)
-            DrawConfirmPopup(display);
+            DrawPopupPage(display);
+        else
+            DrawMainPage(display);
 
         display.DrawText("SYS",  MFD.TEXT_ROWS - 1, 2, Color.white);
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
@@ -138,14 +131,14 @@ public class MFDSystemsPdLimitsPage : MFDPage
         Color lockColor = locked ? Color.yellow : Color.green;
         string lockText = locked ? "LOCK ON" : "LOCK OFF";
 
-        display.DrawText("L1 TOGGLE", 4, 2, Color.white);
-        display.DrawText("L2 RATE -", 7, 2, Color.white);
-        display.DrawText("L3 RATE +", 8, 2, Color.white);
+        display.DrawText("TOGGLE", 2, 1, Color.white);
+        display.DrawText("RATE -", 7, 1, Color.white);
+        display.DrawText("RATE +", 12, 1, Color.white);
 
         if (canToggleLock)
-            display.DrawText("R3 LOCK", 4, 37, Color.white);
+            display.DrawText("LOCK", 3, 37, Color.white);
         else
-            display.DrawText("R3 LOCK", 4, 37, new Color(0.35f, 0.35f, 0.35f, 1f));
+            display.DrawText("LOCK", 3, 37, new Color(0.35f, 0.35f, 0.35f, 1f));
 
         display.DrawText("LOCK", 3, 16, Color.green);
         display.DrawText(lockText, 4, 16, lockColor);
@@ -178,37 +171,44 @@ public class MFDSystemsPdLimitsPage : MFDPage
         }
     }
 
-    private void DrawConfirmPopup(MFD display)
+    private void DrawPopupPage(MFD display)
     {
-        DrawBox(display, new Vector2(0.16f, 0.24f), new Vector2(0.84f, 0.80f), Color.green);
+        // Labels beside the actual top buttons:
+        // T1 = top button index 0
+        // T5 = top button index 4
+        display.DrawText("BACK", 17, 1, Color.white);
+        display.DrawText("CONT", 17, 43, Color.white);
 
-        display.DrawText("PASSENGER COMFORT WARNING", 7, 10, Color.yellow);
+        // Box sized to actually surround the popup text block
+        DrawBox(display, new Vector2(-0.68f, 0.70f), new Vector2(0.68f,-0.68f), Color.green);
+        DrawBox(display, new Vector2(-.70f, 0.72f), new Vector2(0.70f, -0.70f), Color.green);
+
+        display.DrawText("PASSENGER COMFORT", 6, 15, Color.yellow);
+        display.DrawText("WARNING", 7, 20, Color.yellow);
 
         if (_confirmAction == ACTION_SET_ENABLE && !_confirmEnableValue)
         {
-            display.DrawText("RATE LIMITER WILL BE DISABLED.", 10, 9, Color.white);
-            display.DrawText("HIGH ANGULAR RATES MAY CAUSE",   12, 10, Color.white);
-            display.DrawText("DISCOMFORT TO PASSENGERS.",      13, 11, Color.white);
+            display.DrawText("RATE LIMITER WILL BE", 10, 14, Color.white);
+            display.DrawText("DISABLED.", 11, 20, Color.white);
+            display.DrawText("HIGH ANGULAR RATES MAY", 13, 13, Color.white);
+            display.DrawText("DISCOMFORT PASSENGERS.", 14, 13, Color.white);
+            display.DrawText("CONTINUE?", 18, 19, Color.white);
         }
         else
         {
             int targetDeg = GetConfirmTargetDeg();
-            display.DrawText("SELECTED RATE EXCEEDS COMFORT", 10, 9, Color.white);
-            display.DrawText("THRESHOLD OF " + comfortWarnThresholdDegPerSec + " DEG/S", 12, 11, Color.white);
-            display.DrawText("NEW LIMIT " + targetDeg + " DEG/S", 14, 14, Color.white);
+
+            display.DrawText("SELECTED RATE EXCEEDS", 11, 12, Color.white);
+            display.DrawText("COMFORT THRESHOLD.", 12, 14, Color.white);
+            display.DrawText("NEW LIMIT " + targetDeg + " DEG/S", 14, 13, Color.white);
+            display.DrawText("CONTINUE?", 17, 19, Color.white);
         }
-
-        display.DrawText("BACK", 3, 21, Color.white);
-        display.DrawText("CONT", 3, 27, Color.white);
-
-        display.DrawText("T3", 1, 20, Color.white);
-        display.DrawText("T4", 1, 26, Color.white);
     }
 
     private void OnPopupButton(MFD display, ButtonSide side, int num)
     {
-        // T3 = BACK
-        if (side == ButtonSide.Top && num == 2)
+        // T1 = BACK
+        if (side == ButtonSide.Left && num == 3)
         {
             _showConfirmPopup = false;
             _confirmAction = ACTION_NONE;
@@ -216,8 +216,8 @@ public class MFDSystemsPdLimitsPage : MFDPage
             return;
         }
 
-        // T4 = CONTINUE
-        if (side == ButtonSide.Top && num == 3)
+        // T5 = CONTINUE
+        if (side == ButtonSide.Right && num == 3)
         {
             _showConfirmPopup = false;
             CommitConfirmAction();
@@ -243,7 +243,6 @@ public class MFDSystemsPdLimitsPage : MFDPage
 
         if (nextDeg < 0) nextDeg = 0;
 
-        // only warn when moving upward into dangerous region
         if (delta > 0 && nextDeg > comfortWarnThresholdDegPerSec)
         {
             _confirmAction = ACTION_ADJUST_LIMIT;

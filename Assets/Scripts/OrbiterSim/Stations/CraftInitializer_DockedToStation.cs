@@ -25,6 +25,9 @@ public class CraftInitializer_DockedToStation : UdonSharpBehaviour
     public EphemerisSystem ephem;
     public StationPropSystem stationProp;
     public StationStateModel stationState;
+    [Header("Optional mechanism init")]
+    public DockingOpsController dockingOps;
+    public bool forcePortOpenOnInit = true;
 
     [Header("Craft target")]
     public CraftStateModel craft;
@@ -226,6 +229,13 @@ public class CraftInitializer_DockedToStation : UdonSharpBehaviour
         dock.qCraftToStation = qCraftToStation;
         dock.targetRelPos_SB = relPos_SB;
         dock.target_qCraftToStation = qCraftToStation;
+
+
+        // 7.5) Force docking port mechanism open for docked starts
+        if (forcePortOpenOnInit && dockingOps != null)
+        {
+            dockingOps.ForcePortOpenInstant();
+        }
 
         // 8) Publish net state as DOCKED
         if (Networking.IsOwner(netCore.gameObject))

@@ -151,4 +151,49 @@ public class SimHandoffNetState : UdonSharpBehaviour
             $"PUB txn={txnId} state={state} target={targetPlayerId} source={sourcePlayerId}"
         );
     }
+
+
+    public void ClearState(bool serialize)
+    {
+        txnId = -1;
+        targetPlayerId = -1;
+        sourcePlayerId = -1;
+        state = 0; // IDLE
+
+        simT = 0.0;
+
+        mode = 0;
+        primaryBodyId = 0;
+
+        rx = ry = rz = 0.0;
+        vx = vy = vz = 0.0;
+
+        qx = qy = qz = 0f;
+        qw = 1f;
+        wx = wy = wz = 0f;
+
+        _txnId = txnId;
+        _targetPlayerId = targetPlayerId;
+        _sourcePlayerId = sourcePlayerId;
+        _state = state;
+
+        _simT = simT;
+
+        _mode = mode;
+        _primaryBodyId = primaryBodyId;
+
+        _rx = rx; _ry = ry; _rz = rz;
+        _vx = vx; _vy = vy; _vz = vz;
+
+        _qx = qx; _qy = qy; _qz = qz; _qw = qw;
+        _wx = wx; _wy = wy; _wz = wz;
+
+        _rev++;
+
+        _appliedRev = _rev;
+
+        if (serialize && Networking.IsOwner(gameObject))
+            RequestSerialization();
+    }
+
 }
