@@ -313,6 +313,9 @@ public class MFDTransferPage : MFDPage
     private void UploadAutoNode()
     {
         if (!solver.autoValid) return;
+        if (!Networking.IsOwner(gc.gameObject)) {
+            return;
+        }
 
         int idx = gc.API_RequestCreateNode_Time(
             solver.autoDvE,
