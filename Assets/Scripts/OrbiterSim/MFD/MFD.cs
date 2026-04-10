@@ -22,8 +22,10 @@ public class MFD : UdonSharpBehaviour
     public MFDPage currentPage;
     [UdonSynced] private byte currentPageId = (byte)MFDPageID.Menu;
 
+    // Must match values in MFDGraphicsShader.shader
     public const int TEXT_ROWS = 24;
     public const int TEXT_COLUMNS = 48;
+    const int MAX_SHAPES = 32;
 
     [Header("Optional image panel")]
     public Texture imageTex;
@@ -32,11 +34,8 @@ public class MFD : UdonSharpBehaviour
     public Vector4 imageSourceUv = new Vector4(0, 0, 1, 1);
     public Color imageTint = Color.white;
 
-    private float[] charGrid; // Unity materials don't support uploading int arrays for some reason
-    private Color[] charColors;
-
-    // Must match value in MFDGraphicsShader.shader
-    const int MAX_SHAPES = 256;
+    private Texture2D charDataTex;
+    private byte[] blankText;
 
     private int shapeCount = 0;
     private Color[] shapeColors;
@@ -69,12 +68,17 @@ public class MFD : UdonSharpBehaviour
 
     public void Start()
     {
-        charGrid = new float[TEXT_ROWS * TEXT_COLUMNS];
-        charColors = new Color[TEXT_ROWS * TEXT_COLUMNS];
-        ClearText();
+        blankText = new byte[TEXT_COLUMNS * TEXT_ROWS * 4];
+        for (int i = 0; i < blankText.Length; i++) {
+            blankText[i] = 0;
+        }
 
         graphicsMaterial.SetVectorArray("atlasRects", fontData.atlasRects);
         graphicsMaterial.SetVectorArray("charRects", fontData.charRects);
+
+        charDataTex = new Texture2D(TEXT_COLUMNS, TEXT_ROWS, TextureFormat.RGBA32, false, true);
+        ClearText();
+        graphicsMaterial.SetTexture("_TextDataTex", charDataTex);
 
         shapeColors = new Color[MAX_SHAPES];
         shapeData1 = new float[MAX_SHAPES];
@@ -122,8 +126,7 @@ public class MFD : UdonSharpBehaviour
 
     public void ClearText()
     {
-        charGrid = new float[TEXT_ROWS * TEXT_COLUMNS];
-        charColors = new Color[TEXT_ROWS * TEXT_COLUMNS];
+        charDataTex.LoadRawTextureData(blankText);
     }
 
     public void ClearGraphics()
@@ -131,31 +134,25 @@ public class MFD : UdonSharpBehaviour
         shapeCount = 0;
     }
 
+    private void SetChar(int row, int col, char c, Color color)
+    {
+    }
+
     public void DrawText(string text, int row, int col, Color color)
     {
-        if (text == null) return;
-        if (row < 0 || row >= TEXT_ROWS) return;
-        if (col >= TEXT_COLUMNS) return;
-
         int len = text.Length;
-        for (int i = 0; i < len && i + col < TEXT_COLUMNS; i++) {
-            if (i + col < 0) continue;
-            charGrid[row * TEXT_COLUMNS + i + col] = (float)text[i];
-            charColors[row * TEXT_COLUMNS + i + col] = color;
+        for (int i = 0; i < len && col + i < TEXT_COLUMNS; i++) {
+            color.a = (byte)text[i] / 255f;
+            charDataTex.SetPixel(col + i, row, color);
         }
     }
 
     public void DrawVerticalText(string text, int row, int col, Color color)
     {
-        if (text == null) return;
-        if (col < 0 || col >= TEXT_COLUMNS) return;
-        if (row >= TEXT_ROWS) return;
-
         int len = text.Length;
-        for (int i = 0; i < len && i + row < TEXT_ROWS; i++) {
-            if (i + row < 0) continue;
-            charGrid[(i + row) * TEXT_COLUMNS + col] = (float)text[i];
-            charColors[(i + row) * TEXT_COLUMNS + col] = color;
+        for (int i = 0; i < len && row + i < TEXT_ROWS; i++) {
+            color.a = (byte)text[i] / 255f;
+            charDataTex.SetPixel(col, row + i, color);
         }
     }
 
@@ -194,8 +191,7 @@ public class MFD : UdonSharpBehaviour
     private void FlushDrawCommands()
     {
         // Text
-        graphicsMaterial.SetFloatArray("charGrid", charGrid);
-        graphicsMaterial.SetColorArray("charColors", charColors);
+        charDataTex.Apply();
 
         // Vector graphics
         graphicsMaterial.SetColorArray("shapeColors", shapeColors);

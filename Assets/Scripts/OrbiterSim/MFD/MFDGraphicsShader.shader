@@ -6,12 +6,13 @@ Shader "Unlit/MFDGraphicsShader"
         _FontSdfEdge ("Font SDF Edge", Float) = 0.5
         _FontSdfSoftness ("Font SDF Softness", Float) = 0.06
 
+        _TextDataTex ("Text Data", 2D) = "black" {}
+
         _ImageTex ("Optional Image", 2D) = "black" {}
         _ImageEnabled ("Image Enabled", Float) = 0
         _ImageRect ("Image Rect UV", Vector) = (0,0,1,1)
         _ImageUvRect ("Image Source UV Rect", Vector) = (0,0,1,1)
         _ImageTint ("Image Tint", Color) = (1,1,1,1)
-
     }
 
     SubShader
@@ -32,7 +33,7 @@ Shader "Unlit/MFDGraphicsShader"
             // Must match values in MFD.cs
             #define TEXT_ROWS 24
             #define TEXT_COLUMNS 48
-            #define MAX_SHAPES 256
+            #define MAX_SHAPES 32
 
             sampler2D _FontAtlas;
             float4 _FontAtlas_TexelSize;
@@ -42,6 +43,8 @@ Shader "Unlit/MFDGraphicsShader"
             float4 atlasRects[127 - 32 + 1];
             float4 charRects[127 - 32 + 1];
 
+            sampler2D _TextDataTex;
+
             sampler2D _ImageTex;
             float _ImageEnabled;
             float4 _ImageRect;   // xmin, ymin, xmax, ymax in display UV
@@ -49,10 +52,6 @@ Shader "Unlit/MFDGraphicsShader"
             float4 _ImageTint;
             float4 _ImageTex_TexelSize;
 
-
-
-            uniform int charGrid[24 * 48];
-            uniform float3 charColors[24 * 48];
             uniform int shapeCount;
             uniform float3 shapeColors[MAX_SHAPES];
             uniform float shapeData1[MAX_SHAPES];
@@ -215,7 +214,7 @@ Shader "Unlit/MFDGraphicsShader"
                     gy = 1.0 - gy;
                 } else if (c == 0xB0) {
                     // degree symbol
-                    c = 0xFF;
+                    c = 0x7F;
                 }
 
                 float4 atlasRect = atlasRects[c - 32];
@@ -246,19 +245,19 @@ Shader "Unlit/MFDGraphicsShader"
                 return clamp(0.5 - pixelDist, 0.0, 1.0);
             }
 
-
-            float4 SampleOptionalImage(float2 uv)
+            float4 sampleOptionalImage(float2 uv)
             {
                 if (_ImageEnabled < 0.5)
-                    return float4(0,0,0,0);
+                    return float4(0, 0, 0, 0);
 
                 float2 rectMin = _ImageRect.xy;
                 float2 rectMax = _ImageRect.zw;
 
-                if (uv.x < rectMin.x || uv.x > rectMax.x || uv.y < rectMin.y || uv.y > rectMax.y)
+                if (uv.x < rectMin.x || uv.x > rectMax.x || uv.y < rectMin.y || uv.y > rectMax.y) {
                     return float4(0,0,0,0);
+                }
 
-                float2 localUv = (uv - rectMin) / max(rectMax - rectMin, float2(1e-6, 1e-6));
+                float2 localUv = (uv - rectMin) / (rectMax - rectMin);
                 float2 imageUv = lerp(_ImageUvRect.xy, _ImageUvRect.zw, localUv);
 
                 // Pull sampling half a texel inward to avoid border bleed
@@ -278,7 +277,7 @@ Shader "Unlit/MFDGraphicsShader"
 
                 float3 color = float3(0, 0, 0);
 
-                float4 img = SampleOptionalImage(input.uv);
+                float4 img = sampleOptionalImage(input.uv);
 
                 color.rbg = lerp(color.rgb, img.rgb, saturate(img.a));
 
@@ -291,8 +290,10 @@ Shader "Unlit/MFDGraphicsShader"
                 int row = (int)((1.0 - input.uv.y) * TEXT_ROWS);
                 int col = (int)(input.uv.x * TEXT_COLUMNS);
 
-                int index = row*TEXT_COLUMNS + col;
-                int c = (int)charGrid[index];
+                float2 charCoord = float2((col + 0.5) / TEXT_COLUMNS, (row + 0.5) / TEXT_ROWS);
+                float4 charData = tex2D(_TextDataTex, charCoord, 0, 0);
+
+                int c = round(charData.a * 0xFF);
                 if (c == 0) {
                     c = 0x20; // space
                 }
@@ -302,7 +303,7 @@ Shader "Unlit/MFDGraphicsShader"
 
                 float glyph = antialias(drawGlyph(c, gx, 1.0 - gy));
                 color *= 1.0 - glyph;
-                color += charColors[index] * glyph;
+                color += charData.rgb * glyph;
 
                 fixed4 res = fixed4(color, 1.0);
                 // apply fog
