@@ -6,18 +6,10 @@ using VRC.SDKBase;
 /// GroundTrackDisplayDriver
 ///
 /// GPU ground-track pipeline:
-///   Pass 0: propagate future ground-track samples into outputRT
-///           outputRT is a 1D/strip data texture:
-///             RGB = packed body-fixed unit vector
-///             A   = altitude/visibility scalar
-///
+///   Pass 0: propagate future ground-track samples into outputRT (1D strip)
 ///   Pass 1: composite base map + track into mapRT
-///
-/// This driver is independent of the MFD. The MFD can later sample mapRT
-/// as a generic image input.
-///
-/// Assumes the material uses shader:
-///   "Orbiter/MFD/GroundTrackCombined_TwoPass"
+///   Pass 2: pack tile row/col into tileCoordRT (2D: maxTilesPerSample x sampleCount)
+///   Pass 3: pack tile metadata into tileMetaRT (2D: maxTilesPerSample x sampleCount)
 /// </summary>
 public class GroundTrackDisplayDriver : UdonSharpBehaviour
 {
@@ -25,7 +17,7 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
     public GuidanceNavCoreState nav;
     public BodyCatalog bodies;
 
-    [Header("Combined Two-Pass Material")]
+    [Header("Material")]
     public Material groundTrackMaterial;
 
     [Header("Track Data Output RT (Pass 0)")]
@@ -33,6 +25,10 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
 
     [Header("Map Output RT (Pass 1)")]
     public RenderTexture mapRT;
+
+    [Header("Tile Packed Output RTs")]
+    public RenderTexture tileCoordRT;
+    public RenderTexture tileMetaRT;
 
     [Header("Base Maps")]
     public Texture2D earthMapTex;
@@ -42,11 +38,12 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
     [Tooltip("Number of future track samples to generate.")]
     public int sampleCount = 128;
 
-
-
-
     [Tooltip("Seconds between adjacent samples.")]
     public float sampleStepSec = 30f;
+
+    [Header("Horizon Tile Emission")]
+    [Tooltip("Maximum number of emitted tile records per future sample.")]
+    public int maxTilesPerSample = 64;
 
     [Header("Map RT Size")]
     public int mapWidth = 512;
@@ -73,6 +70,13 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
     public float markerSoftnessUV = 0.002f;
     public bool showCurrentMarker = true;
 
+    [Header("Tile Classification")]
+    public float targetArcmin = 15f;
+    public float tileTextureSize = 512f;
+    public int minTileLevel = 3;
+    public int maxTileLevel = 18;
+    public float tileLevelBias = 0f;
+
     [Header("Update Policy")]
     [Tooltip("If false, driver does nothing until EvaluateAndDispatch is called manually.")]
     public bool updateEveryFrame = true;
@@ -83,9 +87,10 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
     private int _lastSampleCount = -1;
     private int _lastMapWidth = -1;
     private int _lastMapHeight = -1;
+    private int _lastTileSampleCount = -1;
+    private int _lastMaxTilesPerSample = -1;
+
     private double _lastDispatchT = double.NegativeInfinity;
-
-
     private int _lastRenderedBodyId = -1;
     private bool _mapMatchesCurrentBody = false;
 
@@ -95,9 +100,6 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         EvaluateAndDispatch();
     }
 
-    /// <summary>
-    /// Main public entry point.
-    /// </summary>
     public void EvaluateAndDispatch()
     {
         if (nav == null || !nav.valid) return;
@@ -123,23 +125,29 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
 
         int desiredSamples = sampleCount;
         if (desiredSamples < 1) desiredSamples = 1;
-        if (desiredSamples > 256) desiredSamples = 256; // shader loop cap for pass 1
+        if (desiredSamples > 256) desiredSamples = 256;
+
+        int desiredMaxTiles = maxTilesPerSample;
+        if (desiredMaxTiles < 1) desiredMaxTiles = 1;
+        if (desiredMaxTiles > 512) desiredMaxTiles = 512;
 
         EnsureTrackDataResources(desiredSamples);
         EnsureMapResources();
+        EnsureTileResources(desiredSamples, desiredMaxTiles);
 
         float bodyRadius = (float)nav.radiusPrimary;
 
-        PushPropagationUniforms(bodyId, bodyRadius, desiredSamples);
+        PushPropagationUniforms(bodyRadius, desiredSamples);
         DispatchTrackDataPass();
 
         PushMapUniforms(bodyId, desiredSamples);
         DispatchMapPass();
 
+        PushTileUniforms(desiredSamples, desiredMaxTiles);
+        DispatchTilePasses();
+
         _lastRenderedBodyId = bodyId;
         _mapMatchesCurrentBody = true;
-
-
     }
 
     public void ForceRefresh()
@@ -149,14 +157,14 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         EvaluateAndDispatch();
     }
 
-
     public bool MapMatchesBody(int bodyId)
     {
         return _mapMatchesCurrentBody &&
-            mapRT != null &&
-            mapRT.IsCreated() &&
-            _lastRenderedBodyId == bodyId;
+               mapRT != null &&
+               mapRT.IsCreated() &&
+               _lastRenderedBodyId == bodyId;
     }
+
     private void EnsureTrackDataResources(int desiredSamples)
     {
         if (outputRT == null) return;
@@ -218,13 +226,71 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         mapRT.Create();
     }
 
-    private void PushPropagationUniforms(int bodyId, float bodyRadius, int desiredSamples)
+    private void EnsureTileResources(int desiredSamples, int desiredMaxTiles)
     {
-        // Sample generation
+        bool tileDimsChanged =
+            (_lastTileSampleCount != desiredSamples) ||
+            (_lastMaxTilesPerSample != desiredMaxTiles);
+
+        if (tileCoordRT != null)
+        {
+            bool needsRecreate =
+                tileDimsChanged ||
+                !tileCoordRT.IsCreated() ||
+                tileCoordRT.width != desiredMaxTiles ||
+                tileCoordRT.height != desiredSamples;
+
+            if (needsRecreate)
+            {
+                if (tileCoordRT.IsCreated())
+                    tileCoordRT.Release();
+
+                tileCoordRT.width = desiredMaxTiles;
+                tileCoordRT.height = desiredSamples;
+                tileCoordRT.depth = 0;
+                tileCoordRT.useMipMap = false;
+                tileCoordRT.autoGenerateMips = false;
+                tileCoordRT.wrapMode = TextureWrapMode.Clamp;
+                tileCoordRT.filterMode = FilterMode.Point;
+                tileCoordRT.enableRandomWrite = false;
+                tileCoordRT.Create();
+            }
+        }
+
+        if (tileMetaRT != null)
+        {
+            bool needsRecreate =
+                tileDimsChanged ||
+                !tileMetaRT.IsCreated() ||
+                tileMetaRT.width != desiredMaxTiles ||
+                tileMetaRT.height != desiredSamples;
+
+            if (needsRecreate)
+            {
+                if (tileMetaRT.IsCreated())
+                    tileMetaRT.Release();
+
+                tileMetaRT.width = desiredMaxTiles;
+                tileMetaRT.height = desiredSamples;
+                tileMetaRT.depth = 0;
+                tileMetaRT.useMipMap = false;
+                tileMetaRT.autoGenerateMips = false;
+                tileMetaRT.wrapMode = TextureWrapMode.Clamp;
+                tileMetaRT.filterMode = FilterMode.Point;
+                tileMetaRT.enableRandomWrite = false;
+                tileMetaRT.Create();
+            }
+        }
+
+        _lastTileSampleCount = desiredSamples;
+        _lastMaxTilesPerSample = desiredMaxTiles;
+    }
+
+    private void PushPropagationUniforms(float bodyRadius, int desiredSamples)
+    {
         groundTrackMaterial.SetFloat("_SampleCount", (float)desiredSamples);
         groundTrackMaterial.SetFloat("_SampleStepSec", sampleStepSec);
 
-        // Current osculating craft orbit from nav
         groundTrackMaterial.SetFloat("_A", (float)nav.a);
         groundTrackMaterial.SetFloat("_E", (float)nav.e);
         groundTrackMaterial.SetFloat("_Inc", (float)nav.iInertialRad);
@@ -234,7 +300,6 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         groundTrackMaterial.SetFloat("_Mu", (float)nav.muPrimary);
         groundTrackMaterial.SetFloat("_T0", (float)nav.t);
 
-        // Primary body rotation / size
         groundTrackMaterial.SetFloat("_BodyRadius", bodyRadius);
         groundTrackMaterial.SetFloat("_AltDisplayScale", altDisplayScale);
 
@@ -297,24 +362,42 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
             aspect = (float)mapRT.width / (float)mapRT.height;
 
         groundTrackMaterial.SetFloat("_MapAspect", aspect);
+    }
 
+    private void PushTileUniforms(int desiredSamples, int desiredMaxTiles)
+    {
+        groundTrackMaterial.SetTexture("_TrackTex", outputRT);
+        groundTrackMaterial.SetFloat("_TrackSampleCount", (float)desiredSamples);
 
+        groundTrackMaterial.SetFloat("_TargetArcmin", targetArcmin);
+        groundTrackMaterial.SetFloat("_TileTextureSize", tileTextureSize);
+        groundTrackMaterial.SetFloat("_MinTileLevel", (float)minTileLevel);
+        groundTrackMaterial.SetFloat("_MaxTileLevel", (float)maxTileLevel);
+        groundTrackMaterial.SetFloat("_TileLevelBias", tileLevelBias);
+        groundTrackMaterial.SetFloat("_MaxTilesPerSample", (float)desiredMaxTiles);
     }
 
     private void DispatchTrackDataPass()
     {
         if (groundTrackMaterial == null || outputRT == null) return;
-
-        // Pass 0 = PROPAGATE_TRACK_DATA
         VRCGraphics.Blit(Texture2D.whiteTexture, outputRT, groundTrackMaterial, 0);
     }
 
     private void DispatchMapPass()
     {
         if (groundTrackMaterial == null || mapRT == null) return;
-
-        // Pass 1 = COMPOSITE_MAP
         VRCGraphics.Blit(Texture2D.whiteTexture, mapRT, groundTrackMaterial, 1);
+    }
+
+    private void DispatchTilePasses()
+    {
+        if (groundTrackMaterial == null) return;
+
+        if (tileCoordRT != null)
+            VRCGraphics.Blit(Texture2D.whiteTexture, tileCoordRT, groundTrackMaterial, 2);
+
+        if (tileMetaRT != null)
+            VRCGraphics.Blit(Texture2D.whiteTexture, tileMetaRT, groundTrackMaterial, 3);
     }
 
     public Texture GetMapTexture()
@@ -327,6 +410,16 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         return outputRT;
     }
 
+    public Texture GetTileCoordTexture()
+    {
+        return tileCoordRT;
+    }
+
+    public Texture GetTileMetaTexture()
+    {
+        return tileMetaRT;
+    }
+
     public bool HasValidMapTexture()
     {
         return mapRT != null && mapRT.IsCreated();
@@ -337,10 +430,18 @@ public class GroundTrackDisplayDriver : UdonSharpBehaviour
         return outputRT != null && outputRT.IsCreated();
     }
 
+    public bool HasValidTileCoordTexture()
+    {
+        return tileCoordRT != null && tileCoordRT.IsCreated();
+    }
+
+    public bool HasValidTileMetaTexture()
+    {
+        return tileMetaRT != null && tileMetaRT.IsCreated();
+    }
 
     void OnDisable()
     {
-        // Intentionally do not release RTs here unless you know
-        // this object is temporary. Usually these are scene-owned.
+        // Scene-owned RTs: intentionally not releasing here.
     }
 }

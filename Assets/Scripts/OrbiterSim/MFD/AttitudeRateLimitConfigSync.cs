@@ -23,7 +23,7 @@ public class AttitudeRateLimitConfigSync : UdonSharpBehaviour
     public bool restrictToSimOwner = false;
 
     [UdonSynced] private bool _enableLimiter = true;
-    [UdonSynced] private byte _limitSteps = 2;
+    [UdonSynced] private byte _limitSteps = 4;
     [UdonSynced] private bool _restrictToSimOwner = false;
     [UdonSynced] private uint _rev = 0;
 

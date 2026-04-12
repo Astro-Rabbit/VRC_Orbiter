@@ -49,9 +49,11 @@ public class SpacecraftLever : UdonSharpBehaviour
             handleAnlge = Mathf.Clamp(handleAnlge, 0f, 180f);
         }
 
-        bool isLocalOwner = (Networking.GetOwner(gameObject) == Networking.LocalPlayer);
+        bool isLocalOwner =
+            (Networking.GetOwner(gameObject) == Networking.LocalPlayer) ||
+            (handle != null && Networking.GetOwner(handle.gameObject) == Networking.LocalPlayer);
 
-        if (!isHeld&& isLocalOwner)
+        if (!isHeld)
         {
             gameObject.transform.position = LeverHandlePos.transform.position;
             handle.gameObject.transform.position = LeverHandlePos.transform.position;
@@ -112,9 +114,9 @@ public class SpacecraftLever : UdonSharpBehaviour
             TargetAngle = isLeverOpen ? -180f : 0f;
         }
 
-        angleOut = Mathf.LerpAngle(angleOut, TargetAngle, Time.deltaTime * lerpspeed);
+        angleOut = Mathf.Lerp(angleOut, TargetAngle, Time.deltaTime * lerpspeed);
         LeverPivot.transform.localRotation = Quaternion.Euler(angleOut, 0f, 0f);
-        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        if (isHeld && isLocalOwner)
         {
             bool prevIsLeverOpen = isLeverOpen;
 
@@ -151,10 +153,15 @@ public class SpacecraftLever : UdonSharpBehaviour
         if (Networking.GetOwner(gameObject) != Networking.LocalPlayer)
         {
             Networking.SetOwner(Networking.LocalPlayer, gameObject);
-            Networking.SetOwner(Networking.LocalPlayer, handle.gameObject);
-
         }
+
+        if (handle != null && Networking.GetOwner(handle.gameObject) != Networking.LocalPlayer)
+        {
+            Networking.SetOwner(Networking.LocalPlayer, handle.gameObject);
+        }
+
         isHeld = true;
+
         if (handle.currentHand == VRC_Pickup.PickupHand.Right)
         {
             isRightHand = true;
@@ -163,6 +170,7 @@ public class SpacecraftLever : UdonSharpBehaviour
         {
             isRightHand = false;
         }
+
         lerpspeed = 15f;
     }
     float TargetAngle = 0f;
@@ -217,7 +225,11 @@ public class SpacecraftLever : UdonSharpBehaviour
         _handlePickable = true;
         handle.pickupable = true;
 
-        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        bool isLocalOwner =
+            (Networking.GetOwner(gameObject) == Networking.LocalPlayer) ||
+            (handle != null && Networking.GetOwner(handle.gameObject) == Networking.LocalPlayer);
+
+        if (isLocalOwner)
             RequestSerialization();
     }
 
@@ -228,7 +240,11 @@ public class SpacecraftLever : UdonSharpBehaviour
         _handlePickable = false;
         handle.pickupable = false;
 
-        if (Networking.GetOwner(gameObject) == Networking.LocalPlayer)
+        bool isLocalOwner =
+            (Networking.GetOwner(gameObject) == Networking.LocalPlayer) ||
+            (handle != null && Networking.GetOwner(handle.gameObject) == Networking.LocalPlayer);
+
+        if (isLocalOwner)
             RequestSerialization();
     }
 }

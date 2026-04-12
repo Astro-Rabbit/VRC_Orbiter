@@ -1,7 +1,6 @@
 ﻿using UdonSharp;
 using UnityEngine;
 
-[UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class TabletTutorialSlot : UdonSharpBehaviour
 {
     [Header("Metadata")]

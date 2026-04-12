@@ -135,7 +135,8 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
             clip = SelectClip();
         }
-        if (clip != previousClip) {
+        bool clipChanged = clip != previousClip;
+        if (clipChanged) {
             previousClip = clip;
             RequestSerialization();
         }
@@ -158,7 +159,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
         }
 
-        if (videoController != null) {
+
+
+
+        if (videoController != null && clipChanged) {
             videoController.PlayClip((RendezvousTutorialClip)clip, false);
         }
     }
@@ -550,11 +554,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
     [NetworkCallable]
     public void Replay()
     {
-        if (!Networking.IsOwner(gameObject)) {
-            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(Replay));
-            return;
-        }
-        
+
         if (!tutorialActive) return;
 
         if (videoController != null) {
@@ -604,7 +604,7 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
     public void API_ReplayTutorial()
     {
-        Replay();
+        SendCustomNetworkEvent(NetworkEventTarget.All, nameof(Replay));
     }
 
     public void API_ContinueTutorial()

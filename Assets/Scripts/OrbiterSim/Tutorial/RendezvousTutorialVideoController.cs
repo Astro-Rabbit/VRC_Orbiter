@@ -118,7 +118,7 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
         _currentClip = -1;
         _playing = true;
 
-        float duration = clipObject.GetComponent<VRCUnityVideoPlayer>().GetDuration();
+        float duration = GetClipDuration(clip);
         if (duration > 0f) {
             _hideAtTime = Time.time + duration;
         } else {
@@ -216,4 +216,39 @@ public class RendezvousTutorialVideoController : UdonSharpBehaviour
 
         return null;
     }
+
+
+    private float GetClipDuration(RendezvousTutorialClip clip)
+    {
+        switch (clip) {
+            case RendezvousTutorialClip.Intro: return introDuration+5;
+            case RendezvousTutorialClip.MenuPage: return menuPageDuration+5;
+            case RendezvousTutorialClip.TargetPage: return targetPageDuration+5;
+            case RendezvousTutorialClip.SelectTarget: return selectTargetDuration+5;
+            case RendezvousTutorialClip.AlignPage: return alignPageDuration+5;
+            case RendezvousTutorialClip.AlignInfo: return alignInfoDuration+5;
+            case RendezvousTutorialClip.AlignNode: return alignNodeDuration+5;
+            case RendezvousTutorialClip.NodeAuto: return nodeAutoDuration+5;
+            case RendezvousTutorialClip.NodeTime: return nodeTimeDuration+5;
+            case RendezvousTutorialClip.NodeExec: return nodeExecDuration+5;
+            case RendezvousTutorialClip.TransferPage: return transferPageDuration+5;
+            case RendezvousTutorialClip.TransferInfo: return transferInfoDuration+5;
+            case RendezvousTutorialClip.TransferCalc: return transferCalcDuration+5;
+            case RendezvousTutorialClip.TransferNode: return transferNodeDuration+5;
+            case RendezvousTutorialClip.DockPage: return dockPageDuration+5;
+            case RendezvousTutorialClip.MatchInfo: return matchInfoDuration+5;
+            case RendezvousTutorialClip.MatchTime: return matchTimeDuration+5;
+            case RendezvousTutorialClip.MatchDir: return matchDirDuration+5;
+            case RendezvousTutorialClip.MatchBurn: return matchBurnDuration+5;
+            case RendezvousTutorialClip.FinishBurn: return finishBurnDuration+5;
+            case RendezvousTutorialClip.TargetDir: return targetDirDuration+5;
+            case RendezvousTutorialClip.TargetBurn: return targetBurnDuration+5;
+            case RendezvousTutorialClip.RestOfTheOwl: return restOfTheOwlDuration+5;
+            case RendezvousTutorialClip.Outro: return outroDuration+5;
+        }
+
+        return 0f;
+    }
+
+
 }

@@ -71,6 +71,7 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
     private bool _smoothInit1 = false;
     private Vector3 _smoothDrE1 = Vector3.zero;
 
+    private int _prevSelectedStationIndex = -1;
     public void Evaluate()
     {
         if (craft == null || craftAtt == null || contacts == null || stations == null)
@@ -169,6 +170,20 @@ public class GuidanceNavContactsComputer : UdonSharpBehaviour
         }
 
         int sel = contacts.selectedStationIndex;
+
+        // Detect station change
+        if (sel != _prevSelectedStationIndex)
+        {
+            _prevSelectedStationIndex = sel;
+
+            // Only set if a valid station is selected
+            if (sel >= 0 && sel < stations.Length && contacts.valid[sel])
+            {
+                contacts.selectedStationDockPortIndex = 0;
+            }
+        }
+
+
         if (sel >= 0 && sel < n && contacts.valid[sel])
             FillFullSlot0(sel, allowRenderSmoothing);
         else

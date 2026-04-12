@@ -16,7 +16,7 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 2999
+  m_CustomRenderQueue: 5000
   stringTagMap: {}
   disabledShaderPasses: []
   m_LockedProperties: 
@@ -44,20 +44,20 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaTest: 0
-    - _Cull: 2
+    - _Cull: 0
     - _Cutoff: 0
-    - _HoloAmount: 0.314
-    - _HoloBandSteps: 7.97
+    - _HoloAmount: 1
+    - _HoloBandSteps: 7.91
     - _HoloBodyFill: 0.22
-    - _HoloBrightness: 1
+    - _HoloBrightness: 0.25
     - _HoloDesaturate: 0.75
     - _HoloFresnelPower: 0.89
     - _HoloFresnelStrength: 0.48
     - _HoloMinBody: 0.35
     - _HoloNoiseScale: 8
     - _HoloNoiseStrength: 0.08
-    - _HoloOpacity: 0.85
-    - _HoloScanlineDensity: 136
+    - _HoloOpacity: 1
+    - _HoloScanlineDensity: 400
     - _HoloScanlineSpeed: 5.45
     - _HoloScanlineStrength: 1.635
     - _HumanScale: -1
@@ -65,6 +65,6 @@ Material:
     - _NearClip: 0
     - _RotationTolerance: 0.136
     m_Colors:
-    - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _HoloColor: {r: 0.09803921, g: 1, b: 0.792252, a: 1}
+    - _Color: {r: 0.6226415, g: 0.6226415, b: 0.6226415, a: 1}
+    - _HoloColor: {r: 0.16464934, g: 0.9433962, b: 0.76394576, a: 1}
   m_BuildTextureStacks: []
