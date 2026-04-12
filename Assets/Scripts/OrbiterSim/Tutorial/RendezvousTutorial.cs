@@ -2,6 +2,8 @@ using UdonSharp;
 using System;
 using UnityEngine;
 using VRC.SDKBase;
+using VRC.SDK3.UdonNetworkCalling;
+using VRC.Udon.Common.Interfaces;
 using VRC.Udon;
 using TMPro;
 
@@ -33,6 +35,7 @@ public enum RendezvousTutorialClip
     Outro,
 }
 
+[UdonBehaviourSyncMode(BehaviourSyncMode.Manual)]
 public class RendezvousTutorial : UdonSharpBehaviour
 {
     [Header("References")]
@@ -102,12 +105,13 @@ public class RendezvousTutorial : UdonSharpBehaviour
     public bool readyMatch = false;
     public bool matchWarpDropDone = false;
 
-    private int clip = (int)RendezvousTutorialClip.Intro;
-    private int lastClip = -1;
-    private double nodeBurnTime;
-    private double transferInterceptTime;
+    [UdonSynced] private int clip = (int)RendezvousTutorialClip.Intro;
+    [UdonSynced] private double nodeBurnTime;
+    [UdonSynced] private double transferInterceptTime;
+    [UdonSynced] private int flagSync;
     private bool correctTarget;
     private int execPhase;
+    private int previousClip = -1;
 
     void Start()
     {
@@ -116,19 +120,26 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
     void LateUpdate()
     {
-        if (!tutorialActive)
-        {
+        if (!tutorialActive) {
             clip = (int)RendezvousTutorialClip.Intro;
 
-            if (continueButton != null)
+            if (continueButton != null) {
                 continueButton.SetActive(false);
+            }
 
             return;
         }
 
-        UpdateStickyConditions();
+        if (Networking.IsOwner(gameObject)) {
+            UpdateStickyConditions();
 
-        clip = SelectClip();
+            clip = SelectClip();
+        }
+        bool clipChanged = clip != previousClip;
+        if (clipChanged) {
+            previousClip = clip;
+            RequestSerialization();
+        }
 
         if (output != null) {
             output.text = ((RendezvousTutorialClip)clip).ToString();
@@ -148,11 +159,11 @@ public class RendezvousTutorial : UdonSharpBehaviour
             }
         }
 
-        if (clip != lastClip) {
-            if (videoController != null) {
-                videoController.PlayClip((RendezvousTutorialClip)clip, false);
-            }
-            lastClip = clip;
+
+
+
+        if (videoController != null && clipChanged) {
+            videoController.PlayClip((RendezvousTutorialClip)clip, false);
         }
     }
 
@@ -447,21 +458,44 @@ public class RendezvousTutorial : UdonSharpBehaviour
         }
     }
 
+    [NetworkCallable]
     public void OnAlignNodeCreate(double time)
     {
+        if (!Networking.IsOwner(gameObject)) {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(OnAlignNodeCreate), time);
+            return;
+        }
+        if (!tutorialActive) return;
+
         hasAlignNode = true;
         nodeBurnTime = time;
+        RequestSerialization();
     }
 
+    [NetworkCallable]
     public void OnTransferNodeCreate(double time, double interceptTime)
     {
+        if (!Networking.IsOwner(gameObject)) {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(OnTransferNodeCreate), time, interceptTime);
+            return;
+        }
+        if (!tutorialActive) return;
+
         hasTransferNode = true;
         nodeBurnTime = time;
         transferInterceptTime = interceptTime;
+        RequestSerialization();
     }
 
+    [NetworkCallable]
     public void Reset()
     {
+        if (!Networking.IsOwner(gameObject)) {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(Reset));
+            return;
+        }
+        if (!Networking.IsOwner(gameObject)) return;
+
         planeAligned = false;
         onFlyby = false;
         proximity = false;
@@ -482,7 +516,6 @@ public class RendezvousTutorial : UdonSharpBehaviour
         matchWarpDropDone = false;
 
         clip = (int)RendezvousTutorialClip.Intro;
-        lastClip = -1;
 
         if (videoController != null) {
             videoController.StopPlayback();
@@ -490,8 +523,13 @@ public class RendezvousTutorial : UdonSharpBehaviour
         tutorialActive = false;
     }
 
+    [NetworkCallable]
     public void Continue()
     {
+        if (!Networking.IsOwner(gameObject)) {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(Continue));
+            return;
+        }
         if (!tutorialActive) return;
 
         switch (clip) {
@@ -513,8 +551,10 @@ public class RendezvousTutorial : UdonSharpBehaviour
         }
     }
 
+    [NetworkCallable]
     public void Replay()
     {
+
         if (!tutorialActive) return;
 
         if (videoController != null) {
@@ -522,8 +562,14 @@ public class RendezvousTutorial : UdonSharpBehaviour
         }
     }
 
-    public void API_StartTutorial()
+    [NetworkCallable]
+    public void StartTutorial()
     {
+        if (!Networking.IsOwner(gameObject)) {
+            SendCustomNetworkEvent(NetworkEventTarget.Owner, nameof(Replay));
+            return;
+        }
+
         if (simManager != null) {
             scenarioInitializer.ApplyScenarioByIndex(tutorialScenarioIndex, 0.0);
             simManager.SetRequestedWarp(1.0);
@@ -533,10 +579,22 @@ public class RendezvousTutorial : UdonSharpBehaviour
         tutorialActive = true;
     }
 
-    public void API_StopTutorial()
+    [NetworkCallable]
+    public void StopTutorial()
     {
+        if (!Networking.IsOwner(gameObject)) return;
         tutorialActive = false;
         Reset();
+    }
+
+    public void API_StartTutorial()
+    {
+        StartTutorial();
+    }
+
+    public void API_StopTutorial()
+    {
+        StopTutorial();
     }
 
     public void API_RestartTutorial()
@@ -546,13 +604,11 @@ public class RendezvousTutorial : UdonSharpBehaviour
 
     public void API_ReplayTutorial()
     {
-        if (!tutorialActive) return;
-        Replay();
+        SendCustomNetworkEvent(NetworkEventTarget.All, nameof(Replay));
     }
 
     public void API_ContinueTutorial()
     {
-        if (!tutorialActive) return;
         Continue();
     }
 
@@ -579,5 +635,53 @@ public class RendezvousTutorial : UdonSharpBehaviour
         if (!tutorialActive) return "OFF";
         if (clip == (int)RendezvousTutorialClip.Outro) return "COMPLETE";
         return "RUNNING";
+    }
+
+    public override void OnPreSerialization()
+    {
+        flagSync = 0;
+        flagSync |= (tutorialActive ? 1 : 0) << 0;
+        flagSync |= (closingSpeedReached ? 1 : 0) << 1;
+        flagSync |= (didClosingBurn ? 1 : 0) << 2;
+        flagSync |= (inFinalZone ? 1 : 0) << 3;
+
+        flagSync |= (planeAligned ? 1 : 0) << 4;
+        flagSync |= (onFlyby ? 1 : 0) << 5;
+        flagSync |= (proximity ? 1 : 0) << 6;
+        flagSync |= (pointingDir ? 1 : 0) << 7;
+        flagSync |= (velocityMatched ? 1 : 0) << 8;
+
+        flagSync |= (hasAlignNode ? 1 : 0) << 9;
+        flagSync |= (hasTransferNode ? 1 : 0) << 10;
+
+        flagSync |= (readyStart ? 1 : 0) << 11;
+        flagSync |= (readyAlign ? 1 : 0) << 12;
+        flagSync |= (readyTransfer ? 1 : 0) << 13;
+        flagSync |= (readyMatch ? 1 : 0) << 14;
+        flagSync |= (matchWarpDropDone ? 1 : 0) << 15;
+    }
+
+
+    public override void OnDeserialization()
+    {
+        tutorialActive = ((flagSync >> 0) & 1) == 1;
+        closingSpeedReached = ((flagSync >> 1) & 1) == 1;
+        didClosingBurn = ((flagSync >> 2) & 1) == 1;
+        inFinalZone = ((flagSync >> 3) & 1) == 1;
+
+        planeAligned = ((flagSync >> 4) & 1) == 1;
+        onFlyby = ((flagSync >> 5) & 1) == 1;
+        proximity = ((flagSync >> 6) & 1) == 1;
+        pointingDir = ((flagSync >> 7) & 1) == 1;
+        velocityMatched = ((flagSync >> 8) & 1) == 1;
+
+        hasAlignNode = ((flagSync >> 9) & 1) == 1;
+        hasTransferNode = ((flagSync >> 10) & 1) == 1;
+
+        readyStart = ((flagSync >> 11) & 1) == 1;
+        readyAlign = ((flagSync >> 12) & 1) == 1;
+        readyTransfer = ((flagSync >> 13) & 1) == 1;
+        readyMatch = ((flagSync >> 14) & 1) == 1;
+        matchWarpDropDone = ((flagSync >> 15) & 1) == 1;
     }
 }

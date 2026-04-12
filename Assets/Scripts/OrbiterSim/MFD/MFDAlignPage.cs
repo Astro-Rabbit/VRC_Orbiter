@@ -199,6 +199,10 @@ public class MFDAlignPage : MFDPage
 
     public void UploadBurn(bool ascending)
     {
+        if (!Networking.IsOwner(gc.gameObject)) {
+            return;
+        }
+
         double burnTime = (ascending ? ascTime : descTime) + currentTime;
         gc.API_RequestCreateNode_Time(ascending ? anBurn : dnBurn, burnTime);
 

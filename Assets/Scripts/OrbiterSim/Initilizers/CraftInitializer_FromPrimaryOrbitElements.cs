@@ -21,7 +21,7 @@ using System;
 ///
 /// Notes:
 /// - This is a rails initializer, not an integrated-state initializer
-/// - Attitude is reset unless you later choose to add authored attitude options
+/// - Attitude can optionally be authored in the primary equatorial frame
 /// </summary>
 public class CraftInitializer_FromPrimaryOrbitElements : UdonSharpBehaviour
 {
@@ -57,6 +57,16 @@ public class CraftInitializer_FromPrimaryOrbitElements : UdonSharpBehaviour
     public bool useMeanAnomaly = true;
     public double M0Rad = 0.0;
     public double nu0Rad = 0.0;
+
+    [Header("Initial attitude")]
+    [Tooltip("If true, apply an authored initial attitude instead of resetting to identity.")]
+    public bool useAuthoredInitialAttitude = false;
+
+    [Tooltip("Authored body->primary-equatorial attitude as Unity Euler angles in degrees.")]
+    public Vector3 initialAttitudeEulerDeg = Vector3.zero;
+
+    [Tooltip("If true, zero the body rates on init.")]
+    public bool zeroAngularRatesOnInit = true;
 
     [Header("Behavior")]
     public bool resetAttitudeState = true;
@@ -148,8 +158,7 @@ public class CraftInitializer_FromPrimaryOrbitElements : UdonSharpBehaviour
         craft.vy = pvy + vyRel_E;
         craft.vz = pvz + vzRel_E;
 
-        if (resetAttitudeState && craftAtt != null)
-            craftAtt.ResetState();
+        ApplyInitialAttitude(Ieq_E, Jeq_E, Keq_E);
 
         if (disableDockingOnInit && simManager != null)
             simManager.dockingAllowed = false;
@@ -180,11 +189,48 @@ public class CraftInitializer_FromPrimaryOrbitElements : UdonSharpBehaviour
                 " iDeg=" + (iRad * 57.29577951308232).ToString("F3") +
                 " raanDeg=" + (raanRad * 57.29577951308232).ToString("F3") +
                 " argpDeg=" + (argpRad * 57.29577951308232).ToString("F3") +
-                " nuDeg=" + (nu * 57.29577951308232).ToString("F3")
+                " nuDeg=" + (nu * 57.29577951308232).ToString("F3") +
+                " useAuthoredInitialAttitude=" + useAuthoredInitialAttitude +
+                " attEulerDeg=(" + initialAttitudeEulerDeg.x.ToString("F2") + ", " +
+                                   initialAttitudeEulerDeg.y.ToString("F2") + ", " +
+                                   initialAttitudeEulerDeg.z.ToString("F2") + ")"
             );
         }
 
         return true;
+    }
+
+    private void ApplyInitialAttitude(Vector3 Ieq_E, Vector3 Jeq_E, Vector3 Keq_E)
+    {
+        if (craftAtt == null)
+            return;
+
+        if (!resetAttitudeState && !useAuthoredInitialAttitude)
+            return;
+
+        if (useAuthoredInitialAttitude)
+        {
+            // Body -> primary-equatorial authored by inspector Euler angles
+            Quaternion qBEq = Quaternion.Euler(initialAttitudeEulerDeg);
+
+            // Primary-equatorial basis expressed in solver inertial frame.
+            // Columns are the eq basis axes in E frame.
+            Quaternion qEqToE = QuaternionFromBasis(Ieq_E, Jeq_E, Keq_E);
+
+            // Body -> E
+            craftAtt.qBE = Normalize(qEqToE * qBEq);
+
+            if (zeroAngularRatesOnInit)
+            {
+                craftAtt.wx = 0.0;
+                craftAtt.wy = 0.0;
+                craftAtt.wz = 0.0;
+            }
+        }
+        else
+        {
+            craftAtt.ResetState();
+        }
     }
 
     /// <summary>
@@ -225,6 +271,34 @@ public class CraftInitializer_FromPrimaryOrbitElements : UdonSharpBehaviour
         Jeq_E = j;
         Keq_E = k;
         return true;
+    }
+
+    private static Quaternion QuaternionFromBasis(Vector3 xAxis, Vector3 yAxis, Vector3 zAxis)
+    {
+        xAxis.Normalize();
+        yAxis.Normalize();
+        zAxis.Normalize();
+
+        Matrix4x4 m = new Matrix4x4();
+        m.SetColumn(0, new Vector4(xAxis.x, yAxis.x, zAxis.x, 0f));
+        m.SetColumn(1, new Vector4(xAxis.y, yAxis.y, zAxis.y, 0f));
+        m.SetColumn(2, new Vector4(xAxis.z, yAxis.z, zAxis.z, 0f));
+        m.SetColumn(3, new Vector4(0f, 0f, 0f, 1f));
+
+        return Normalize(m.rotation);
+    }
+
+    private static Quaternion Normalize(Quaternion q)
+    {
+        float m = Mathf.Sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+        if (m < 1e-8f) return Quaternion.identity;
+
+        float inv = 1.0f / m;
+        q.x *= inv;
+        q.y *= inv;
+        q.z *= inv;
+        q.w *= inv;
+        return q;
     }
 
     /// <summary>

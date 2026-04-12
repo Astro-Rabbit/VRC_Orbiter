@@ -19,6 +19,8 @@ public class SimScenarioEntry : UdonSharpBehaviour
     [Header("Scenario refs")]
     public CraftInitializer_FromPrimaryOrbitElements orbitScenario;
     public CraftInitializer_FromTLE tleOrbitScenario;
+    public CraftInitializer_FromEarthCenteredApiState apiOrbitScenario;
+
     public CraftInitializer_NearStation nearStationScenario;
     public CraftInitializer_DockedToStation dockedScenario;
 }

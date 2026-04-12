@@ -507,8 +507,14 @@ public class CraftNetState : UdonSharpBehaviour
         {
             int portCount = GetDockPortCountForStation(stationIndex);
 
-            if (stationPortIndex < 0 || stationPortIndex >= portCount)
+            if (portCount <= 0)
+            {
                 stationPortIndex = -1;
+            }
+            else if (stationPortIndex < 0 || stationPortIndex >= portCount)
+            {
+                stationPortIndex = 0;
+            }
         }
 
         _selectedStationIndex = EncodeIndexOrNone(stationIndex);

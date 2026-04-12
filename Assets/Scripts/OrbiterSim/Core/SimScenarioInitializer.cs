@@ -8,9 +8,9 @@ public class SimScenarioInitializer : UdonSharpBehaviour
     [Header("Core")]
     public EphemerisSystem ephem;
     public SimManager simManager;
+
     [Header("Scenario entries")]
     public SimScenarioEntry[] scenarios;
-
 
     [Header("Selection")]
     public int selectedScenarioIndex = 0;
@@ -36,10 +36,8 @@ public class SimScenarioInitializer : UdonSharpBehaviour
         SimScenarioEntry entry = scenarios[index];
         if (entry == null) return false;
 
-
         if (simManager != null)
             simManager.AbortHandoffForAuthoritativeReset();
-
 
         _activeScenarioIndex = index;
         activeScenarioIndex = index;
@@ -52,13 +50,25 @@ public class SimScenarioInitializer : UdonSharpBehaviour
             resolvedJd0 = entry.scenarioJd0;
             haveResolvedJd0 = true;
         }
-        else if (entry.scenarioType == SimScenarioEntry.SCENARIO_CONIC && entry.tleOrbitScenario != null)
+        else if (entry.scenarioType == SimScenarioEntry.SCENARIO_CONIC)
         {
-            double tleJd0;
-            if (entry.tleOrbitScenario.TryGetScenarioJd0(out tleJd0))
+            if (entry.tleOrbitScenario != null)
             {
-                resolvedJd0 = tleJd0;
-                haveResolvedJd0 = true;
+                double tleJd0;
+                if (entry.tleOrbitScenario.TryGetScenarioJd0(out tleJd0))
+                {
+                    resolvedJd0 = tleJd0;
+                    haveResolvedJd0 = true;
+                }
+            }
+            else if (entry.apiOrbitScenario != null)
+            {
+                double apiJd0;
+                if (entry.apiOrbitScenario.TryGetScenarioJd0(out apiJd0))
+                {
+                    resolvedJd0 = apiJd0;
+                    haveResolvedJd0 = true;
+                }
             }
         }
         else if (ephem != null)
@@ -95,6 +105,12 @@ public class SimScenarioInitializer : UdonSharpBehaviour
                 {
                     entry.tleOrbitScenario.t0Seconds = t0;
                     return entry.tleOrbitScenario.InitializeNow();
+                }
+
+                if (entry.apiOrbitScenario != null)
+                {
+                    entry.apiOrbitScenario.t0Seconds = t0;
+                    return entry.apiOrbitScenario.InitializeNow();
                 }
 
                 if (entry.orbitScenario != null)

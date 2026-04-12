@@ -96,6 +96,9 @@ public class DockingOpsController : UdonSharpBehaviour
     [Tooltip("Seconds for full travel from 0 to 1.")]
     public float hatchFullTravelSeconds = 2.0f;
 
+    [Header("Hatch Collision")]
+    public Collider hatchBlockerCollider;
+
     // ---------------------------------------------------------------------
     // Hatch policy
     // ---------------------------------------------------------------------
@@ -247,7 +250,7 @@ public class DockingOpsController : UdonSharpBehaviour
     private byte _lastLocalHatchState = 255;
     private byte _lastLocalHatchStartPosQ = 255;
     private ushort _lastLocalHatchStartTick = 65535;
-
+    private int _lastHatchState = -1;
     private float _airlockLocalFrom01 = 0f;
     private float _airlockLocalTo01 = 0f;
     private float _airlockLocalStartTime = 0f;
@@ -325,7 +328,7 @@ public class DockingOpsController : UdonSharpBehaviour
             hatchLever.isLeverOpen = hatchLooksOpen;
         }
 
-
+        UpdateHatchBlockerCollider();
     }
 
     void Update()
@@ -365,6 +368,10 @@ public class DockingOpsController : UdonSharpBehaviour
         }
 
         RefreshHatchLeverLockout();
+
+        RefreshHatchLeverLockout();
+        UpdateHatchBlockerCollider();
+
         // 3) Apply actual transforms on every client
         if (Mathf.Abs(portPos01 - _lastAppliedPortPos01) > poseEpsilon)
         {
@@ -430,7 +437,7 @@ public class DockingOpsController : UdonSharpBehaviour
 
 
         RefreshHatchLeverLockout();
-
+        UpdateHatchBlockerCollider();
     }
 
 
@@ -1302,6 +1309,15 @@ public class DockingOpsController : UdonSharpBehaviour
             hatchLever.SetPickupOff();
 
         hatchLever.handle.pickupable = shouldAllowPickup;
+    }
+
+    private void UpdateHatchBlockerCollider()
+    {
+        if (hatchBlockerCollider == null) return;
+
+        // Enabled only when fully shut.
+        bool shouldEnable = (hatchState == MECH_CLOSED) && (hatchPos01 <= poseEpsilon);
+        hatchBlockerCollider.enabled = shouldEnable;
     }
 
     // private void UpdateCraftHatchFromLever()
