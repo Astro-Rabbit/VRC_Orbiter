@@ -6,6 +6,7 @@ using VRC.Udon;
 [UdonBehaviourSyncMode(BehaviourSyncMode.None)]
 public class PenUpdater : UdonSharpBehaviour
 {
+    //
     public GameObject PenHolderL;
     public GameObject PenHolderR;
     public VRC_Pickup PenLPickup;
