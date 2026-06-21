@@ -174,4 +174,15 @@ public class MFDTargetPage : MFDPage
 
         display.DrawText("MENU", MFD.TEXT_ROWS - 1, MFD.TEXT_COLUMNS / 2 - 2, Color.white);
     }
+
+    public void SelectStation(int index)
+    {
+        if (contacts == null || contacts.stations == null) return;
+        
+        // Bounds check to ensure the index is valid for the current station list
+        if (index < 0 || index >= contacts.stations.Length) return;
+
+        // Uses the existing networking logic to request the change from the owner
+        RequestTargetIndex(index);
+    }
 }

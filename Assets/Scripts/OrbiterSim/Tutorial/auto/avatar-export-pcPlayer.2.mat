@@ -8,7 +8,7 @@ Material:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_Name: avatar-export-pcPlayer.2
-  m_Shader: {fileID: 4800000, guid: 83061e8de39ec564b973ac6ebcac92c0, type: 3}
+  m_Shader: {fileID: 4800000, guid: dd06eb73e4fc7a84fbb5fecce12d7d07, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
@@ -16,7 +16,7 @@ Material:
   m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
-  m_CustomRenderQueue: 5000
+  m_CustomRenderQueue: -1
   stringTagMap: {}
   disabledShaderPasses: []
   m_LockedProperties: 
@@ -28,12 +28,44 @@ Material:
           type: 2}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _BumpMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailAlbedoMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailMask:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _DetailNormalMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _EmissionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MainTex:
         m_Texture: {fileID: 2800000, guid: 2a5351fc2f1361d47b8d2e358a0bd5c0, type: 3}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _MetallicGlossMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _MotionDec:
         m_Texture: {fileID: 8600000, guid: 0247e5cfe3e145b4d9cba5360c02bfea, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _OcclusionMap:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ParallaxMap:
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _Shape:
@@ -44,8 +76,15 @@ Material:
     m_Ints: []
     m_Floats:
     - _AlphaTest: 0
+    - _AutoHide: 1
+    - _BumpScale: 1
     - _Cull: 0
     - _Cutoff: 0
+    - _DetailNormalMapScale: 1
+    - _DstBlend: 0
+    - _GlossMapScale: 1
+    - _Glossiness: 0.5
+    - _GlossyReflections: 1
     - _HoloAmount: 1
     - _HoloBandSteps: 7.91
     - _HoloBodyFill: 0.22
@@ -62,9 +101,19 @@ Material:
     - _HoloScanlineStrength: 1.635
     - _HumanScale: -1
     - _Layer: 0
+    - _Metallic: 0
+    - _Mode: 0
     - _NearClip: 0
+    - _OcclusionStrength: 1
+    - _Parallax: 0.02
     - _RotationTolerance: 0.136
+    - _SmoothnessTextureChannel: 0
+    - _SpecularHighlights: 1
+    - _SrcBlend: 1
+    - _UVSec: 0
+    - _ZWrite: 1
     m_Colors:
     - _Color: {r: 0.6226415, g: 0.6226415, b: 0.6226415, a: 1}
+    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
     - _HoloColor: {r: 0.16464934, g: 0.9433962, b: 0.76394576, a: 1}
   m_BuildTextureStacks: []

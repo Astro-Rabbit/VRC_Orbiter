@@ -9,6 +9,7 @@ public class TabletTutorialPage : UdonSharpBehaviour
     [Header("Core")]
     public SimClock clock;
     public SimManager simManager;
+    public MFDTargetPage MFDTarget;
 
     [Header("Tutorials")]
     public TabletTutorialSlot[] tutorials;
@@ -109,6 +110,20 @@ public class TabletTutorialPage : UdonSharpBehaviour
         if (slot == null) return;
 
         slot.StartTutorial();
+        RefreshUI(true);
+    }
+    public void StartSelectedTutorialDockingTesting()
+    {
+        if (!CanStartSelectedTutorial()) return;
+
+        MFDTarget.SelectStation(2);
+
+        StopAllOtherTutorials(selectedTutorialIndex);
+
+        TabletTutorialSlot slot = GetSelectedTutorial();
+        if (slot == null) return;
+
+        slot.StartDockingTutorial();
         RefreshUI(true);
     }
 

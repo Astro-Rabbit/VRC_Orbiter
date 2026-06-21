@@ -71,6 +71,23 @@ public class TabletTutorialSlot : UdonSharpBehaviour
         //     return;
         // }
     }
+    //Temp, should remove this once i get aroudn to making the docking tutorial is own script
+    public void StartDockingTutorial()
+    {
+        if (rendezvousTutorial != null)
+        {
+            rendezvousTutorial.tutorialScenarioIndex = scenarioIndex;
+            rendezvousTutorial.API_StartDockingTutorial();
+            return;
+        }
+
+        // if (dockingTutorial != null)
+        // {
+        //     dockingTutorial.tutorialScenarioIndex = scenarioIndex;
+        //     dockingTutorial.API_StartTutorial();
+        //     return;
+        // }
+    }
 
     public void StopTutorial()
     {
